@@ -4,14 +4,14 @@ with open("README.md", "r") as f:
     long_description = f.read()
 
 setuptools.setup(
-    name="microsnitch",
+    name="picosnitch",
     version="0.0.4",
     description="See which processes make remote network connections",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/elesiuta/microsnitch",
-    py_modules=["microsnitch"],
-    entry_points={"console_scripts": ["microsnitch = microsnitch:main"]},
+    url="https://github.com/elesiuta/picosnitch",
+    py_modules=["picosnitch"],
+    entry_points={"console_scripts": ["picosnitch = picosnitch:main"]},
     install_requires=["psutil", "python-daemon"],
     classifiers=[
         "Programming Language :: Python :: 3",

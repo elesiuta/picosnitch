@@ -31,7 +31,7 @@ import psutil
 
 
 def read() -> dict:
-    file_path = os.path.join(os.path.expanduser("~"), ".config", "microsnitch", "snitch.json")
+    file_path = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "snitch.json")
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             data = json.load(json_file)
@@ -47,14 +47,14 @@ def read() -> dict:
 
 
 def write(snitch: dict):
-    file_path = os.path.join(os.path.expanduser("~"), ".config", "microsnitch", "snitch.json")
+    file_path = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "snitch.json")
     if not os.path.isdir(os.path.dirname(file_path)):
         os.makedirs(os.path.dirname(file_path))
     try:
         with open(file_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
             json.dump(snitch, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
     except Exception:
-        print("microsnitch write error", file=sys.stderr)
+        print("picosnitch write error", file=sys.stderr)
 
 
 def terminate(snitch: dict):
@@ -94,7 +94,7 @@ def poll(snitch: dict):
             error = str(conn) + str(psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline"]))
             if error not in snitch["Errors"]:
                 snitch["Errors"].append(error)
-                print("microsnitch polling error", file=sys.stderr)
+                print("picosnitch polling error", file=sys.stderr)
 
 
 def loop():
