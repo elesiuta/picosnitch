@@ -29,9 +29,6 @@ import sys
 import textwrap
 import time
 
-import daemon
-import psutil
-
 
 def setup():
     setuptools.setup(
@@ -141,4 +138,7 @@ if __name__ == "__main__":
     if len(sys.argv) >= 2 and "setup" in sys.argv[1]:
         _ = sys.argv.pop(1)
         sys.exit(setup())
-    main()
+
+import daemon
+import psutil
+main()
