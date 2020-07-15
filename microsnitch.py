@@ -40,6 +40,7 @@ def read() -> dict:
     return {
         "Config": {"Refresh period": 1.0, "Write counter": 600},
         "Executables": [],
+        "Names": [],
         "Processes": {}
         }
 
@@ -68,6 +69,10 @@ def update(snitch: dict):
                 proc = psutil.Process(conn.pid)
                 if proc.exe() not in snitch["Processes"]:
                     snitch["Executables"].append(proc.exe())
+                    name = proc.name()
+                    if name in snitch["Names"]:
+                        name += " (different executable location)"
+                    snitch["Names"].append(name)
                     snitch["Processes"][proc.exe()] = {
                         "name": proc.name(),
                         "cmdlines": [str(proc.cmdline())],
