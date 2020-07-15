@@ -39,7 +39,7 @@ def read() -> dict:
         assert all(key in data for key in ["Config", "Errors", "Executables", "Names", "Processes"])
         return data
     return {
-        "Config": {"Polling interval": 0.1, "Write interval": 600},
+        "Config": {"Polling interval": 0.2, "Write interval": 600},
         "Errors": [],
         "Executables": [],
         "Names": [],
@@ -84,6 +84,7 @@ def poll(snitch: dict, last_connections: set) -> set:
             snitch["Errors"].append(ctime + " " + error)
             toast("picosnitch polling error: " + error, file=sys.stderr)
     return current_connections
+
 
 def new_entry(snitch: dict, proc: dict, ctime: str):
     snitch["Executables"].append(proc["exe"])
