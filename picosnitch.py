@@ -80,6 +80,7 @@ def poll(snitch: dict):
                         "last seen": ctime,
                         "days seen": 1,
                     }
+                    toast(proc["name"])
                 else:
                     entry = snitch["Processes"][proc["exe"]]
                     if proc["name"] not in entry["name"]:
@@ -111,6 +112,21 @@ def loop():
             counter = 0
         else:
             counter += 1
+
+
+def toast(msg: str):
+    try:
+        if sys.platform.startswith("win32"):
+            from win10toast import ToastNotifier
+            ToastNotifier().show_toast(title="picosnitch",
+                                       msg="First network connection detected for " + msg)
+        else:
+            from plyer import notification
+            notification.notify(title="picosnitch",
+                                message="First network connection detected for " + msg,
+                                app_name="picosnitch")
+    except Exception:
+        print("First network connection detected for " + msg)
 
 
 def main():
