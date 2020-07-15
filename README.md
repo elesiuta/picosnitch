@@ -1,7 +1,7 @@
 # picosnitch
 - See which processes make remote network connections  
 - Logs and config are stored in ~/.config/picosnitch/snitch.json and updated every 10 minutes or on sigterm  
-- Do not rely on this for security or anything remotely critical (only checks connections at 1s intervals since there's no per process network io counter, would need a network driver to provide any sort of reliability)   
+- Do not rely on this for security or anything remotely critical (only checks connections at 0.1s intervals and could miss very short lived ones, would need a network driver or event listener for better reliability)  
 - Quick experiment inspired by programs such as:  
   - Little Snitch
   - OpenSnitch
