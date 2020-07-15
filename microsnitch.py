@@ -27,7 +27,6 @@ import signal
 import sys
 import time
 
-import daemon
 import psutil
 
 
@@ -107,7 +106,11 @@ def loop():
 
 
 def main():
-    with daemon.DaemonContext():
+    if os.name == "posix":
+        import daemon
+        with daemon.DaemonContext():
+            loop()
+    else:
         loop()
 
 
