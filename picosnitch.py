@@ -62,10 +62,11 @@ def terminate(snitch: dict):
     sys.exit(0)
 
 
-def poll(snitch: dict):
+def poll(snitch: dict, last_connections: set) -> set:
     ctime = time.ctime()
     proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
-    for conn in psutil.net_connections(kind='inet'):
+    current_connections = set(psutil.net_connections(kind='inet'))
+    for conn in current_connections - last_connections:
         try:
             if conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
@@ -81,7 +82,7 @@ def poll(snitch: dict):
                 error += "{process no longer exists}"
             snitch["Errors"].append(ctime + " " + error)
             toast("picosnitch polling error: " + error, file=sys.stderr)
-
+    return current_connections
 
 def new_entry(snitch: dict, proc: dict, ctime: str):
     snitch["Executables"].append(proc["exe"])
@@ -113,11 +114,12 @@ def loop():
     snitch = read()
     signal.signal(signal.SIGTERM, lambda *args: terminate(snitch))
     signal.signal(signal.SIGINT, lambda *args: terminate(snitch))
+    connections = set()
     polling_interval = snitch["Config"]["Polling interval"]
     write_counter = int(snitch["Config"]["Write interval"] / polling_interval)
     counter = 0
     while True:
-        poll(snitch)
+        connections = poll(snitch, connections)
         time.sleep(polling_interval)
         if counter >= write_counter:
             write(snitch)
