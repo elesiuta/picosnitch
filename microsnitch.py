@@ -23,40 +23,12 @@
 import ipaddress
 import json
 import os
-import setuptools
 import signal
 import sys
-import textwrap
 import time
 
-
-def setup():
-    setuptools.setup(
-        name="microsnitch",
-        version="0.0.1",
-        description="See which processes make remote network connections",
-        long_description=textwrap.dedent('''\
-            See which processes make remote network connections  
-            Logs and config are stored in ~/.config/microsnitch/snitch.json  
-            Do not rely on this for security or anything remotely critical  
-            Quick experiment inspired by programs such as:  
-            - Little Snitch
-            - OpenSnitch
-            - GlassWire
-            - simplewall
-            '''),
-        long_description_content_type="text/markdown",
-        url="https://github.com/elesiuta/microsnitch",
-        py_modules=["microsnitch"],
-        entry_points={"console_scripts": ["microsnitch = microsnitch:main"]},
-        install_requires=["psutil", "python-daemon"],
-        classifiers=[
-            "Programming Language :: Python :: 3",
-            "License :: OSI Approved :: MIT License",
-            "Operating System :: OS Independent",
-            "Topic :: System :: Networking :: Monitoring",
-        ],
-    )
+import daemon
+import psutil
 
 
 def read() -> dict:
@@ -135,10 +107,4 @@ def main():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 2 and "setup" in sys.argv[1]:
-        _ = sys.argv.pop(1)
-        sys.exit(setup())
-
-import daemon
-import psutil
-main()
+    sys.exit(main())
