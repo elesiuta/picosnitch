@@ -70,27 +70,9 @@ def poll(snitch: dict):
             if conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
                 if proc["exe"] not in snitch["Processes"]:
-                    snitch["Executables"].append(proc["exe"])
-                    snitch["Names"].append(proc["name"])
-                    if snitch["Names"].count(proc["name"]) > 1:
-                        snitch["Names"][-1] += " (different executable location)"
-                    snitch["Processes"][proc["exe"]] = {
-                        "name": proc["name"],
-                        "cmdlines": [str(proc["cmdline"])],
-                        "first seen": ctime,
-                        "last seen": ctime,
-                        "days seen": 1,
-                    }
-                    toast("First network connection detected for " + proc["name"])
+                    new_entry(snitch, proc, ctime)
                 else:
-                    entry = snitch["Processes"][proc["exe"]]
-                    if proc["name"] not in entry["name"]:
-                        entry["name"] += " alternative=" + proc["name"]
-                    if str(proc["cmdline"]) not in entry["cmdlines"]:
-                        entry["cmdlines"].append(str(proc["cmdline"]))
-                    if ctime.split()[:3] != entry["last seen"].split()[:3]:
-                        entry["days seen"] += 1
-                    entry["last seen"] = ctime
+                    update_entry(snitch, proc, ctime)
         except Exception:
             error = str(conn)
             if conn.pid == proc["pid"]:
@@ -99,6 +81,32 @@ def poll(snitch: dict):
                 error += "{process no longer exists}"
             snitch["Errors"].append(ctime + " " + error)
             toast("picosnitch polling error: " + error, file=sys.stderr)
+
+
+def new_entry(snitch: dict, proc: dict, ctime: str):
+    snitch["Executables"].append(proc["exe"])
+    snitch["Names"].append(proc["name"])
+    if snitch["Names"].count(proc["name"]) > 1:
+        snitch["Names"][-1] += " (different executable location)"
+    snitch["Processes"][proc["exe"]] = {
+        "name": proc["name"],
+        "cmdlines": [str(proc["cmdline"])],
+        "first seen": ctime,
+        "last seen": ctime,
+        "days seen": 1,
+    }
+    toast("First network connection detected for " + proc["name"])
+
+
+def update_entry(snitch: dict, proc: dict, ctime: str):
+    entry = snitch["Processes"][proc["exe"]]
+    if proc["name"] not in entry["name"]:
+        entry["name"] += " alternative=" + proc["name"]
+    if str(proc["cmdline"]) not in entry["cmdlines"]:
+        entry["cmdlines"].append(str(proc["cmdline"]))
+    if ctime.split()[:3] != entry["last seen"].split()[:3]:
+        entry["days seen"] += 1
+    entry["last seen"] = ctime
 
 
 def loop():
