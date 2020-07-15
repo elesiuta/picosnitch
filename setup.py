@@ -5,7 +5,7 @@ with open("README.md", "r") as f:
 
 setuptools.setup(
     name="microsnitch",
-    version="0.0.3",
+    version="0.0.4",
     description="See which processes make remote network connections",
     long_description=long_description,
     long_description_content_type="text/markdown",

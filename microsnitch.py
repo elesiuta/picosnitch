@@ -35,9 +35,11 @@ def read() -> dict:
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             data = json.load(json_file)
+        data["Errors"] = []
         return data
     return {
-        "Config": {"Refresh period": 1.0, "Write counter": 600},
+        "Config": {"Polling interval": 0.1, "Write interval": 600},
+        "Errors": [],
         "Executables": [],
         "Names": [],
         "Processes": {}
@@ -87,18 +89,23 @@ def update(snitch: dict):
                         entry["days seen"] += 1
                     entry["last seen"] = ctime
         except Exception:
-            print("microsnitch update error", file=sys.stderr)
+            error = str(conn) + str(psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline"]))
+            if error not in snitch["Errors"]:
+                snitch["Errors"].append(error)
+                print("microsnitch update error", file=sys.stderr)
 
 
 def loop():
     snitch = read()
     signal.signal(signal.SIGTERM, lambda *args: terminate(snitch))
     signal.signal(signal.SIGINT, lambda *args: terminate(snitch))
+    polling_interval = snitch["Config"]["Polling interval"]
+    write_counter = int(snitch["Config"]["Write interval"] / polling_interval)
     counter = 0
     while True:
         update(snitch)
-        time.sleep(snitch["Config"]["Refresh period"])
-        if counter >= snitch["Config"]["Write counter"]:
+        time.sleep(polling_interval)
+        if counter >= write_counter:
             write(snitch)
             counter = 0
         else:
