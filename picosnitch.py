@@ -35,6 +35,7 @@ def read() -> dict:
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             data = json.load(json_file)
+        assert all(key in data for key in ["Config", "Errors", "Executables", "Names", "Processes"])
         return data
     return {
         "Config": {"Polling interval": 0.1, "Write interval": 600},
