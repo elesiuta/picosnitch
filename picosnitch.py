@@ -35,7 +35,6 @@ def read() -> dict:
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             data = json.load(json_file)
-        data["Errors"] = []
         return data
     return {
         "Config": {"Polling interval": 0.1, "Write interval": 600},
@@ -97,9 +96,8 @@ def poll(snitch: dict):
                 error += str(proc["pid"])
             else:
                 error += "{process no longer exists}"
-            if error not in snitch["Errors"]:
-                snitch["Errors"].append(error)
-                toast("picosnitch polling error: " + error, file=sys.stderr)
+            snitch["Errors"].append(ctime + " " + error)
+            toast("picosnitch polling error: " + error, file=sys.stderr)
 
 
 def loop():
