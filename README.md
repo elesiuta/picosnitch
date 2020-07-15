@@ -8,9 +8,11 @@
   - GlassWire
   - simplewall
 # run
-- run as a daemon with  
+- run as a daemon (regular process on windows) with  
 `python picosnitch.py`
-- or install with  
+- or install from source with  
 `python setup.py install`
+- or install from PyPI with  
+`pip install picosnitch`
 - then run as a daemon with  
 `picosnitch`
