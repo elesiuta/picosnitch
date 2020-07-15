@@ -13,7 +13,7 @@ setuptools.setup(
     py_modules=["picosnitch"],
     entry_points={"console_scripts": ["picosnitch = picosnitch:main"]},
     install_requires=["psutil", "python-daemon"],
-    extras_require=["plyer", "win10toast"],
+    extras_require={"toast": ["plyer"], "win10toast": ["win10toast"]},
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
