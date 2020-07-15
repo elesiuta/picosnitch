@@ -54,7 +54,7 @@ def write(snitch: dict):
         with open(file_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
             json.dump(snitch, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
     except Exception:
-        print("picosnitch write error", file=sys.stderr)
+        toast("picosnitch write error", file=sys.stderr)
 
 
 def terminate(snitch: dict):
@@ -80,7 +80,7 @@ def poll(snitch: dict):
                         "last seen": ctime,
                         "days seen": 1,
                     }
-                    toast(proc["name"])
+                    toast("First network connection detected for " + proc["name"])
                 else:
                     entry = snitch["Processes"][proc["exe"]]
                     if proc["name"] not in entry["name"]:
@@ -94,7 +94,7 @@ def poll(snitch: dict):
             error = str(conn) + str(psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline"]))
             if error not in snitch["Errors"]:
                 snitch["Errors"].append(error)
-                print("picosnitch polling error", file=sys.stderr)
+                toast("picosnitch polling error", file=sys.stderr)
 
 
 def loop():
@@ -114,19 +114,19 @@ def loop():
             counter += 1
 
 
-def toast(msg: str):
+def toast(msg: str, file=sys.stdout):
     try:
         if sys.platform.startswith("win32"):
             from win10toast import ToastNotifier
             ToastNotifier().show_toast(title="picosnitch",
-                                       msg="First network connection detected for " + msg)
+                                       msg=msg)
         else:
             from plyer import notification
             notification.notify(title="picosnitch",
-                                message="First network connection detected for " + msg,
+                                message=msg,
                                 app_name="picosnitch")
     except Exception:
-        print("First network connection detected for " + msg)
+        print(msg, file=file)
 
 
 def main():
