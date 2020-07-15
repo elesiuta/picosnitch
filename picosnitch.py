@@ -70,10 +70,9 @@ def poll(snitch: dict):
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline"], ad_value="")
                 if proc["exe"] not in snitch["Processes"]:
                     snitch["Executables"].append(proc["exe"])
-                    name = proc["name"]
-                    if name in snitch["Names"]:
-                        name += " (different executable location)"
-                    snitch["Names"].append(name)
+                    snitch["Names"].append(proc["name"])
+                    if snitch["Names"].count(proc["name"]) > 1:
+                        snitch["Names"][-1] += " (different executable location)"
                     snitch["Processes"][proc["exe"]] = {
                         "name": proc["name"],
                         "cmdlines": [str(proc["cmdline"])],
