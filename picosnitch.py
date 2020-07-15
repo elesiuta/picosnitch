@@ -64,10 +64,11 @@ def terminate(snitch: dict):
 
 def poll(snitch: dict):
     ctime = time.ctime()
+    proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
     for conn in psutil.net_connections(kind='inet'):
         try:
             if conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
-                proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline"], ad_value="")
+                proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
                 if proc["exe"] not in snitch["Processes"]:
                     snitch["Executables"].append(proc["exe"])
                     snitch["Names"].append(proc["name"])
@@ -91,10 +92,14 @@ def poll(snitch: dict):
                         entry["days seen"] += 1
                     entry["last seen"] = ctime
         except Exception:
-            error = str(conn) + str(psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline"]))
+            error = str(conn)
+            if conn.pid == proc["pid"]:
+                error += str(proc["pid"])
+            else:
+                error += "{process no longer exists}"
             if error not in snitch["Errors"]:
                 snitch["Errors"].append(error)
-                toast("picosnitch polling error", file=sys.stderr)
+                toast("picosnitch polling error: " + error, file=sys.stderr)
 
 
 def loop():
