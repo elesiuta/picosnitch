@@ -62,29 +62,31 @@ def terminate(snitch: dict):
     sys.exit(0)
 
 
-def update(snitch: dict):
+def poll(snitch: dict):
     ctime = time.ctime()
     for conn in psutil.net_connections(kind='inet'):
         try:
             if conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
-                proc = psutil.Process(conn.pid)
-                if proc.exe() not in snitch["Processes"]:
-                    snitch["Executables"].append(proc.exe())
-                    name = proc.name()
+                proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline"], ad_value="")
+                if proc["exe"] not in snitch["Processes"]:
+                    snitch["Executables"].append(proc["exe"])
+                    name = proc["name"]
                     if name in snitch["Names"]:
                         name += " (different executable location)"
                     snitch["Names"].append(name)
-                    snitch["Processes"][proc.exe()] = {
-                        "name": proc.name(),
-                        "cmdlines": [str(proc.cmdline())],
+                    snitch["Processes"][proc["exe"]] = {
+                        "name": proc["name"],
+                        "cmdlines": [str(proc["cmdline"])],
                         "first seen": ctime,
                         "last seen": ctime,
                         "days seen": 1,
                     }
                 else:
-                    entry = snitch["Processes"][proc.exe()]
-                    if str(proc.cmdline()) not in entry["cmdlines"]:
-                        entry["cmdlines"].apppend(str(proc.cmdline()))
+                    entry = snitch["Processes"][proc["exe"]]
+                    if proc["name"] not in entry["name"]:
+                        entry["name"] += " alternative=" + proc["name"]
+                    if str(proc["cmdline"]) not in entry["cmdlines"]:
+                        entry["cmdlines"].append(str(proc["cmdline"]))
                     if ctime.split()[:3] != entry["last seen"].split()[:3]:
                         entry["days seen"] += 1
                     entry["last seen"] = ctime
@@ -92,7 +94,7 @@ def update(snitch: dict):
             error = str(conn) + str(psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline"]))
             if error not in snitch["Errors"]:
                 snitch["Errors"].append(error)
-                print("microsnitch update error", file=sys.stderr)
+                print("microsnitch polling error", file=sys.stderr)
 
 
 def loop():
@@ -103,7 +105,7 @@ def loop():
     write_counter = int(snitch["Config"]["Write interval"] / polling_interval)
     counter = 0
     while True:
-        update(snitch)
+        poll(snitch)
         time.sleep(polling_interval)
         if counter >= write_counter:
             write(snitch)
