@@ -27,6 +27,7 @@ import signal
 import sys
 import time
 
+import plyer
 import psutil
 
 
@@ -130,15 +131,9 @@ def loop():
 
 def toast(msg: str, file=sys.stdout):
     try:
-        if sys.platform.startswith("win32"):
-            from win10toast import ToastNotifier
-            ToastNotifier().show_toast(title="picosnitch",
-                                       msg=msg)
-        else:
-            from plyer import notification
-            notification.notify(title="picosnitch",
-                                message=msg,
-                                app_name="picosnitch")
+        plyer.notification.notify(title="picosnitch",
+                                  message=msg,
+                                  app_name="picosnitch")
     except Exception:
         print(msg, file=file)
 

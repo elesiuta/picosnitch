@@ -12,8 +12,7 @@ setuptools.setup(
     url="https://github.com/elesiuta/picosnitch",
     py_modules=["picosnitch"],
     entry_points={"console_scripts": ["picosnitch = picosnitch:main"]},
-    install_requires=["psutil", "python-daemon"],
-    extras_require={"toast": ["plyer"], "win10toast": ["win10toast"]},
+    install_requires=["plyer", "psutil", "python-daemon"],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
