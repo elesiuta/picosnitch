@@ -22,6 +22,7 @@
 
 import ipaddress
 import json
+import multiprocessing
 import os
 import signal
 import sys
@@ -58,8 +59,10 @@ def write(snitch: dict):
         toast("picosnitch write error", file=sys.stderr)
 
 
-def terminate(snitch: dict):
+def terminate(snitch: dict, process: multiprocessing.Process = None):
     write(snitch)
+    if process is not None:
+        process.terminate()
     sys.exit(0)
 
 
@@ -140,6 +143,47 @@ def toast(msg: str, file=sys.stdout):
                                   app_name="picosnitch")
     except Exception:
         print(msg, file=file)
+
+
+def init_pcap(snitch: dict):
+    if snitch["Config"]["Use pcap"]:
+        import scapy
+        from scapy.all import sniff
+
+        def parse_packet(packet) -> dict:
+            output = {}
+            src = packet.getlayer(scapy.layers.all.IP).src
+            dst = packet.getlayer(scapy.layers.all.IP).dst
+            if ipaddress.ip_address(src).is_private:
+                output["direction"] = "outgoing"
+                output["laddr_ip"] = src
+                output["laddr_port"] = packet.sport
+                output["raddr_ip"] = dst
+            elif ipaddress.ip_address(dst).is_private:
+                output["direction"] = "incoming"
+                output["laddr_ip"] = dst
+                output["laddr_port"] = packet.dport
+                output["raddr_ip"] = src
+            return output
+
+        def filter_packet(packet) -> bool:
+            try:
+                src = ipaddress.ip_address(packet.getlayer(scapy.layers.all.IP).src)
+                dst = ipaddress.ip_address(packet.getlayer(scapy.layers.all.IP).dst)
+                return src.is_private != dst.is_private
+            except:
+                return False
+
+        def sniffer(q):
+            sniff(count=0, prn=lambda x: q.put(parse_packet(x)), lfilter=filter_packet)
+
+        if __name__ == "__main__":
+            q = multiprocessing.Queue()
+            p = multiprocessing.Process(target=sniffer, args=(q,))
+            p.start()
+            return p, q
+
+    return None, None
 
 
 def main():
