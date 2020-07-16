@@ -27,6 +27,7 @@ import os
 import signal
 import sys
 import time
+import typing
 
 import plyer
 import psutil
@@ -66,13 +67,14 @@ def terminate(snitch: dict, process: multiprocessing.Process = None):
     sys.exit(0)
 
 
-def poll(snitch: dict, last_connections: set) -> set:
+def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
     ctime = time.ctime()
     proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
     current_connections = set(psutil.net_connections(kind='inet'))
     for conn in current_connections - last_connections:
         try:
             if conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
+                _ = pcap_dict.pop(conn.laddr.port, None)
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
                 if proc["exe"] not in snitch["Processes"]:
                     new_entry(snitch, proc, conn.raddr.ip, ctime)
@@ -86,6 +88,9 @@ def poll(snitch: dict, last_connections: set) -> set:
                 error += "{process no longer exists}"
             snitch["Errors"].append(ctime + " " + error)
             toast("picosnitch polling error: " + error, file=sys.stderr)
+    for conn in pcap_dict:
+        snitch["Errors"].append(ctime + " " + str(conn))
+        toast("picosnitch missed connection: " + str(conn), file=sys.stderr)
     return current_connections
 
 
@@ -120,14 +125,23 @@ def update_entry(snitch: dict, proc: dict, raddr_ip: str, ctime: str):
 
 def loop():
     snitch = read()
-    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch))
-    signal.signal(signal.SIGINT, lambda *args: terminate(snitch))
+    pcap_proc, queue = init_pcap(snitch)
+    pcap_dict = {}
+    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, pcap_proc))
+    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, pcap_proc))
     connections = set()
     polling_interval = snitch["Config"]["Polling interval"]
     write_counter = int(snitch["Config"]["Write interval"] / polling_interval)
     counter = 0
     while True:
-        connections = poll(snitch, connections)
+        if queue is not None:
+            pcap_dict = {}
+            known_ports = [conn.laddr.port for conn in connections]
+            while not queue.empty():
+                packet = q.get()
+                if packet["laddr_port"] not in known_ports:
+                    pcap_dict[packet["laddr_port"]] = packet
+        connections = poll(snitch, connections, pcap_dict)
         time.sleep(polling_interval)
         if counter >= write_counter:
             write(snitch)
@@ -145,7 +159,7 @@ def toast(msg: str, file=sys.stdout):
         print(msg, file=file)
 
 
-def init_pcap(snitch: dict):
+def init_pcap(snitch: dict) -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue]:
     if snitch["Config"]["Use pcap"]:
         import scapy
         from scapy.all import sniff
