@@ -39,7 +39,7 @@ def read() -> dict:
         assert all(key in data for key in ["Config", "Errors", "Executables", "Names", "Processes"])
         return data
     return {
-        "Config": {"Polling interval": 0.2, "Write interval": 600},
+        "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": False},
         "Errors": [],
         "Executables": [],
         "Names": [],
@@ -72,9 +72,9 @@ def poll(snitch: dict, last_connections: set) -> set:
             if conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
                 if proc["exe"] not in snitch["Processes"]:
-                    new_entry(snitch, proc, ctime)
+                    new_entry(snitch, proc, conn, ctime)
                 else:
-                    update_entry(snitch, proc, ctime)
+                    update_entry(snitch, proc, conn, ctime)
         except Exception:
             error = str(conn)
             if conn.pid == proc["pid"]:
@@ -86,7 +86,7 @@ def poll(snitch: dict, last_connections: set) -> set:
     return current_connections
 
 
-def new_entry(snitch: dict, proc: dict, ctime: str):
+def new_entry(snitch: dict, proc: dict, conn, ctime: str):
     snitch["Executables"].append(proc["exe"])
     snitch["Names"].append(proc["name"])
     if snitch["Names"].count(proc["name"]) > 1:
@@ -97,16 +97,19 @@ def new_entry(snitch: dict, proc: dict, ctime: str):
         "first seen": ctime,
         "last seen": ctime,
         "days seen": 1,
+        "remote addresses": [conn.raddr.ip]
     }
     toast("First network connection detected for " + proc["name"])
 
 
-def update_entry(snitch: dict, proc: dict, ctime: str):
+def update_entry(snitch: dict, proc: dict, conn, ctime: str):
     entry = snitch["Processes"][proc["exe"]]
     if proc["name"] not in entry["name"]:
         entry["name"] += " alternative=" + proc["name"]
     if str(proc["cmdline"]) not in entry["cmdlines"]:
         entry["cmdlines"].append(str(proc["cmdline"]))
+    if conn.raddr.ip not in entry["remote addresses"]:
+        entry["remote addresses"].append(conn.raddr.ip)
     if ctime.split()[:3] != entry["last seen"].split()[:3]:
         entry["days seen"] += 1
     entry["last seen"] = ctime

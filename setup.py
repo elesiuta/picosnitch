@@ -5,7 +5,7 @@ with open("README.md", "r") as f:
 
 setuptools.setup(
     name="picosnitch",
-    version="0.1.0",
+    version="0.1.1",
     description="See which processes make remote network connections",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -13,6 +13,7 @@ setuptools.setup(
     py_modules=["picosnitch"],
     entry_points={"console_scripts": ["picosnitch = picosnitch:main"]},
     install_requires=["plyer", "psutil", "python-daemon"],
+    extras_require={"pcap": ["scapy"]},
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
