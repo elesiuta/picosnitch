@@ -77,10 +77,7 @@ def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
             if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
                 _ = pcap_dict.pop(str(conn.laddr.port) + str(conn.raddr.ip), None)
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
-                if proc["exe"] not in snitch["Processes"]:
-                    new_entry(snitch, proc, conn, ctime)
-                else:
-                    update_entry(snitch, proc, conn, ctime)
+                update_snitch_proc(snitch, proc, conn, ctime)
         except Exception:
             error = str(conn)
             if conn.pid == proc["pid"]:
@@ -90,29 +87,43 @@ def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
             snitch["Errors"].append(ctime + " " + error)
             toast("picosnitch polling error: " + error, file=sys.stderr)
     for conn in pcap_dict:
-        snitch["Errors"].append(ctime + " " + str(conn))
-        toast("picosnitch missed connection: " + str(conn), file=sys.stderr)
+        update_snitch_proc(snitch, conn, ctime)
     return current_connections
 
 
-def new_entry(snitch: dict, proc: dict, conn, ctime: str):
+def update_snitch_proc(snitch: dict, proc: dict, conn, ctime: str):
     # Update Latest Entries
-    snitch["Latest Entries"].insert(0, proc["name"] + " - " + proc["exe"])
+    if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
+        snitch["Latest Entries"].insert(0, proc["name"] + " - " + proc["exe"])
     # Update Names
     if proc["name"] in snitch["Names"]:
         if proc["exe"] not in snitch["Names"][proc["name"]]:
             snitch["Names"][proc["name"]].append(proc["exe"])
+            toast("New executable detected for " + proc["name"] + ": " + proc["exe"])
     else:
         snitch["Names"][proc["name"]] = [proc["exe"]]
+        toast("First network connection detected for " + proc["name"])
     # Update Processes
-    snitch["Processes"][proc["exe"]] = {
-        "name": proc["name"],
-        "cmdlines": [str(proc["cmdline"])],
-        "first seen": ctime,
-        "last seen": ctime,
-        "days seen": 1,
-        "remote addresses": []
-    }
+    if proc["exe"] not in snitch["Processes"]:
+        snitch["Processes"][proc["exe"]] = {
+            "name": proc["name"],
+            "cmdlines": [str(proc["cmdline"])],
+            "first seen": ctime,
+            "last seen": ctime,
+            "days seen": 1,
+            "remote addresses": []
+        }
+    else:
+        entry = snitch["Processes"][proc["exe"]]
+        if proc["name"] not in entry["name"]:
+            entry["name"] += " alternative=" + proc["name"]
+        if str(proc["cmdline"]) not in entry["cmdlines"]:
+            entry["cmdlines"].append(str(proc["cmdline"]))
+        if conn.raddr.ip not in entry["remote addresses"] and conn.laddr.port not in snitch["Config"]["Remote Addresses ignored ports"]:
+            entry["remote addresses"].append(conn.raddr.ip)
+        if ctime.split()[:3] != entry["last seen"].split()[:3]:
+            entry["days seen"] += 1
+        entry["last seen"] = ctime
     # Update Remote Addresses
     if conn.laddr.port not in snitch["Config"]["Remote Addresses ignored ports"]:
         snitch["Processes"][proc["exe"]]["remote addresses"].append(conn.raddr.ip)
@@ -121,22 +132,12 @@ def new_entry(snitch: dict, proc: dict, conn, ctime: str):
                 snitch["Remote Addresses"][conn.raddr.ip].append(proc["exe"])
         else:
             snitch["Remote Addresses"][conn.raddr.ip] = [proc["exe"]]
-    # Notify
-    toast("First network connection detected for " + proc["name"])
 
 
-def update_entry(snitch: dict, proc: dict, conn, ctime: str):
-    entry = snitch["Processes"][proc["exe"]]
-    if proc["name"] not in entry["name"]:
-        entry["name"] += " alternative=" + proc["name"]
-    if str(proc["cmdline"]) not in entry["cmdlines"]:
-        entry["cmdlines"].append(str(proc["cmdline"]))
-    if conn.raddr.ip not in entry["remote addresses"] and conn.laddr.port not in snitch["Config"]["Remote Addresses ignored ports"]:
-        entry["remote addresses"].append(conn.raddr.ip)
-    if ctime.split()[:3] != entry["last seen"].split()[:3]:
-        entry["days seen"] += 1
-    entry["last seen"] = ctime
-
+def update_snitch_pcap(snitch: dict, conn: dict, ctime: str):
+    if conn["raddr_ip"] not in snitch["Remote Addresses"] and conn["laddr_port"] not in snitch["Config"]["Remote Addresses ignored ports"]:
+        snitch["Remote Addresses"][conn.raddr.ip] = [conn["proto"]]
+        toast("polling missed process for connection: " + str(conn))
 
 def loop():
     snitch = read()
