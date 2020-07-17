@@ -38,14 +38,15 @@ def read() -> dict:
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             data = json.load(json_file)
-        assert all(key in data for key in ["Config", "Errors", "Executables", "Names", "Processes"])
+        assert all(key in data for key in ["Config", "Errors", "Latest Entries", "Names", "Processes", "Remote Addresses"])
         return data
     return {
-        "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": False},
+        "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": False, "Remote Addresses ignored ports": [80, 443]},
         "Errors": [],
-        "Executables": [],
-        "Names": [],
-        "Processes": {}
+        "Latest Entries": [],
+        "Names": {},
+        "Processes": {},
+        "Remote Addresses": {}
         }
 
 
@@ -70,16 +71,16 @@ def terminate(snitch: dict, process: multiprocessing.Process = None):
 def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
     ctime = time.ctime()
     proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
-    current_connections = set(psutil.net_connections(kind='inet'))
+    current_connections = set(psutil.net_connections(kind="all"))
     for conn in current_connections - last_connections:
         try:
-            if conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
-                _ = pcap_dict.pop(conn.laddr.port, None)
+            if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
+                _ = pcap_dict.pop(str(conn.laddr.port) + str(conn.raddr.ip), None)
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
                 if proc["exe"] not in snitch["Processes"]:
-                    new_entry(snitch, proc, conn.raddr.ip, ctime)
+                    new_entry(snitch, proc, conn, ctime)
                 else:
-                    update_entry(snitch, proc, conn.raddr.ip, ctime)
+                    update_entry(snitch, proc, conn, ctime)
         except Exception:
             error = str(conn)
             if conn.pid == proc["pid"]:
@@ -94,30 +95,44 @@ def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
     return current_connections
 
 
-def new_entry(snitch: dict, proc: dict, raddr_ip: str, ctime: str):
-    snitch["Executables"].append(proc["exe"])
-    snitch["Names"].append(proc["name"])
-    if snitch["Names"].count(proc["name"]) > 1:
-        snitch["Names"][-1] += " (different executable location)"
+def new_entry(snitch: dict, proc: dict, conn, ctime: str):
+    # Update Latest Entries
+    snitch["Latest Entries"].insert(0, proc["name"] + " - " + proc["exe"])
+    # Update Names
+    if proc["name"] in snitch["Names"]:
+        if proc["exe"] not in snitch["Names"][proc["name"]]:
+            snitch["Names"][proc["name"]].append(proc["exe"])
+    else:
+        snitch["Names"][proc["name"]] = [proc["exe"]]
+    # Update Processes
     snitch["Processes"][proc["exe"]] = {
         "name": proc["name"],
         "cmdlines": [str(proc["cmdline"])],
         "first seen": ctime,
         "last seen": ctime,
         "days seen": 1,
-        "remote addresses": [raddr_ip]
+        "remote addresses": []
     }
+    # Update Remote Addresses
+    if conn.laddr.port not in snitch["Config"]["Remote Addresses ignored ports"]:
+        snitch["Processes"][proc["exe"]]["remote addresses"].append(conn.raddr.ip)
+        if conn.raddr.ip in snitch["Remote Addresses"]:
+            if proc["exe"] not in snitch["Remote Addresses"][conn.raddr.ip]:
+                snitch["Remote Addresses"][conn.raddr.ip].append(proc["exe"])
+        else:
+            snitch["Remote Addresses"][conn.raddr.ip] = [proc["exe"]]
+    # Notify
     toast("First network connection detected for " + proc["name"])
 
 
-def update_entry(snitch: dict, proc: dict, raddr_ip: str, ctime: str):
+def update_entry(snitch: dict, proc: dict, conn, ctime: str):
     entry = snitch["Processes"][proc["exe"]]
     if proc["name"] not in entry["name"]:
         entry["name"] += " alternative=" + proc["name"]
     if str(proc["cmdline"]) not in entry["cmdlines"]:
         entry["cmdlines"].append(str(proc["cmdline"]))
-    if raddr_ip not in entry["remote addresses"]:
-        entry["remote addresses"].append(raddr_ip)
+    if conn.raddr.ip not in entry["remote addresses"] and conn.laddr.port not in snitch["Config"]["Remote Addresses ignored ports"]:
+        entry["remote addresses"].append(conn.raddr.ip)
     if ctime.split()[:3] != entry["last seen"].split()[:3]:
         entry["days seen"] += 1
     entry["last seen"] = ctime
@@ -137,10 +152,11 @@ def loop():
         if q_packet is not None:
             pcap_dict = {}
             known_ports = [conn.laddr.port for conn in connections]
+            known_raddr = [conn.raddr.ip for conn in connections]
             while not q_packet.empty():
                 packet = q_packet.get()
-                if packet is not None and packet["laddr_port"] not in known_ports:
-                    pcap_dict[packet["laddr_port"]] = packet
+                if not (packet["laddr_port"] in known_ports or packet["raddr_ip"] in known_raddr):
+                    pcap_dict[str(packet["laddr_port"]) + str(packet["raddr_ip"])] = packet
             if not q_error.empty():
                 toast(q_error.get())
                 p_sniff.terminate()
@@ -170,17 +186,20 @@ def init_pcap(snitch: dict) -> typing.Tuple[multiprocessing.Process, multiproces
         from scapy.all import sniff
 
         def parse_packet(packet) -> dict:
-            output = {"packet": str(packet.show(dump=True)), "proto": packet.proto}
+            output = {"proto": packet.proto, "laddr_port": None}
+            # output["packet"] = str(packet.show(dump=True))
             src = packet.getlayer(scapy.layers.all.IP).src
             dst = packet.getlayer(scapy.layers.all.IP).dst
             if ipaddress.ip_address(src).is_private:
                 output["direction"] = "outgoing"
                 output["laddr_ip"], output["raddr_ip"] = src, dst
-                output["laddr_port"] = packet.sport
+                if hasattr(packet, "sport"):
+                    output["laddr_port"] = packet.sport
             elif ipaddress.ip_address(dst).is_private:
                 output["direction"] = "incoming"
                 output["laddr_ip"], output["raddr_ip"] = dst, src
-                output["laddr_port"] = packet.dport
+                if hasattr(packet, "dport"):
+                    output["laddr_port"] = packet.dport
             return output
 
         def filter_packet(packet) -> bool:
@@ -195,7 +214,7 @@ def init_pcap(snitch: dict) -> typing.Tuple[multiprocessing.Process, multiproces
             try:
                 sniff(count=0, prn=lambda x: q_packet.put(parse_packet(x)), lfilter=filter_packet)
             except Exception as e:
-                q_error.put(str(e))
+                q_error.put("picosnitch sniffer exception: " + str(e))
 
         if __name__ == "__main__":
             q_packet = multiprocessing.Queue()
@@ -209,12 +228,12 @@ def init_pcap(snitch: dict) -> typing.Tuple[multiprocessing.Process, multiproces
 
 
 def main():
-    if os.name == "posix":
-        import daemon
-        with daemon.DaemonContext():
-            loop()
-    else:
-        loop()
+    # if os.name == "posix":
+    #     import daemon
+    #     with daemon.DaemonContext():
+    #         loop()
+    # else:
+    loop()
 
 
 if __name__ == "__main__":
