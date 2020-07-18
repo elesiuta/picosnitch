@@ -34,7 +34,11 @@ import psutil
 
 
 def read() -> dict:
-    file_path = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "snitch.json")
+    if sys.platform.startswith("linux") and os.getuid() == 0:
+        home_dir = "/home/" + os.getenv("SUDO_USER")
+    else:
+        home_dir = os.path.expanduser("~")
+    file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.json")
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             data = json.load(json_file)
@@ -61,9 +65,25 @@ def write(snitch: dict):
         toast("picosnitch write error", file=sys.stderr)
 
 
+def drop_root_privileges():
+    if sys.platform.startswith("linux") and os.getuid() == 0:
+        # os.setgid(int(os.getenv("SUDO_GID")))
+        # os.setuid(int(os.getenv("SUDO_UID")))
+        # os.setegid(int(os.getenv("SUDO_GID")))
+        # os.seteuid(int(os.getenv("SUDO_UID")))
+        os.setresgid(int(os.getenv("SUDO_GID")), int(os.getenv("SUDO_GID")), -1)
+        os.setresuid(int(os.getenv("SUDO_UID")), int(os.getenv("SUDO_UID")), -1)
+        # os.umask(0o077)
+
+
 def terminate(snitch: dict, process: multiprocessing.Process = None):
     write(snitch)
     if process is not None:
+        if sys.platform.startswith("linux") and os.getresuid()[2] == 0:
+        #     os.setegid(0)
+        #     os.seteuid(0)
+            os.setresgid(0, 0, -1)
+            os.setresuid(0, 0, -1)
         process.terminate()
     sys.exit(0)
 
@@ -86,8 +106,8 @@ def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
                 error += "{process no longer exists}"
             snitch["Errors"].append(ctime + " " + error)
             toast("picosnitch polling error: " + error, file=sys.stderr)
-    for conn in pcap_dict:
-        update_snitch_proc(snitch, conn, ctime)
+    for pcap in pcap_dict.values():
+        update_snitch_pcap(snitch, pcap)
     return current_connections
 
 
@@ -134,15 +154,18 @@ def update_snitch_proc(snitch: dict, proc: dict, conn, ctime: str):
             snitch["Remote Addresses"][conn.raddr.ip] = [proc["exe"]]
 
 
-def update_snitch_pcap(snitch: dict, conn: dict, ctime: str):
-    if conn["raddr_ip"] not in snitch["Remote Addresses"] and conn["laddr_port"] not in snitch["Config"]["Remote Addresses ignored ports"]:
-        snitch["Remote Addresses"][conn.raddr.ip] = [conn["proto"]]
-        toast("polling missed process for connection: " + str(conn))
+def update_snitch_pcap(snitch: dict, pcap: dict):
+    if pcap["raddr_ip"] not in snitch["Remote Addresses"] and pcap["laddr_port"] not in snitch["Config"]["Remote Addresses ignored ports"]:
+        snitch["Remote Addresses"][pcap["raddr_ip"]] = [pcap["summary"]]
+        toast("polling missed process for connection: " + pcap["summary"])
+
 
 def loop():
     snitch = read()
-    p_sniff, q_packet, q_error = init_pcap(snitch)
-    pcap_dict = {}
+    p_sniff, q_packet, q_error = None, None, None
+    if snitch["Config"]["Use pcap"]:
+        p_sniff, q_packet, q_error = init_pcap()
+    drop_root_privileges()
     signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_sniff))
     signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_sniff))
     connections = set()
@@ -150,19 +173,17 @@ def loop():
     write_counter = int(snitch["Config"]["Write interval"] / polling_interval)
     counter = 0
     while True:
+        pcap_dict = {}
         if q_packet is not None:
-            pcap_dict = {}
-            known_ports = [conn.laddr.port for conn in connections]
-            known_raddr = [conn.raddr.ip for conn in connections]
+            known_ports = [conn.laddr.port for conn in connections if not isinstance(conn.laddr, str)]
+            known_raddr = [conn.raddr.ip for conn in connections if conn.raddr]
             while not q_packet.empty():
                 packet = q_packet.get()
                 if not (packet["laddr_port"] in known_ports or packet["raddr_ip"] in known_raddr):
                     pcap_dict[str(packet["laddr_port"]) + str(packet["raddr_ip"])] = packet
-            if not q_error.empty():
-                toast(q_error.get())
-                p_sniff.terminate()
-                p_sniff.close()
-                p_sniff, q_packet, q_error = init_pcap(snitch)
+            while not q_error.empty():
+                error = q_error.get()
+                snitch["Errors"].append(time.ctime() + " " + error)
         connections = poll(snitch, connections, pcap_dict)
         time.sleep(polling_interval)
         if counter >= write_counter:
@@ -175,57 +196,54 @@ def loop():
 def toast(msg: str, file=sys.stdout):
     try:
         plyer.notification.notify(title="picosnitch",
-                                  message=msg,
-                                  app_name="picosnitch")
-    except Exception:
-        print(msg, file=file)
+                                    message=msg,
+                                    app_name="picosnitch")
+    except Exception as e:
+        print(str(e) + msg, file=file)
 
 
-def init_pcap(snitch: dict) -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue]:
-    if snitch["Config"]["Use pcap"]:
-        import scapy
-        from scapy.all import sniff
+def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue]:
+    import scapy
+    from scapy.all import sniff
 
-        def parse_packet(packet) -> dict:
-            output = {"proto": packet.proto, "laddr_port": None}
-            # output["packet"] = str(packet.show(dump=True))
-            src = packet.getlayer(scapy.layers.all.IP).src
-            dst = packet.getlayer(scapy.layers.all.IP).dst
-            if ipaddress.ip_address(src).is_private:
-                output["direction"] = "outgoing"
-                output["laddr_ip"], output["raddr_ip"] = src, dst
-                if hasattr(packet, "sport"):
-                    output["laddr_port"] = packet.sport
-            elif ipaddress.ip_address(dst).is_private:
-                output["direction"] = "incoming"
-                output["laddr_ip"], output["raddr_ip"] = dst, src
-                if hasattr(packet, "dport"):
-                    output["laddr_port"] = packet.dport
-            return output
+    def parse_packet(packet) -> dict:
+        output = {"summary": packet.summary(), "laddr_port": None}
+        # output["packet"] = str(packet.show(dump=True))
+        src = packet.getlayer(scapy.layers.all.IP).src
+        dst = packet.getlayer(scapy.layers.all.IP).dst
+        if ipaddress.ip_address(src).is_private:
+            output["direction"] = "outgoing"
+            output["laddr_ip"], output["raddr_ip"] = src, dst
+            if hasattr(packet, "sport"):
+                output["laddr_port"] = packet.sport
+        elif ipaddress.ip_address(dst).is_private:
+            output["direction"] = "incoming"
+            output["laddr_ip"], output["raddr_ip"] = dst, src
+            if hasattr(packet, "dport"):
+                output["laddr_port"] = packet.dport
+        return output
 
-        def filter_packet(packet) -> bool:
-            try:
-                src = ipaddress.ip_address(packet.getlayer(scapy.layers.all.IP).src)
-                dst = ipaddress.ip_address(packet.getlayer(scapy.layers.all.IP).dst)
-                return src.is_private != dst.is_private
-            except:
-                return False
+    def filter_packet(packet) -> bool:
+        try:
+            src = ipaddress.ip_address(packet.getlayer(scapy.layers.all.IP).src)
+            dst = ipaddress.ip_address(packet.getlayer(scapy.layers.all.IP).dst)
+            return src.is_private != dst.is_private
+        except:
+            return False
 
-        def sniffer(q_packet, q_error):
+    def sniffer(q_packet, q_error):
+        while True:
             try:
                 sniff(count=0, prn=lambda x: q_packet.put(parse_packet(x)), lfilter=filter_packet)
             except Exception as e:
-                q_error.put("picosnitch sniffer exception: " + str(e))
+                q_error.put("sniffer exception: " + str(e))
 
-        if __name__ == "__main__":
-            q_packet = multiprocessing.Queue()
-            q_error = multiprocessing.Queue()
-            p_sniff = multiprocessing.Process(target=sniffer, args=(q_packet, q_error))
-            p_sniff.start()
-            print("pcap started")
-            return p_sniff, q_packet, q_error
-    print("pcap failed")
-    return None, None, None
+    if __name__ == "__main__":
+        q_packet = multiprocessing.Queue()
+        q_error = multiprocessing.Queue()
+        p_sniff = multiprocessing.Process(target=sniffer, args=(q_packet, q_error))
+        p_sniff.start()
+        return p_sniff, q_packet, q_error
 
 
 def main():
