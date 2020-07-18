@@ -67,24 +67,24 @@ def write(snitch: dict):
 
 def drop_root_privileges():
     if sys.platform.startswith("linux") and os.getuid() == 0:
-        # os.setgid(int(os.getenv("SUDO_GID")))
-        # os.setuid(int(os.getenv("SUDO_UID")))
+        os.setgid(int(os.getenv("SUDO_GID")))
+        os.setuid(int(os.getenv("SUDO_UID")))
         # os.setegid(int(os.getenv("SUDO_GID")))
         # os.seteuid(int(os.getenv("SUDO_UID")))
-        os.setresgid(int(os.getenv("SUDO_GID")), int(os.getenv("SUDO_GID")), -1)
-        os.setresuid(int(os.getenv("SUDO_UID")), int(os.getenv("SUDO_UID")), -1)
+        # os.setresgid(int(os.getenv("SUDO_GID")), int(os.getenv("SUDO_GID")), -1)
+        # os.setresuid(int(os.getenv("SUDO_UID")), int(os.getenv("SUDO_UID")), -1)
         # os.umask(0o077)
 
 
-def terminate(snitch: dict, process: multiprocessing.Process = None):
+def terminate(snitch: dict, q_term: multiprocessing.Queue = None):
     write(snitch)
-    if process is not None:
-        if sys.platform.startswith("linux") and os.getresuid()[2] == 0:
-        #     os.setegid(0)
-        #     os.seteuid(0)
-            os.setresgid(0, 0, -1)
-            os.setresuid(0, 0, -1)
-        process.terminate()
+    if q_term is not None:
+        # if sys.platform.startswith("linux") and os.getresuid()[2] == 0:
+        # #     os.setegid(0)
+        # #     os.seteuid(0)
+        #     os.setresgid(0, 0, -1)
+        #     os.setresuid(0, 0, -1)
+        q_term.put("TERMINATE")
     sys.exit(0)
 
 
@@ -162,12 +162,12 @@ def update_snitch_pcap(snitch: dict, pcap: dict):
 
 def loop():
     snitch = read()
-    p_sniff, q_packet, q_error = None, None, None
+    q_packet, q_error, q_term = None, None, None
     if snitch["Config"]["Use pcap"]:
-        p_sniff, q_packet, q_error = init_pcap()
+        q_packet, q_error, q_term = init_pcap()
     drop_root_privileges()
-    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_sniff))
-    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_sniff))
+    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, q_term))
+    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, q_term))
     connections = set()
     polling_interval = snitch["Config"]["Polling interval"]
     write_counter = int(snitch["Config"]["Write interval"] / polling_interval)
@@ -238,12 +238,22 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
             except Exception as e:
                 q_error.put("sniffer exception: " + str(e))
 
+    def sniffer_mon(q_packet, q_error, q_term):
+        p_sniff = multiprocessing.Process(name="pico-sniffer", target=sniffer, args=(q_packet, q_error), daemon=True)
+        p_sniff.start()
+        q_term.get(block=True, timeout=None)
+        p_sniff.kill()
+        p_sniff.close()
+        sys.exit(0)
+        multiprocessing.current_process().terminate()
+
     if __name__ == "__main__":
         q_packet = multiprocessing.Queue()
         q_error = multiprocessing.Queue()
-        p_sniff = multiprocessing.Process(target=sniffer, args=(q_packet, q_error))
+        q_term = multiprocessing.Queue()
+        p_sniff = multiprocessing.Process(name="pico-sniffermon", target=sniffer_mon, args=(q_packet, q_error, q_term))
         p_sniff.start()
-        return p_sniff, q_packet, q_error
+        return q_packet, q_error, q_term
 
 
 def main():
