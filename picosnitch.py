@@ -24,6 +24,7 @@ import ipaddress
 import json
 import multiprocessing
 import os
+import queue
 import signal
 import sys
 import time
@@ -237,7 +238,13 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
         signal.signal(signal.SIGINT, lambda *args: None)
         p_sniff = multiprocessing.Process(name="pico-sniffer", target=sniffer, args=(q_packet, q_error), daemon=True)
         p_sniff.start()
-        q_term.get(block=True, timeout=None)
+        while True:
+            try:
+                if q_term.get(block=True, timeout=5):
+                    break
+            except queue.Empty:
+                if not multiprocessing.parent_process().is_alive():
+                    break
         p_sniff.terminate()
         p_sniff.join(1)
         if p_sniff.is_alive():
