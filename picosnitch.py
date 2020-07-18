@@ -80,8 +80,6 @@ def terminate(snitch: dict, p_sniff: multiprocessing.Process = None, q_term: mul
 def toast(msg: str, file=sys.stdout) -> None:
     try:
         plyer.notification.notify(title="picosnitch", message=msg, app_name="picosnitch")
-        if file == sys.stderr:
-            print(msg, file=file)
     except Exception:
         print("picosnitch (toast failed):" + msg, file=file)
 
