@@ -69,21 +69,11 @@ def drop_root_privileges():
     if sys.platform.startswith("linux") and os.getuid() == 0:
         os.setgid(int(os.getenv("SUDO_GID")))
         os.setuid(int(os.getenv("SUDO_UID")))
-        # os.setegid(int(os.getenv("SUDO_GID")))
-        # os.seteuid(int(os.getenv("SUDO_UID")))
-        # os.setresgid(int(os.getenv("SUDO_GID")), int(os.getenv("SUDO_GID")), -1)
-        # os.setresuid(int(os.getenv("SUDO_UID")), int(os.getenv("SUDO_UID")), -1)
-        # os.umask(0o077)
 
 
-def terminate(snitch: dict, p_sniff: multiprocessing.Queue = None, q_term: multiprocessing.Queue = None):
+def terminate(snitch: dict, p_sniff: multiprocessing.Process = None, q_term: multiprocessing.Queue = None):
     write(snitch)
     if q_term is not None:
-        # if sys.platform.startswith("linux") and os.getresuid()[2] == 0:
-        # #     os.setegid(0)
-        # #     os.seteuid(0)
-        #     os.setresgid(0, 0, -1)
-        #     os.setresuid(0, 0, -1)
         q_term.put("TERMINATE")
         p_sniff.join(5)
         p_sniff.close()
@@ -186,6 +176,9 @@ def loop():
             while not q_error.empty():
                 error = q_error.get()
                 snitch["Errors"].append(time.ctime() + " " + error)
+            if not p_sniff.is_alive():
+                toast("picosnitch sniffer process stopped", file=sys.stderr)
+                snitch["Errors"].append(time.ctime() + " picosnitch sniffer process stopped")
         connections = poll(snitch, connections, pcap_dict)
         time.sleep(polling_interval)
         if counter >= write_counter:
@@ -262,12 +255,12 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
 
 
 def main():
-    # if os.name == "posix":
-    #     import daemon
-    #     with daemon.DaemonContext():
-    #         loop()
-    # else:
-    loop()
+    if os.name == "posix":
+        import daemon
+        with daemon.DaemonContext():
+            loop()
+    else:
+        loop()
 
 
 if __name__ == "__main__":
