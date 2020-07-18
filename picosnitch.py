@@ -24,14 +24,10 @@ import ipaddress
 import json
 import multiprocessing
 import os
-import queue
 import signal
 import sys
 import time
 import typing
-
-import plyer
-import psutil
 
 
 def read() -> dict:
@@ -46,7 +42,7 @@ def read() -> dict:
         assert all(key in data for key in ["Config", "Errors", "Latest Entries", "Names", "Processes", "Remote Addresses"])
         return data
     return {
-        "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": False, "Remote Addresses ignored ports": [80, 443]},
+        "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": True, "Remote Addresses ignored ports": [80, 443]},
         "Errors": [],
         "Latest Entries": [],
         "Names": {},
@@ -159,6 +155,8 @@ def loop():
     if snitch["Config"]["Use pcap"]:
         p_sniff, q_packet, q_error, q_term = init_pcap()
     drop_root_privileges()
+    import plyer
+    import psutil
     signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_sniff, q_term))
     signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_sniff, q_term))
     connections = set()
@@ -198,9 +196,6 @@ def toast(msg: str, file=sys.stdout):
 
 
 def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue]:
-    import scapy
-    from scapy.all import sniff
-
     def parse_packet(packet) -> dict:
         output = {"summary": packet.summary(), "laddr_port": None}
         # output["packet"] = str(packet.show(dump=True))
@@ -227,6 +222,8 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
             return False
 
     def sniffer(q_packet, q_error):
+        import scapy
+        from scapy.all import sniff
         error_counter = 0
         while True:
             try:
@@ -241,6 +238,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
                     break
 
     def sniffer_mon(q_packet, q_error, q_term):
+        import queue
         signal.signal(signal.SIGINT, lambda *args: None)
         p_sniff = multiprocessing.Process(name="pico-sniffer", target=sniffer, args=(q_packet, q_error), daemon=True)
         p_sniff.start()
