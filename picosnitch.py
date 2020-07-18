@@ -76,7 +76,7 @@ def drop_root_privileges():
         # os.umask(0o077)
 
 
-def terminate(snitch: dict, q_term: multiprocessing.Queue = None):
+def terminate(snitch: dict, p_sniff: multiprocessing.Queue = None, q_term: multiprocessing.Queue = None):
     write(snitch)
     if q_term is not None:
         # if sys.platform.startswith("linux") and os.getresuid()[2] == 0:
@@ -85,6 +85,8 @@ def terminate(snitch: dict, q_term: multiprocessing.Queue = None):
         #     os.setresgid(0, 0, -1)
         #     os.setresuid(0, 0, -1)
         q_term.put("TERMINATE")
+        p_sniff.join(5)
+        p_sniff.close()
     sys.exit(0)
 
 
@@ -162,12 +164,12 @@ def update_snitch_pcap(snitch: dict, pcap: dict):
 
 def loop():
     snitch = read()
-    q_packet, q_error, q_term = None, None, None
+    p_sniff, q_packet, q_error, q_term = None, None, None, None
     if snitch["Config"]["Use pcap"]:
-        q_packet, q_error, q_term = init_pcap()
+        p_sniff, q_packet, q_error, q_term = init_pcap()
     drop_root_privileges()
-    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, q_term))
-    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, q_term))
+    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_sniff, q_term))
+    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_sniff, q_term))
     connections = set()
     polling_interval = snitch["Config"]["Polling interval"]
     write_counter = int(snitch["Config"]["Write interval"] / polling_interval)
@@ -239,13 +241,16 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
                 q_error.put("sniffer exception: " + str(e))
 
     def sniffer_mon(q_packet, q_error, q_term):
+        signal.signal(signal.SIGINT, lambda *args: None)
         p_sniff = multiprocessing.Process(name="pico-sniffer", target=sniffer, args=(q_packet, q_error), daemon=True)
         p_sniff.start()
         q_term.get(block=True, timeout=None)
-        p_sniff.kill()
+        p_sniff.terminate()
+        p_sniff.join(1)
+        if p_sniff.is_alive():
+            p_sniff.kill()
         p_sniff.close()
-        sys.exit(0)
-        multiprocessing.current_process().terminate()
+        return 0
 
     if __name__ == "__main__":
         q_packet = multiprocessing.Queue()
@@ -253,7 +258,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
         q_term = multiprocessing.Queue()
         p_sniff = multiprocessing.Process(name="pico-sniffermon", target=sniffer_mon, args=(q_packet, q_error, q_term))
         p_sniff.start()
-        return q_packet, q_error, q_term
+        return p_sniff, q_packet, q_error, q_term
 
 
 def main():
