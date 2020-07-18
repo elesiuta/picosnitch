@@ -167,7 +167,7 @@ def loop():
     counter = 0
     while True:
         pcap_dict = {}
-        if q_packet is not None:
+        if p_sniff is not None:
             known_ports = [conn.laddr.port for conn in connections if not isinstance(conn.laddr, str)]
             known_raddr = [conn.raddr.ip for conn in connections if conn.raddr]
             while not q_packet.empty():
@@ -180,6 +180,7 @@ def loop():
             if not p_sniff.is_alive():
                 toast("picosnitch sniffer process stopped", file=sys.stderr)
                 snitch["Errors"].append(time.ctime() + " picosnitch sniffer process stopped")
+                p_sniff, q_packet, q_error, q_term = None, None, None, None
         connections = poll(snitch, connections, pcap_dict)
         time.sleep(polling_interval)
         if counter >= write_counter:
@@ -191,9 +192,7 @@ def loop():
 
 def toast(msg: str, file=sys.stdout):
     try:
-        plyer.notification.notify(title="picosnitch",
-                                    message=msg,
-                                    app_name="picosnitch")
+        plyer.notification.notify(title="picosnitch", message=msg, app_name="picosnitch")
     except Exception as e:
         print(str(e) + msg, file=file)
 
@@ -228,11 +227,18 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
             return False
 
     def sniffer(q_packet, q_error):
+        error_counter = 0
         while True:
             try:
                 sniff(count=0, prn=lambda x: q_packet.put(parse_packet(x)), lfilter=filter_packet)
+            except PermissionError:
+                q_error.put("sniffer permission error, it needs to run with sudo -E")
+                break
             except Exception as e:
-                q_error.put("sniffer exception: " + str(e))
+                q_error.put("sniffer exception: " + type(e).__name__ + str(e.args))
+                error_counter += 1
+                if error_counter >= 50:
+                    break
 
     def sniffer_mon(q_packet, q_error, q_term):
         signal.signal(signal.SIGINT, lambda *args: None)
@@ -243,7 +249,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
                 if q_term.get(block=True, timeout=5):
                     break
             except queue.Empty:
-                if not multiprocessing.parent_process().is_alive():
+                if not multiprocessing.parent_process().is_alive() or not p_sniff.is_alive():
                     break
         p_sniff.terminate()
         p_sniff.join(1)
