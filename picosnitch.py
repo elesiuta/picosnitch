@@ -42,7 +42,7 @@ def read() -> dict:
         assert all(key in data for key in ["Config", "Errors", "Latest Entries", "Names", "Processes", "Remote Addresses"])
         return data
     return {
-        "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": False, "Ignore remote addresses": [80, 443]},
+        "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": False, "Remote address unlog": [80, 443]},
         "Errors": [],
         "Latest Entries": [],
         "Names": {},
@@ -136,13 +136,13 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
         if str(proc["cmdline"]) not in entry["cmdlines"]:
             entry["cmdlines"].append(str(proc["cmdline"]))
         if conn.raddr.ip not in entry["remote addresses"]:
-            if conn.laddr.port not in snitch["Config"]["Ignore remote addresses"] and proc["name"] not in snitch["Config"]["Ignore remote addresses"]:
+            if conn.laddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
                 entry["remote addresses"].append(conn.raddr.ip)
         if ctime.split()[:3] != entry["last seen"].split()[:3]:
             entry["days seen"] += 1
         entry["last seen"] = ctime
     # Update Remote Addresses
-    if conn.laddr.port not in snitch["Config"]["Ignore remote addresses"] and proc["name"] not in snitch["Config"]["Ignore remote addresses"]:
+    if conn.laddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
         snitch["Processes"][proc["exe"]]["remote addresses"].append(conn.raddr.ip)
         if conn.raddr.ip in snitch["Remote Addresses"]:
             if proc["exe"] not in snitch["Remote Addresses"][conn.raddr.ip]:
@@ -152,7 +152,7 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
 
 
 def update_snitch_pcap(snitch: dict, pcap: dict) -> None:
-    if pcap["raddr_ip"] not in snitch["Remote Addresses"] and pcap["laddr_port"] not in snitch["Config"]["Ignore remote addresses"]:
+    if pcap["raddr_ip"] not in snitch["Remote Addresses"] and pcap["laddr_port"] not in snitch["Config"]["Remote address unlog"]:
         snitch["Remote Addresses"][pcap["raddr_ip"]] = [pcap["summary"]]
         toast("polling missed process for connection: " + pcap["summary"])
 
