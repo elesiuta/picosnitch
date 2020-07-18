@@ -42,7 +42,7 @@ def read() -> dict:
         assert all(key in data for key in ["Config", "Errors", "Latest Entries", "Names", "Processes", "Remote Addresses"])
         return data
     return {
-        "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": True, "Remote Addresses ignored ports": [80, 443]},
+        "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": False, "Ignore remote addresses": [80, 443]},
         "Errors": [],
         "Latest Entries": [],
         "Names": {},
@@ -51,7 +51,7 @@ def read() -> dict:
         }
 
 
-def write(snitch: dict):
+def write(snitch: dict) -> None:
     file_path = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "snitch.json")
     if not os.path.isdir(os.path.dirname(file_path)):
         os.makedirs(os.path.dirname(file_path))
@@ -62,7 +62,7 @@ def write(snitch: dict):
         toast("picosnitch write error", file=sys.stderr)
 
 
-def drop_root_privileges():
+def drop_root_privileges() -> None:
     if sys.platform.startswith("linux") and os.getuid() == 0:
         os.setgid(int(os.getenv("SUDO_GID")))
         os.setuid(int(os.getenv("SUDO_UID")))
@@ -75,6 +75,13 @@ def terminate(snitch: dict, p_sniff: multiprocessing.Process = None, q_term: mul
         p_sniff.join(5)
         p_sniff.close()
     sys.exit(0)
+
+
+def toast(msg: str, file=sys.stdout) -> None:
+    try:
+        plyer.notification.notify(title="picosnitch", message=msg, app_name="picosnitch")
+    except Exception as e:
+        print(str(e) + msg, file=file)
 
 
 def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
@@ -100,7 +107,7 @@ def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
     return current_connections
 
 
-def update_snitch_proc(snitch: dict, proc: dict, conn, ctime: str):
+def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime: str) -> None:
     # Update Latest Entries
     if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
         snitch["Latest Entries"].insert(0, proc["name"] + " - " + proc["exe"])
@@ -128,13 +135,14 @@ def update_snitch_proc(snitch: dict, proc: dict, conn, ctime: str):
             entry["name"] += " alternative=" + proc["name"]
         if str(proc["cmdline"]) not in entry["cmdlines"]:
             entry["cmdlines"].append(str(proc["cmdline"]))
-        if conn.raddr.ip not in entry["remote addresses"] and conn.laddr.port not in snitch["Config"]["Remote Addresses ignored ports"]:
-            entry["remote addresses"].append(conn.raddr.ip)
+        if conn.raddr.ip not in entry["remote addresses"]:
+            if conn.laddr.port not in snitch["Config"]["Ignore remote addresses"] and proc["name"] not in snitch["Config"]["Ignore remote addresses"]:
+                entry["remote addresses"].append(conn.raddr.ip)
         if ctime.split()[:3] != entry["last seen"].split()[:3]:
             entry["days seen"] += 1
         entry["last seen"] = ctime
     # Update Remote Addresses
-    if conn.laddr.port not in snitch["Config"]["Remote Addresses ignored ports"]:
+    if conn.laddr.port not in snitch["Config"]["Ignore remote addresses"] and proc["name"] not in snitch["Config"]["Ignore remote addresses"]:
         snitch["Processes"][proc["exe"]]["remote addresses"].append(conn.raddr.ip)
         if conn.raddr.ip in snitch["Remote Addresses"]:
             if proc["exe"] not in snitch["Remote Addresses"][conn.raddr.ip]:
@@ -143,20 +151,24 @@ def update_snitch_proc(snitch: dict, proc: dict, conn, ctime: str):
             snitch["Remote Addresses"][conn.raddr.ip] = [proc["exe"]]
 
 
-def update_snitch_pcap(snitch: dict, pcap: dict):
-    if pcap["raddr_ip"] not in snitch["Remote Addresses"] and pcap["laddr_port"] not in snitch["Config"]["Remote Addresses ignored ports"]:
+def update_snitch_pcap(snitch: dict, pcap: dict) -> None:
+    if pcap["raddr_ip"] not in snitch["Remote Addresses"] and pcap["laddr_port"] not in snitch["Config"]["Ignore remote addresses"]:
         snitch["Remote Addresses"][pcap["raddr_ip"]] = [pcap["summary"]]
         toast("polling missed process for connection: " + pcap["summary"])
 
 
 def loop():
+    """Main loop"""
+    # read config and init sniffer if enabled
     snitch = read()
     p_sniff, q_packet, q_error, q_term = None, None, None, None
     if snitch["Config"]["Use pcap"]:
         p_sniff, q_packet, q_error, q_term = init_pcap()
     drop_root_privileges()
+    # import dependencies here to save memory since sniffer doesn't need to load them
     import plyer
     import psutil
+    # set signal handlers and init variables for loop
     signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_sniff, q_term))
     signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_sniff, q_term))
     connections = set()
@@ -164,6 +176,7 @@ def loop():
     write_counter = int(snitch["Config"]["Write interval"] / polling_interval)
     counter = 0
     while True:
+        # check sniffer status and for any connections that were missed during the last poll
         pcap_dict = {}
         if p_sniff is not None:
             known_ports = [conn.laddr.port for conn in connections if not isinstance(conn.laddr, str)]
@@ -179,6 +192,7 @@ def loop():
                 toast("picosnitch sniffer process stopped", file=sys.stderr)
                 snitch["Errors"].append(time.ctime() + " picosnitch sniffer process stopped")
                 p_sniff, q_packet, q_error, q_term = None, None, None, None
+        # poll connections and processes with psutil
         connections = poll(snitch, connections, pcap_dict)
         time.sleep(polling_interval)
         if counter >= write_counter:
@@ -188,14 +202,7 @@ def loop():
             counter += 1
 
 
-def toast(msg: str, file=sys.stdout):
-    try:
-        plyer.notification.notify(title="picosnitch", message=msg, app_name="picosnitch")
-    except Exception as e:
-        print(str(e) + msg, file=file)
-
-
-def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue]:
+def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
     def parse_packet(packet) -> dict:
         output = {"summary": packet.summary(), "laddr_port": None}
         # output["packet"] = str(packet.show(dump=True))
