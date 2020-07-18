@@ -110,7 +110,7 @@ def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
 def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime: str) -> None:
     # Update Latest Entries
     if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
-        snitch["Latest Entries"].insert(0, proc["name"] + " - " + proc["exe"])
+        snitch["Latest Entries"].insert(0, ctime + " " + proc["name"] + " - " + proc["exe"])
     # Update Names
     if proc["name"] in snitch["Names"]:
         if proc["exe"] not in snitch["Names"][proc["name"]]:
