@@ -88,20 +88,25 @@ def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
     ctime = time.ctime()
     proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
     current_connections = set(psutil.net_connections(kind="all"))
+    # check processes for all new connections
     for conn in current_connections - last_connections:
         try:
             if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
+                # update snitch (if necessary) with new non-local connection (pop from pcap)
                 _ = pcap_dict.pop(str(conn.laddr.port) + str(conn.raddr.ip), None)
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
                 update_snitch_proc(snitch, proc, conn, ctime)
-        except Exception:
+        except Exception as e:
+            # too late to grab process info (most likely) or some other error
             error = str(conn)
             if conn.pid == proc["pid"]:
-                error += str(proc["pid"])
+                error += str(proc)
             else:
                 error += "{process no longer exists}"
+            error += type(e).__name__ + str(e.args)
             snitch["Errors"].append(ctime + " " + error)
             toast("picosnitch polling error: " + error, file=sys.stderr)
+    # check any connection still in the pcap that wasn't already identified
     for pcap in pcap_dict.values():
         update_snitch_pcap(snitch, pcap, ctime)
     return current_connections
@@ -178,17 +183,21 @@ def loop():
         # check sniffer status and for any connections that were missed during the last poll
         pcap_dict = {}
         if p_sniff is not None:
-            known_ports = [conn.laddr.port for conn in connections if not isinstance(conn.laddr, str)]
-            known_raddr = [conn.raddr.ip for conn in connections if conn.raddr]
+            # list of known connections from last poll, l/raddr could be a path if AF_UNIX socket, and raddr could be None
+            known_ports = [conn.laddr.port for conn in connections if hasattr(conn.laddr, "port")]
+            known_raddr = [conn.raddr.ip for conn in connections if hasattr(conn.raddr, "ip")]
             while not q_packet.empty():
                 packet = q_packet.get()
                 if not (packet["laddr_port"] in known_ports or packet["raddr_ip"] in known_raddr):
+                    # new connection, log and check during polling
                     pcap_dict[str(packet["laddr_port"]) + str(packet["raddr_ip"])] = packet
             while not q_error.empty():
+                # log sniffer errors
                 error = q_error.get()
                 snitch["Errors"].append(time.ctime() + " " + error)
                 toast("picosnitch " + error, file=sys.stderr)
             if not p_sniff.is_alive():
+                # log sniffer death, stop checking it and try to keep running
                 snitch["Errors"].append(time.ctime() + " picosnitch sniffer process stopped")
                 toast("picosnitch sniffer process stopped", file=sys.stderr)
                 p_sniff, q_packet, q_error, q_term = None, None, None, None
