@@ -31,8 +31,8 @@ import typing
 
 
 def read() -> dict:
-    if sys.platform.startswith("linux") and os.getuid() == 0:
-        home_dir = "/home/" + os.getenv("SUDO_USER")
+    if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
+        home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
     else:
         home_dir = os.path.expanduser("~")
     file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.json")
@@ -42,13 +42,13 @@ def read() -> dict:
         assert all(key in data for key in ["Config", "Errors", "Latest Entries", "Names", "Processes", "Remote Addresses"])
         return data
     return {
-        "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": False, "Remote address unlog": [80, 443]},
+        "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": True, "Remote address unlog": []},
         "Errors": [],
         "Latest Entries": [],
         "Names": {},
         "Processes": {},
         "Remote Addresses": {}
-        }
+    }
 
 
 def write(snitch: dict) -> None:
@@ -103,7 +103,7 @@ def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
             snitch["Errors"].append(ctime + " " + error)
             toast("picosnitch polling error: " + error, file=sys.stderr)
     for pcap in pcap_dict.values():
-        update_snitch_pcap(snitch, pcap)
+        update_snitch_pcap(snitch, pcap, ctime)
     return current_connections
 
 
@@ -150,7 +150,7 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
             snitch["Remote Addresses"][conn.raddr.ip] = ["First connection: " + ctime, proc["exe"]]
 
 
-def update_snitch_pcap(snitch: dict, pcap: dict) -> None:
+def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
     if pcap["raddr_ip"] not in snitch["Remote Addresses"] and pcap["laddr_port"] not in snitch["Config"]["Remote address unlog"]:
         snitch["Remote Addresses"][pcap["raddr_ip"]] = ["First connection: " + ctime, pcap["summary"]]
         toast("polling missed process for connection: " + pcap["summary"])
@@ -187,9 +187,10 @@ def loop():
             while not q_error.empty():
                 error = q_error.get()
                 snitch["Errors"].append(time.ctime() + " " + error)
+                toast("picosnitch " + error, file=sys.stderr)
             if not p_sniff.is_alive():
-                toast("picosnitch sniffer process stopped", file=sys.stderr)
                 snitch["Errors"].append(time.ctime() + " picosnitch sniffer process stopped")
+                toast("picosnitch sniffer process stopped", file=sys.stderr)
                 p_sniff, q_packet, q_error, q_term = None, None, None, None
         # poll connections and processes with psutil
         connections = poll(snitch, connections, pcap_dict)
@@ -274,6 +275,8 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
 
 def main():
     if os.name == "posix":
+        if os.path.expanduser("~") == "/root":
+            print("Warning: picosnitch was run as root without preserving environment", file=sys.stderr)
         import daemon
         with daemon.DaemonContext():
             loop()
