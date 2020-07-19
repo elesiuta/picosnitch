@@ -166,8 +166,8 @@ def loop():
         p_sniff, q_packet, q_error, q_term = init_pcap()
     drop_root_privileges()
     # import dependencies here to save memory since sniffer doesn't need to load them
-    import plyer
-    import psutil
+    global plyer, psutil
+    import plyer, psutil
     # set signal handlers and init variables for loop
     signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_sniff, q_term))
     signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_sniff, q_term))
@@ -229,6 +229,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
             return False
 
     def sniffer(q_packet, q_error):
+        global scapy
         import scapy
         from scapy.all import sniff
         error_counter = 0
