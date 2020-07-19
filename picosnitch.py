@@ -142,18 +142,17 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
             entry["days seen"] += 1
         entry["last seen"] = ctime
     # Update Remote Addresses
-    if conn.laddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
-        snitch["Processes"][proc["exe"]]["remote addresses"].append(conn.raddr.ip)
-        if conn.raddr.ip in snitch["Remote Addresses"]:
-            if proc["exe"] not in snitch["Remote Addresses"][conn.raddr.ip]:
-                snitch["Remote Addresses"][conn.raddr.ip].append(proc["exe"])
-        else:
-            snitch["Remote Addresses"][conn.raddr.ip] = [proc["exe"]]
+    if conn.raddr.ip in snitch["Remote Addresses"]:
+        if proc["exe"] not in snitch["Remote Addresses"][conn.raddr.ip]:
+            snitch["Remote Addresses"][conn.raddr.ip].append(proc["exe"])
+    else:
+        if conn.laddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
+            snitch["Remote Addresses"][conn.raddr.ip] = ["First connection: " + ctime, proc["exe"]]
 
 
 def update_snitch_pcap(snitch: dict, pcap: dict) -> None:
     if pcap["raddr_ip"] not in snitch["Remote Addresses"] and pcap["laddr_port"] not in snitch["Config"]["Remote address unlog"]:
-        snitch["Remote Addresses"][pcap["raddr_ip"]] = [pcap["summary"]]
+        snitch["Remote Addresses"][pcap["raddr_ip"]] = ["First connection: " + ctime, pcap["summary"]]
         toast("polling missed process for connection: " + pcap["summary"])
 
 
