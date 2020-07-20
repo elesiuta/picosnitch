@@ -14,8 +14,9 @@
 ## linux
 - install from PyPI with  
 `pip3 install picosnitch --upgrade --user`
-- optionally install Scapy  
-	- [https://scapy.readthedocs.io/en/latest/installation.html](https://scapy.readthedocs.io/en/latest/installation.html)
+- optionally install Scapy
+  - you should be able to just install scapy or python3-scapy from your distribution
+  - [https://scapy.readthedocs.io/en/latest/installation.html](https://scapy.readthedocs.io/en/latest/installation.html)
 - run daemon with  
 `picosnitch`
 - or run daemon as root to use Scapy  
@@ -23,17 +24,18 @@
 ## windows
 - install from PyPI with  
 `pip install picosnitch --upgrade`
-- optionally install Scapy  
-	- [https://scapy.readthedocs.io/en/latest/installation.html](https://scapy.readthedocs.io/en/latest/installation.html)
-- run with (make sure you're running as an administrator if using Scapy)  
+- optionally install Scapy
+  - [https://scapy.readthedocs.io/en/latest/installation.html](https://scapy.readthedocs.io/en/latest/installation.html)
+- run with  
 `picosnitch`
+- make sure you're running as an administrator if using Scapy
 ## building from source
 - install from source using python 3 with  
 `python setup.py install --user`
 - required dependencies (installed automatically from PyPI on setup if not already present)  
 `filelock plyer psutil python-daemon`
-- optional dependency (requires manual installation)
-	- [Scapy](https://scapy.readthedocs.io/en/latest/installation.html)
+- optional dependency (requires manual installation)  
+`scapy`
 - picosnitch.py can also be run directly
 # configuration
 - stored in ~/.config/picosnitch/snitch.json
