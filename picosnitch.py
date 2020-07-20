@@ -283,6 +283,8 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
 
 
 def main():
+    if sys.prefix != sys.base_prefix:
+            print("Warning: picosnitch is running in a virtual environment, notifications may not function", file=sys.stderr)
     if os.name == "posix":
         if os.path.expanduser("~") == "/root":
             print("Warning: picosnitch was run as root without preserving environment", file=sys.stderr)
