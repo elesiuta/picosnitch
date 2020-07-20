@@ -37,7 +37,7 @@ def read() -> dict:
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             data = json.load(json_file)
-        assert all(key in data for key in ["Config", "Errors", "Latest Entries", "Names", "Processes", "Remote Addresses"])
+        assert all(key in data for key in ["Config", "Errors", "Latest Entries", "Names", "Processes", "Remote Addresses"]), "Invalid snitch.json"
         return data
     return {
         "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": True, "Remote address unlog": []},
