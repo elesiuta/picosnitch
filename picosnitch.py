@@ -22,6 +22,7 @@ import json
 import multiprocessing
 import os
 import signal
+import socket
 import sys
 import time
 import typing
@@ -110,6 +111,8 @@ def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
 
 
 def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime: str) -> None:
+    # Get DNS reverse name and reverse the name for sorting
+    reversed_dns = ".".join(reversed(socket.getnameinfo((conn.raddr.ip, 0), 0)[0].split(".")))
     # Update Latest Entries
     if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
         snitch["Latest Entries"].insert(0, ctime + " " + proc["name"] + " - " + proc["exe"])
@@ -131,30 +134,34 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
             "days seen": 1,
             "remote addresses": []
         }
+        if conn.laddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
+            snitch["Processes"][proc["exe"]]["remote addresses"].append(reversed_dns)
     else:
         entry = snitch["Processes"][proc["exe"]]
         if proc["name"] not in entry["name"]:
             entry["name"] += " alternative=" + proc["name"]
         if str(proc["cmdline"]) not in entry["cmdlines"]:
             entry["cmdlines"].append(str(proc["cmdline"]))
-        if conn.raddr.ip not in entry["remote addresses"]:
+        if reversed_dns not in entry["remote addresses"]:
             if conn.laddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
-                entry["remote addresses"].append(conn.raddr.ip)
+                entry["remote addresses"].append(reversed_dns)
         if ctime.split()[:3] != entry["last seen"].split()[:3]:
             entry["days seen"] += 1
         entry["last seen"] = ctime
     # Update Remote Addresses
-    if conn.raddr.ip in snitch["Remote Addresses"]:
-        if proc["exe"] not in snitch["Remote Addresses"][conn.raddr.ip]:
-            snitch["Remote Addresses"][conn.raddr.ip].append(proc["exe"])
+    if reversed_dns in snitch["Remote Addresses"]:
+        if proc["exe"] not in snitch["Remote Addresses"][reversed_dns]:
+            snitch["Remote Addresses"][reversed_dns].append(proc["exe"])
     else:
         if conn.laddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
-            snitch["Remote Addresses"][conn.raddr.ip] = ["First connection: " + ctime, proc["exe"]]
+            snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, proc["exe"]]
 
 
 def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
-    if pcap["raddr_ip"] not in snitch["Remote Addresses"] and pcap["laddr_port"] not in snitch["Config"]["Remote address unlog"]:
-        snitch["Remote Addresses"][pcap["raddr_ip"]] = ["First connection: " + ctime, pcap["summary"]]
+    # Get DNS reverse name and reverse the name for sorting
+    reversed_dns = ".".join(reversed(socket.getnameinfo((pcap["raddr_ip"], 0), 0)[0].split(".")))
+    if reversed_dns not in snitch["Remote Addresses"] and pcap["laddr_port"] not in snitch["Config"]["Remote address unlog"]:
+        snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, pcap["summary"]]
         toast("polling missed process for connection: " + pcap["summary"])
 
 
