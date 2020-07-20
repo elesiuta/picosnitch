@@ -12,7 +12,7 @@ setuptools.setup(
     url="https://github.com/elesiuta/picosnitch",
     py_modules=["picosnitch"],
     entry_points={"console_scripts": ["picosnitch = picosnitch:main"]},
-    install_requires=["plyer", "psutil", "python-daemon"],
+    install_requires=["filelock", "plyer", "psutil", "python-daemon"],
     extras_require={"pcap": ["scapy"]},
     classifiers=[
         "Programming Language :: Python :: 3",
