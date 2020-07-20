@@ -40,7 +40,7 @@ def read() -> dict:
         assert all(key in data for key in ["Config", "Errors", "Latest Entries", "Names", "Processes", "Remote Addresses"]), "Invalid snitch.json"
         return data
     return {
-        "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": True, "Remote address unlog": []},
+        "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": False, "Remote address unlog": []},
         "Errors": [],
         "Latest Entries": [],
         "Names": {},
