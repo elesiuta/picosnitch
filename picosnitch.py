@@ -168,7 +168,7 @@ def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
 def loop():
     """Main loop"""
     # acquire lock (since the prior one would be released by starting the daemon)
-    lock = filelock.FileLock(os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "lockfile"), timeout=1)
+    lock = filelock.FileLock(os.path.join(os.path.expanduser("~"), ".picosnitch_lock"), timeout=1)
     lock.acquire()
     # read config and init sniffer if enabled
     snitch = read()
@@ -292,7 +292,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
 def main():
     global filelock
     import filelock
-    lock = filelock.FileLock(os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "lockfile"), timeout=1)
+    lock = filelock.FileLock(os.path.join(os.path.expanduser("~"), ".picosnitch_lock"), timeout=1)
     try:
         lock.acquire()
         lock.release()
