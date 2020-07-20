@@ -45,7 +45,7 @@
   "Config": {
     "Polling interval": 0.2, # float in seconds
     "Remote address unlog": [80, "firefox"], # list of process names (str) or ports (int) to omit addresses
-    "Use pcap": true, # bool, requires Scapy to be installed
+    "Use pcap": false, # bool, requires Scapy to be installed
     "Write interval": 600 # how often to write this file in seconds
   },
   "Errors": [], # Log of errors by time
