@@ -5,11 +5,12 @@
 - Polls connections and processes at 0.2s intervals by default
 - Optionally sniff all traffic for new connections using Scapy for improved reliability
 - Inspired by programs such as:
+  - GlassWire
   - Little Snitch
   - OpenSnitch
-  - GlassWire
   - simplewall
-- Note, picosnitch only provides monitoring and notification capabilities, see the above programs for additional features such as a GUI, bandwidth tracking, firewall configuration, or filtering
+  - tinysnitch
+- picosnitch only provides monitoring and notification capabilities, see the above programs for features such as a GUI, bandwidth tracking, firewall configuration, or filtering
 # getting started
 ## linux
 - install from PyPI with  
