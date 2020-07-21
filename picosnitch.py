@@ -31,6 +31,14 @@ import typing
 
 def read() -> dict:
     """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
+    template = {
+        "Config": {"Enable pcap": False, "Polling interval": 0.2, "Remote address unlog": ["firefox"]},
+        "Errors": [],
+        "Latest Entries": [],
+        "Names": {},
+        "Processes": {},
+        "Remote Addresses": {}
+    }
     if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
         home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
     else:
@@ -39,16 +47,10 @@ def read() -> dict:
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             data = json.load(json_file)
-        assert all(key in data for key in ["Config", "Errors", "Latest Entries", "Names", "Processes", "Remote Addresses"]), "Invalid snitch.json"
+        assert all(key in data and type(data[key]) == type(template[key]) for key in template), "Invalid snitch.json"
+        assert all(key in data["Config"] for key in template["Config"]), "Invalid config"
         return data
-    return {
-        "Config": {"Enable pcap": False, "Polling interval": 0.2, "Remote address unlog": ["firefox"]},
-        "Errors": [],
-        "Latest Entries": [],
-        "Names": {},
-        "Processes": {},
-        "Remote Addresses": {}
-    }
+    return template
 
 
 def write(snitch: dict) -> None:
@@ -175,7 +177,7 @@ def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
 
 
 def loop():
-    """Main loop"""
+    """main loop"""
     # acquire lock (since the prior one would be released by starting the daemon)
     lock = filelock.FileLock(os.path.join(os.path.expanduser("~"), ".picosnitch_lock"), timeout=1)
     lock.acquire()
@@ -229,7 +231,9 @@ def loop():
 
 
 def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
+    """init sniffing subprocess and monitor with root (before dropping root privileges)"""
     def parse_packet(packet) -> dict:
+        """create a dict from the packet"""
         output = {"summary": packet.summary(), "laddr_port": None}
         # output["packet"] = str(packet.show(dump=True))
         src = packet.getlayer(scapy.layers.all.IP).src
@@ -247,6 +251,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
         return output
 
     def filter_packet(packet) -> bool:
+        """filter remote connections (ignore local only) (either src or dst is remote)"""
         try:
             src = ipaddress.ip_address(packet.getlayer(scapy.layers.all.IP).src)
             dst = ipaddress.ip_address(packet.getlayer(scapy.layers.all.IP).dst)
@@ -255,6 +260,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
             return False
 
     def sniffer(q_packet, q_error):
+        """always running packet sniffer that queues parsed packets after filtering"""
         global scapy
         import scapy
         from scapy.all import sniff
@@ -272,6 +278,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
                     break
 
     def sniffer_mon(q_packet, q_error, q_term):
+        """monitor the sniffer and parent process, has same privileges as the sniffer for clean termination at the command or death of the parent"""
         import queue
         signal.signal(signal.SIGINT, lambda *args: None)
         p_sniff = multiprocessing.Process(name="pico-sniffer", target=sniffer, args=(q_packet, q_error), daemon=True)
@@ -300,6 +307,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
 
 
 def main():
+    """startup picosnitch as a daemon on posix systems, regular process otherwise, and ensure only one instance is running"""
     global filelock
     import filelock
     lock = filelock.FileLock(os.path.join(os.path.expanduser("~"), ".picosnitch_lock"), timeout=1)
