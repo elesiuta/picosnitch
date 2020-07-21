@@ -52,8 +52,10 @@
   },
   "Errors": [], # Log of errors by time
   "Latest Entries": [], # Log of entries by time
-  "Names": {}, # Log of process names and respective executable(s)
-  "Processes": {}, # Log of processes by executable
-  "Remote Addresses": {} # Log of remote addresses
+  "Names": {}, # Log of processes by name containing respective executable(s)
+  "Processes": {}, # Log of processes by executable containing:
+  # cmdlines, days seen, first seen, last seen, name, ports, remote addresses
+  "Remote Addresses": {} # Log of remote addresses containing respective executable(s)
+  # and packet summaries if pcap is enabled and process was too short lived for detection via polling
 }
 ```
