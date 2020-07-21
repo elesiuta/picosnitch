@@ -21,6 +21,7 @@ import ipaddress
 import json
 import multiprocessing
 import os
+import pickle
 import signal
 import socket
 import sys
@@ -40,7 +41,7 @@ def read() -> dict:
         assert all(key in data for key in ["Config", "Errors", "Latest Entries", "Names", "Processes", "Remote Addresses"]), "Invalid snitch.json"
         return data
     return {
-        "Config": {"Polling interval": 0.2, "Write interval": 600, "Use pcap": False, "Remote address unlog": ["firefox"]},
+        "Config": {"Enable pcap": False, "Polling interval": 0.2, "Remote address unlog": ["firefox"]},
         "Errors": [],
         "Latest Entries": [],
         "Names": {},
@@ -115,7 +116,7 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
     reversed_dns = ".".join(reversed(socket.getnameinfo((conn.raddr.ip, 0), 0)[0].split(".")))
     # Update Latest Entries
     if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
-        snitch["Latest Entries"].insert(0, ctime + " " + proc["name"] + " - " + proc["exe"])
+        snitch["Latest Entries"].append(ctime + " " + proc["name"] + " - " + proc["exe"])
     # Update Names
     if proc["name"] in snitch["Names"]:
         if proc["exe"] not in snitch["Names"][proc["name"]]:
@@ -173,19 +174,19 @@ def loop():
     # read config and init sniffer if enabled
     snitch = read()
     p_sniff, q_packet, q_error, q_term = None, None, None, None
-    if snitch["Config"]["Use pcap"]:
+    if snitch["Config"]["Enable pcap"]:
         p_sniff, q_packet, q_error, q_term = init_pcap()
     drop_root_privileges()
     # import dependencies here to save memory since sniffer doesn't need to load them
     global plyer, psutil
     import plyer, psutil
-    # set signal handlers and init variables for loop
+    # set signal handlers
     signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_sniff, q_term))
     signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_sniff, q_term))
+    # init variables for loop
     connections = set()
     polling_interval = snitch["Config"]["Polling interval"]
-    write_counter = int(snitch["Config"]["Write interval"] / polling_interval)
-    counter = 0
+    sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     while True:
         # check sniffer status and for any connections that were missed during the last poll
         pcap_dict = {}
@@ -211,11 +212,10 @@ def loop():
         # poll connections and processes with psutil
         connections = poll(snitch, connections, pcap_dict)
         time.sleep(polling_interval)
-        if counter >= write_counter:
+        new_size = sys.getsizeof(pickle.dumps(snitch))
+        if new_size > sizeof_snitch:
+            sizeof_snitch = new_size
             write(snitch)
-            counter = 0
-        else:
-            counter += 1
 
 
 def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
