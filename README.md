@@ -29,7 +29,7 @@
   - [https://scapy.readthedocs.io/en/latest/installation.html](https://scapy.readthedocs.io/en/latest/installation.html)
 - run with  
 `picosnitch`
-- make sure you're running as an administrator if using Scapy
+- you'll probably need to run it as an administrator if using Scapy
 ## building from source
 - install from source using python 3 with  
 `python setup.py install --user`
