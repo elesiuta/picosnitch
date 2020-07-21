@@ -30,6 +30,7 @@ import typing
 
 
 def read() -> dict:
+    """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
         home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
     else:
@@ -51,6 +52,7 @@ def read() -> dict:
 
 
 def write(snitch: dict) -> None:
+    """write snitch to correct location (root privileges should be dropped first)"""
     file_path = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "snitch.json")
     if not os.path.isdir(os.path.dirname(file_path)):
         os.makedirs(os.path.dirname(file_path))
@@ -62,12 +64,14 @@ def write(snitch: dict) -> None:
 
 
 def drop_root_privileges() -> None:
+    """drop root privileges on linux"""
     if sys.platform.startswith("linux") and os.getuid() == 0:
         os.setgid(int(os.getenv("SUDO_GID")))
         os.setuid(int(os.getenv("SUDO_UID")))
 
 
 def terminate(snitch: dict, p_sniff: multiprocessing.Process = None, q_term: multiprocessing.Queue = None):
+    """write snitch one last time, then terminate picosnitch and subprocesses if running"""
     write(snitch)
     if q_term is not None:
         q_term.put("TERMINATE")
@@ -77,6 +81,7 @@ def terminate(snitch: dict, p_sniff: multiprocessing.Process = None, q_term: mul
 
 
 def toast(msg: str, file=sys.stdout) -> None:
+    """create a system tray notification, tries printing as a last resort"""
     try:
         plyer.notification.notify(title="picosnitch", message=msg, app_name="picosnitch")
     except Exception:
@@ -84,6 +89,7 @@ def toast(msg: str, file=sys.stdout) -> None:
 
 
 def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
+    """poll processes and connections using psutil, and queued pcap if available, then run update_snitch_*"""
     ctime = time.ctime()
     proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
     current_connections = set(psutil.net_connections(kind="all"))
@@ -112,6 +118,7 @@ def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
 
 
 def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime: str) -> None:
+    """update the snitch with polled data from psutil and create a notification if new"""
     # Get DNS reverse name and reverse the name for sorting
     reversed_dns = ".".join(reversed(socket.getnameinfo((conn.raddr.ip, 0), 0)[0].split(".")))
     # Update Latest Entries
@@ -159,6 +166,7 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
 
 
 def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
+    """update the snitch with queued data from Scapy and create a notification if new"""
     # Get DNS reverse name and reverse the name for sorting
     reversed_dns = ".".join(reversed(socket.getnameinfo((pcap["raddr_ip"], 0), 0)[0].split(".")))
     if reversed_dns not in snitch["Remote Addresses"] and pcap["laddr_port"] not in snitch["Config"]["Remote address unlog"]:
@@ -187,6 +195,7 @@ def loop():
     connections = set()
     polling_interval = snitch["Config"]["Polling interval"]
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
+    last_write = 0
     while True:
         # check sniffer status and for any connections that were missed during the last poll
         pcap_dict = {}
@@ -213,8 +222,9 @@ def loop():
         connections = poll(snitch, connections, pcap_dict)
         time.sleep(polling_interval)
         new_size = sys.getsizeof(pickle.dumps(snitch))
-        if new_size > sizeof_snitch:
+        if new_size > sizeof_snitch or time.time() - last_write > 300:
             sizeof_snitch = new_size
+            last_write = time.time()
             write(snitch)
 
 
@@ -258,7 +268,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
             except Exception as e:
                 q_error.put("sniffer exception: " + type(e).__name__ + str(e.args))
                 error_counter += 1
-                if error_counter >= 50:
+                if error_counter >= 42:
                     break
 
     def sniffer_mon(q_packet, q_error, q_term):
