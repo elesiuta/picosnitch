@@ -142,6 +142,7 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
             "first seen": ctime,
             "last seen": ctime,
             "days seen": 1,
+            "ports": [conn.laddr.port],
             "remote addresses": []
         }
         if conn.laddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
@@ -152,6 +153,9 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
             entry["name"] += " alternative=" + proc["name"]
         if str(proc["cmdline"]) not in entry["cmdlines"]:
             entry["cmdlines"].append(str(proc["cmdline"]))
+        if conn.laddr.port not in entry["ports"]:
+            entry["ports"].append(conn.laddr.port)
+            entry["ports"].sort()
         if reversed_dns not in entry["remote addresses"]:
             if conn.laddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
                 entry["remote addresses"].append(reversed_dns)
@@ -171,9 +175,12 @@ def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
     """update the snitch with queued data from Scapy and create a notification if new"""
     # Get DNS reverse name and reverse the name for sorting
     reversed_dns = ".".join(reversed(socket.getnameinfo((pcap["raddr_ip"], 0), 0)[0].split(".")))
-    if reversed_dns not in snitch["Remote Addresses"] and pcap["laddr_port"] not in snitch["Config"]["Remote address unlog"]:
-        snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, pcap["summary"]]
-        toast("polling missed process for connection: " + pcap["summary"])
+    if pcap["laddr_port"] not in snitch["Config"]["Remote address unlog"]:
+        if reversed_dns not in snitch["Remote Addresses"]:
+            snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, pcap["summary"]]
+            toast("polling missed process for connection: " + pcap["summary"])
+        elif pcap["summary"] not in snitch["Remote Addresses"][reversed_dns]:
+            snitch["Remote Addresses"][reversed_dns].append(pcap["summary"])
 
 
 def loop():
