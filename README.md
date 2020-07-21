@@ -1,7 +1,7 @@
 
 # picosnitch
-- See which processes make remote network connections
-- Logs and config are stored in ~/.config/picosnitch/snitch.json and updated every 10 minutes or on SIGTERM
+- Monitors your system to notify you whenever a program makes its first remote network connection (while picosnitch has been running)
+- Logs and config are stored in ~/.config/picosnitch/snitch.json
 - Polls connections and processes at 0.2s intervals by default
 - Optionally sniff all traffic for new connections using Scapy for improved reliability
 - Inspired by programs such as:
@@ -16,7 +16,7 @@
 - install from PyPI with  
 `pip3 install picosnitch --upgrade --user`
 - optionally install Scapy
-  - you should be able to just install scapy or python3-scapy from your distribution
+  - you should be able to just install scapy or python3-scapy using your distribution's package manager
   - [https://scapy.readthedocs.io/en/latest/installation.html](https://scapy.readthedocs.io/en/latest/installation.html)
 - run daemon with  
 `picosnitch`
@@ -44,10 +44,11 @@
 ```python
 {
   "Config": {
+    "Enable pcap": false, # bool, use Scapy to sniff traffic
     "Polling interval": 0.2, # float in seconds
-    "Remote address unlog": [80, "firefox"], # list of process names (str) or ports (int) to omit addresses
-    "Use pcap": false, # bool, requires Scapy to be installed
-    "Write interval": 600 # how often to write this file in seconds
+    "Remote address unlog": [80, "firefox"] # list of process names (str) or ports (int)
+    # will omit connections that match any of these from the log of remote addresses to avoid clutter
+    # the process and executable will still be logged if it has not been already
   },
   "Errors": [], # Log of errors by time
   "Latest Entries": [], # Log of entries by time
