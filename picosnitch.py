@@ -317,6 +317,11 @@ def main():
     except filelock.Timeout:
         print("Error: another instance of this application is currently running", file=sys.stderr)
         sys.exit(1)
+    try:
+        _ = read()
+    except Exception as e:
+        print(type(e).__name__ + str(e.args))
+        sys.exit(1)
     if sys.prefix != sys.base_prefix:
             print("Warning: picosnitch is running in a virtual environment, notifications may not function", file=sys.stderr)
     if os.name == "posix":
