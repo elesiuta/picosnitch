@@ -178,7 +178,7 @@ def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
     if pcap["laddr_port"] not in snitch["Config"]["Remote address unlog"]:
         if reversed_dns not in snitch["Remote Addresses"]:
             snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, pcap["summary"]]
-            toast("polling missed process for connection: " + pcap["summary"])
+            toast("polling missed process for connection to: " + ".".join(reversed(reversed_dns.split("."))))
         elif pcap["summary"] not in snitch["Remote Addresses"][reversed_dns]:
             snitch["Remote Addresses"][reversed_dns].append(pcap["summary"])
 
