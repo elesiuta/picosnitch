@@ -213,7 +213,7 @@ def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
     if pcap["raddr_port"] not in snitch["Config"]["Remote address unlog"]:
         if reversed_dns not in snitch["Remote Addresses"]:
             snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, pcap["summary"]]
-            toast("New address: " + reverse_domain_name(reversed_dns))
+            toast("New address: " + reverse_domain_name(reversed_dns) + " (polling missed process)")
         elif pcap["summary"] not in snitch["Remote Addresses"][reversed_dns]:
             get_common_pattern(pcap["summary"], snitch["Remote Addresses"][reversed_dns], 0.95)
 
@@ -264,11 +264,12 @@ def loop():
         # poll connections and processes with psutil
         connections = poll(snitch, connections, pcap_dict)
         time.sleep(polling_interval)
-        new_size = sys.getsizeof(pickle.dumps(snitch))
-        if new_size != sizeof_snitch or time.time() - last_write > 300:
-            sizeof_snitch = new_size
-            last_write = time.time()
-            write(snitch)
+        if time.time() - last_write > 5:
+            new_size = sys.getsizeof(pickle.dumps(snitch))
+            if new_size != sizeof_snitch or time.time() - last_write > 300:
+                sizeof_snitch = new_size
+                last_write = time.time()
+                write(snitch)
 
 
 def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
