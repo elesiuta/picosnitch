@@ -245,11 +245,10 @@ def loop():
         pcap_dict = {}
         if p_sniff is not None:
             # list of known connections from last poll, l/raddr could be a path if AF_UNIX socket, and raddr could be None
-            # known_ports = [conn.laddr.port for conn in connections if hasattr(conn.raddr, "port")]
             known_raddr = [conn.raddr.ip for conn in connections if hasattr(conn.raddr, "ip")]
             while not q_packet.empty():
                 packet = q_packet.get()
-                if not packet["raddr_ip"] in known_raddr:
+                if packet["raddr_ip"] not in known_raddr:
                     # new connection, log and check during polling
                     pcap_dict[str(packet["raddr_ip"])] = packet
             while not q_error.empty():
@@ -266,7 +265,7 @@ def loop():
         connections = poll(snitch, connections, pcap_dict)
         time.sleep(polling_interval)
         new_size = sys.getsizeof(pickle.dumps(snitch))
-        if new_size > sizeof_snitch or time.time() - last_write > 300:
+        if new_size != sizeof_snitch or time.time() - last_write > 300:
             sizeof_snitch = new_size
             last_write = time.time()
             write(snitch)
@@ -283,15 +282,11 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
         if ipaddress.ip_address(src).is_private:
             output["direction"] = "outgoing"
             output["laddr_ip"], output["raddr_ip"] = src, dst
-            # if hasattr(packet, "sport"):
-            #     output["laddr_port"] = packet.sport
             if hasattr(packet, "dport"):
                 output["raddr_port"] = packet.dport
         elif ipaddress.ip_address(dst).is_private:
             output["direction"] = "incoming"
             output["laddr_ip"], output["raddr_ip"] = dst, src
-            # if hasattr(packet, "dport"):
-            #     output["laddr_port"] = packet.dport
             if hasattr(packet, "sport"):
                 output["raddr_port"] = packet.sport
         return output
