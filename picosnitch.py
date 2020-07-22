@@ -113,13 +113,9 @@ def get_common_pattern(a: str, l: list, cutoff: float) -> None:
     b = difflib.get_close_matches(a, l, n=1, cutoff=cutoff)
     if b:
         common_pattern = ""
-        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a.lower(), b[0].lower()).get_opcodes():
-            if tag == "equal":
-                common_pattern += a[i1:i2]
-            elif tag == "replace":
-                common_pattern += "*" * (j2 - j1)
-            elif tag == "insert":
-                common_pattern += "*" * (j2 - j1)
+        for match in difflib.SequenceMatcher(None, a.lower(), b[0].lower(), False).get_matching_blocks():
+            common_pattern += "*" * (match.a - len(common_pattern))
+            common_pattern += a[match.a:match.a+match.size]
         l[l.index(b[0])] = common_pattern
     else:
         l.append(a)
