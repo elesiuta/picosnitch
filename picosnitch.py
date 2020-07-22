@@ -117,7 +117,7 @@ def get_common_pattern(a: str, l: list, cutoff: float) -> None:
             if tag == "equal":
                 common_pattern += a[i1:i2]
             elif tag == "replace":
-                common_pattern += "*" * (i2 - i1)
+                common_pattern += "*" * (j2 - j1)
             elif tag == "insert":
                 common_pattern += "*" * (j2 - j1)
         l[l.index(b[0])] = common_pattern
