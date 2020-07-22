@@ -17,6 +17,7 @@
 
 # https://github.com/elesiuta/picosnitch
 
+import difflib
 import ipaddress
 import json
 import multiprocessing
@@ -107,6 +108,23 @@ def reverse_domain_name(dns: str) -> str:
         return ".".join(reversed(dns.split(".")))
 
 
+def get_common_pattern(a: str, l: list, cutoff: float) -> None:
+    """if there is a close match to a in l replace it with a common pattern, otherwise append a to the list"""
+    b = difflib.get_close_matches(a, l, n=1, cutoff=cutoff)
+    if b:
+        common_pattern = ""
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b[0]).get_opcodes():
+            if tag == "equal":
+                common_pattern += a[i1:i2]
+            elif tag == "replace":
+                common_pattern += "*" * (i2 - i1)
+            elif tag == "insert":
+                common_pattern += "*" * (j2 - j1)
+        l[l.index(b[0])] = common_pattern
+    else:
+        l.append(a)
+
+
 def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
     """poll processes and connections using psutil, and queued pcap if available, then run update_snitch_*"""
     ctime = time.ctime()
@@ -169,7 +187,7 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
         if proc["name"] not in entry["name"]:
             entry["name"] += " alternative=" + proc["name"]
         if str(proc["cmdline"]) not in entry["cmdlines"]:
-            entry["cmdlines"].append(str(proc["cmdline"]))
+            get_common_pattern(str(proc["cmdline"]), entry["cmdlines"], 0.8)
         if conn.raddr.port not in entry["ports"]:
             entry["ports"].append(conn.raddr.port)
             entry["ports"].sort()
@@ -197,7 +215,7 @@ def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
             snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, pcap["summary"]]
             toast("polling missed process for connection to: " + reverse_domain_name(reversed_dns))
         elif pcap["summary"] not in snitch["Remote Addresses"][reversed_dns]:
-            snitch["Remote Addresses"][reversed_dns].append(pcap["summary"])
+            get_common_pattern(pcap["summary"], snitch["Remote Addresses"][reversed_dns], 0.95)
 
 
 def loop():
