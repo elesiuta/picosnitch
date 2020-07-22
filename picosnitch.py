@@ -109,11 +109,11 @@ def reverse_domain_name(dns: str) -> str:
 
 
 def get_common_pattern(a: str, l: list, cutoff: float) -> None:
-    """if there is a close match to a in l replace it with a common pattern, otherwise append a to the list"""
+    """if there is a close match to a in l, replace it with a common pattern, otherwise append a to l"""
     b = difflib.get_close_matches(a, l, n=1, cutoff=cutoff)
     if b:
         common_pattern = ""
-        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b[0]).get_opcodes():
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a.lower(), b[0].lower()).get_opcodes():
             if tag == "equal":
                 common_pattern += a[i1:i2]
             elif tag == "replace":
