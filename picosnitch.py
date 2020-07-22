@@ -90,6 +90,23 @@ def toast(msg: str, file=sys.stdout) -> None:
         print("picosnitch (toast failed):" + msg, file=file)
 
 
+def reverse_dns_lookup(ip: str) -> str:
+    """do a reverse dns lookup, return original ip if fails"""
+    try:
+        return socket.getnameinfo((ip, 0), 0)[0]
+    except Exception:
+        return ip
+
+
+def reverse_domain_name(dns: str) -> str:
+    """reverse domain name, don't reverse if ip"""
+    try:
+        _ = ipaddress.ip_address(dns)
+        return dns
+    except ValueError:
+        return ".".join(reversed(dns.split(".")))
+
+
 def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
     """poll processes and connections using psutil, and queued pcap if available, then run update_snitch_*"""
     ctime = time.ctime()
@@ -122,7 +139,7 @@ def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
 def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime: str) -> None:
     """update the snitch with polled data from psutil and create a notification if new"""
     # Get DNS reverse name and reverse the name for sorting
-    reversed_dns = ".".join(reversed(socket.getnameinfo((conn.raddr.ip, 0), 0)[0].split(".")))
+    reversed_dns = reverse_domain_name(reverse_dns_lookup(conn.raddr.ip))
     # Update Latest Entries
     if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
         snitch["Latest Entries"].append(ctime + " " + proc["name"] + " - " + proc["exe"])
@@ -174,11 +191,11 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
 def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
     """update the snitch with queued data from Scapy and create a notification if new"""
     # Get DNS reverse name and reverse the name for sorting
-    reversed_dns = ".".join(reversed(socket.getnameinfo((pcap["raddr_ip"], 0), 0)[0].split(".")))
+    reversed_dns = reversed_dns = reverse_domain_name(reverse_dns_lookup(pcap["raddr_ip"]))
     if pcap["laddr_port"] not in snitch["Config"]["Remote address unlog"]:
         if reversed_dns not in snitch["Remote Addresses"]:
             snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, pcap["summary"]]
-            toast("polling missed process for connection to: " + ".".join(reversed(reversed_dns.split("."))))
+            toast("polling missed process for connection to: " + reverse_domain_name(reversed_dns))
         elif pcap["summary"] not in snitch["Remote Addresses"][reversed_dns]:
             snitch["Remote Addresses"][reversed_dns].append(pcap["summary"])
 
@@ -241,7 +258,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
     """init sniffing subprocess and monitor with root (before dropping root privileges)"""
     def parse_packet(packet) -> dict:
         """create a dict from the packet"""
-        output = {"summary": packet.summary(), "laddr_port": None}
+        output = {"summary": packet.summary(), "laddr_port": None, "raddr_port": None}
         # output["packet"] = str(packet.show(dump=True))
         src = packet.getlayer(scapy.layers.all.IP).src
         dst = packet.getlayer(scapy.layers.all.IP).dst
@@ -250,11 +267,15 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
             output["laddr_ip"], output["raddr_ip"] = src, dst
             if hasattr(packet, "sport"):
                 output["laddr_port"] = packet.sport
+            if hasattr(packet, "dport"):
+                output["raddr_port"] = packet.dport
         elif ipaddress.ip_address(dst).is_private:
             output["direction"] = "incoming"
             output["laddr_ip"], output["raddr_ip"] = dst, src
             if hasattr(packet, "dport"):
                 output["laddr_port"] = packet.dport
+            if hasattr(packet, "sport"):
+                output["raddr_port"] = packet.sport
         return output
 
     def filter_packet(packet) -> bool:
