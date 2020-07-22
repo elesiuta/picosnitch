@@ -19,7 +19,7 @@
   - you should be able to just install scapy or python3-scapy using your distribution's package manager
   - [https://scapy.readthedocs.io/en/latest/installation.html](https://scapy.readthedocs.io/en/latest/installation.html)
 - run daemon with  
-`picosnitch`
+`python3 -m picosnitch`
 - or run daemon as root to use Scapy  
 `sudo -E python3 -m picosnitch`
 ## windows
