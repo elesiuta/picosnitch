@@ -182,7 +182,7 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
     # Update Remote Addresses
     if reversed_dns in snitch["Remote Addresses"]:
         if proc["exe"] not in snitch["Remote Addresses"][reversed_dns]:
-            snitch["Remote Addresses"][reversed_dns].append(proc["exe"])
+            snitch["Remote Addresses"][reversed_dns].insert(1, proc["exe"])
     else:
         if conn.raddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
             snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, proc["exe"]]
