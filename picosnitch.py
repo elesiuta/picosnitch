@@ -264,7 +264,7 @@ def loop():
         # poll connections and processes with psutil
         connections = poll(snitch, connections, pcap_dict)
         time.sleep(polling_interval)
-        if time.time() - last_write > 5:
+        if time.time() - last_write > 10:
             new_size = sys.getsizeof(pickle.dumps(snitch))
             if new_size != sizeof_snitch or time.time() - last_write > 300:
                 sizeof_snitch = new_size
