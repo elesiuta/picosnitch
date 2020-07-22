@@ -88,7 +88,7 @@ def toast(msg: str, file=sys.stdout) -> None:
     try:
         plyer.notification.notify(title="picosnitch", message=msg, app_name="picosnitch")
     except Exception:
-        print("picosnitch (toast failed):" + msg, file=file)
+        print("picosnitch (toast failed): " + msg, file=file)
 
 
 def reverse_dns_lookup(ip: str) -> str:
@@ -147,7 +147,7 @@ def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
                 error += "{process no longer exists}"
             error += type(e).__name__ + str(e.args)
             snitch["Errors"].append(ctime + " " + error)
-            toast("picosnitch polling error: " + error, file=sys.stderr)
+            toast("Polling error: " + error, file=sys.stderr)
     # check any connection still in the pcap that wasn't already identified
     for pcap in pcap_dict.values():
         update_snitch_pcap(snitch, pcap, ctime)
@@ -213,7 +213,7 @@ def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
     if pcap["raddr_port"] not in snitch["Config"]["Remote address unlog"]:
         if reversed_dns not in snitch["Remote Addresses"]:
             snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, pcap["summary"]]
-            toast("polling missed process for connection to: " + reverse_domain_name(reversed_dns))
+            toast("New address: " + reverse_domain_name(reversed_dns))
         elif pcap["summary"] not in snitch["Remote Addresses"][reversed_dns]:
             get_common_pattern(pcap["summary"], snitch["Remote Addresses"][reversed_dns], 0.95)
 
@@ -255,7 +255,7 @@ def loop():
                 # log sniffer errors
                 error = q_error.get()
                 snitch["Errors"].append(time.ctime() + " " + error)
-                toast("picosnitch " + error, file=sys.stderr)
+                toast("Sniffer error: " + error, file=sys.stderr)
             if not p_sniff.is_alive():
                 # log sniffer death, stop checking it and try to keep running
                 snitch["Errors"].append(time.ctime() + " picosnitch sniffer process stopped")
