@@ -46,7 +46,7 @@
   "Config": {
     "Enable pcap": false, # bool, use Scapy to sniff traffic
     "Polling interval": 0.2, # float in seconds
-    "Remote address unlog": [80, "firefox"] # list of process names (str) or ports (int)
+    "Remote address unlog": [80, "firefox"] # list of process names (str) or remote ports (int)
     # will omit connections that match any of these from the log of remote addresses to avoid clutter
     # the process and executable will still be logged if it has not been already
   },

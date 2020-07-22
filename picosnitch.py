@@ -117,7 +117,7 @@ def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
         try:
             if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
                 # update snitch (if necessary) with new non-local connection (pop from pcap)
-                _ = pcap_dict.pop(str(conn.laddr.port) + str(conn.raddr.ip), None)
+                _ = pcap_dict.pop(str(conn.raddr.ip), None)
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
                 update_snitch_proc(snitch, proc, conn, ctime)
         except Exception as e:
@@ -159,10 +159,10 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
             "first seen": ctime,
             "last seen": ctime,
             "days seen": 1,
-            "ports": [conn.laddr.port],
+            "ports": [conn.raddr.port],
             "remote addresses": []
         }
-        if conn.laddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
+        if conn.raddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
             snitch["Processes"][proc["exe"]]["remote addresses"].append(reversed_dns)
     else:
         entry = snitch["Processes"][proc["exe"]]
@@ -170,11 +170,11 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
             entry["name"] += " alternative=" + proc["name"]
         if str(proc["cmdline"]) not in entry["cmdlines"]:
             entry["cmdlines"].append(str(proc["cmdline"]))
-        if conn.laddr.port not in entry["ports"]:
-            entry["ports"].append(conn.laddr.port)
+        if conn.raddr.port not in entry["ports"]:
+            entry["ports"].append(conn.raddr.port)
             entry["ports"].sort()
         if reversed_dns not in entry["remote addresses"]:
-            if conn.laddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
+            if conn.raddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
                 entry["remote addresses"].append(reversed_dns)
         if ctime.split()[:3] != entry["last seen"].split()[:3]:
             entry["days seen"] += 1
@@ -184,7 +184,7 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
         if proc["exe"] not in snitch["Remote Addresses"][reversed_dns]:
             snitch["Remote Addresses"][reversed_dns].append(proc["exe"])
     else:
-        if conn.laddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
+        if conn.raddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
             snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, proc["exe"]]
 
 
@@ -192,7 +192,7 @@ def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
     """update the snitch with queued data from Scapy and create a notification if new"""
     # Get DNS reverse name and reverse the name for sorting
     reversed_dns = reversed_dns = reverse_domain_name(reverse_dns_lookup(pcap["raddr_ip"]))
-    if pcap["laddr_port"] not in snitch["Config"]["Remote address unlog"]:
+    if pcap["raddr_port"] not in snitch["Config"]["Remote address unlog"]:
         if reversed_dns not in snitch["Remote Addresses"]:
             snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, pcap["summary"]]
             toast("polling missed process for connection to: " + reverse_domain_name(reversed_dns))
@@ -227,13 +227,13 @@ def loop():
         pcap_dict = {}
         if p_sniff is not None:
             # list of known connections from last poll, l/raddr could be a path if AF_UNIX socket, and raddr could be None
-            known_ports = [conn.laddr.port for conn in connections if hasattr(conn.laddr, "port")]
+            # known_ports = [conn.laddr.port for conn in connections if hasattr(conn.raddr, "port")]
             known_raddr = [conn.raddr.ip for conn in connections if hasattr(conn.raddr, "ip")]
             while not q_packet.empty():
                 packet = q_packet.get()
-                if not (packet["laddr_port"] in known_ports or packet["raddr_ip"] in known_raddr):
+                if not packet["raddr_ip"] in known_raddr:
                     # new connection, log and check during polling
-                    pcap_dict[str(packet["laddr_port"]) + str(packet["raddr_ip"])] = packet
+                    pcap_dict[str(packet["raddr_ip"])] = packet
             while not q_error.empty():
                 # log sniffer errors
                 error = q_error.get()
@@ -265,15 +265,15 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
         if ipaddress.ip_address(src).is_private:
             output["direction"] = "outgoing"
             output["laddr_ip"], output["raddr_ip"] = src, dst
-            if hasattr(packet, "sport"):
-                output["laddr_port"] = packet.sport
+            # if hasattr(packet, "sport"):
+            #     output["laddr_port"] = packet.sport
             if hasattr(packet, "dport"):
                 output["raddr_port"] = packet.dport
         elif ipaddress.ip_address(dst).is_private:
             output["direction"] = "incoming"
             output["laddr_ip"], output["raddr_ip"] = dst, src
-            if hasattr(packet, "dport"):
-                output["laddr_port"] = packet.dport
+            # if hasattr(packet, "dport"):
+            #     output["laddr_port"] = packet.dport
             if hasattr(packet, "sport"):
                 output["raddr_port"] = packet.sport
         return output
