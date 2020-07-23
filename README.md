@@ -55,7 +55,9 @@
   "Names": {}, # Log of processes by name containing respective executable(s)
   "Processes": {}, # Log of processes by executable containing:
   # cmdlines, days seen, first seen, last seen, name, ports, remote addresses
+  # some cmdlines are consolidated using * as a wildcard, ports are remote ports
   "Remote Addresses": {} # Log of remote addresses containing respective executable(s)
   # and packet summaries if pcap is enabled and process was too short lived for detection via polling
+  # some packet summaries are consolidated using * as a wildcard
 }
 ```
