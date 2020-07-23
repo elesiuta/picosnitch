@@ -236,6 +236,9 @@ def loop():
     polling_interval = snitch["Config"]["Polling interval"]
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
+    if snitch["Config"]["Enable pcap"] and p_sniff is None:
+        snitch["Errors"].append(time.ctime() + " Sniffer init failed, __name__ != __main__, try: python -m picosnitch")
+        toast("Sniffer init failed, try: python -m picosnitch", file=sys.stderr)
     while True:
         # check sniffer status and for any connections that were missed during the last poll
         pcap_dict = {}
@@ -294,7 +297,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
             src = ipaddress.ip_address(packet.getlayer(scapy.layers.all.IP).src)
             dst = ipaddress.ip_address(packet.getlayer(scapy.layers.all.IP).dst)
             return src.is_private != dst.is_private
-        except:
+        except Exception:
             return False
 
     def sniffer(q_packet, q_error):
@@ -342,6 +345,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
         p_sniff = multiprocessing.Process(name="pico-sniffermon", target=sniffer_mon, args=(q_packet, q_error, q_term))
         p_sniff.start()
         return p_sniff, q_packet, q_error, q_term
+    return None, None, None, None
 
 
 def main():
