@@ -231,14 +231,17 @@ def loop():
     # set signal handlers
     signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_sniff, q_term))
     signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_sniff, q_term))
+    # sniffer init checks
+    if snitch["Config"]["Enable pcap"] and p_sniff is None:
+        snitch["Errors"].append(time.ctime() + " Sniffer init failed, __name__ != __main__, try: python -m picosnitch")
+        toast("Sniffer init failed, try: python -m picosnitch", file=sys.stderr)
+    if not snitch["Config"]["Enable pcap"] and os.getenv("SUDO_USER") is not None:
+        toast("Sniffer is disabled, root is not necessary, did you intend to enable it?", file=sys.stderr)
     # init variables for loop
     connections = set()
     polling_interval = snitch["Config"]["Polling interval"]
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
-    if snitch["Config"]["Enable pcap"] and p_sniff is None:
-        snitch["Errors"].append(time.ctime() + " Sniffer init failed, __name__ != __main__, try: python -m picosnitch")
-        toast("Sniffer init failed, try: python -m picosnitch", file=sys.stderr)
     while True:
         # check sniffer status and for any connections that were missed during the last poll
         pcap_dict = {}
@@ -254,7 +257,7 @@ def loop():
                 # log sniffer errors
                 error = q_error.get()
                 snitch["Errors"].append(time.ctime() + " " + error)
-                toast("Sniffer error: " + error, file=sys.stderr)
+                toast(error, file=sys.stderr)
             if not p_sniff.is_alive():
                 # log sniffer death, stop checking it and try to keep running
                 snitch["Errors"].append(time.ctime() + " picosnitch sniffer process stopped")
@@ -303,17 +306,21 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
     def sniffer(q_packet, q_error):
         """always running packet sniffer that queues parsed packets after filtering"""
         global scapy
-        import scapy
-        from scapy.all import sniff
+        try:
+            import scapy
+            from scapy.all import sniff
+        except Exception as e:
+            q_error.put("Sniffer " + type(e).__name__ + str(e.args))
+            return 1
         error_counter = 0
         while True:
             try:
                 sniff(count=0, prn=lambda x: q_packet.put(parse_packet(x)), lfilter=filter_packet)
             except PermissionError:
-                q_error.put("sniffer permission error, it needs to run with sudo -E")
+                q_error.put("Sniffer permission error, it needs to run with sudo -E")
                 break
             except Exception as e:
-                q_error.put("sniffer exception: " + type(e).__name__ + str(e.args))
+                q_error.put("Sniffer exception: " + type(e).__name__ + str(e.args))
                 error_counter += 1
                 if error_counter >= 42:
                     break
