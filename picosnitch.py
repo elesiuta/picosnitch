@@ -346,6 +346,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
         return 0
 
     if __name__ == "__main__":
+        multiprocessing.set_start_method("spawn")
         q_packet = multiprocessing.Queue()
         q_error = multiprocessing.Queue()
         q_term = multiprocessing.Queue()
