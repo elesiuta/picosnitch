@@ -333,13 +333,14 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
         p_sniff = multiprocessing.Process(name="pico-sniffer", target=sniffer, args=(q_packet, q_error), daemon=True)
         p_sniff.start()
         while True:
+            if p_sniff.is_alive() and psutil.Process(p_sniff.pid).memory_info().vms > 256000000:
+                q_error.put("Sniffer memory usage exceeded 256 MB, restarting sniffer")
+                terminate_sniffer(p_sniff)
+                p_sniff = multiprocessing.Process(name="pico-sniffer", target=sniffer, args=(q_packet, q_error), daemon=True)
+                p_sniff.start()
             try:
                 if q_term.get(block=True, timeout=10):
                     break
-                if psutil.Process(p_sniff.pid).memory_info().vms > 256000000:
-                    terminate_sniffer(p_sniff)
-                    p_sniff = multiprocessing.Process(name="pico-sniffer", target=sniffer, args=(q_packet, q_error), daemon=True)
-                    p_sniff.start()
             except queue.Empty:
                 if not multiprocessing.parent_process().is_alive() or not p_sniff.is_alive():
                     break
@@ -348,9 +349,7 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
 
     if __name__ == "__main__":
         multiprocessing.set_start_method("spawn")
-        q_packet = multiprocessing.Queue()
-        q_error = multiprocessing.Queue()
-        q_term = multiprocessing.Queue()
+        q_packet, q_error, q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
         p_sniff = multiprocessing.Process(name="pico-sniffermon", target=sniffer_mon, args=(q_packet, q_error, q_term))
         p_sniff.start()
         return p_sniff, q_packet, q_error, q_term
