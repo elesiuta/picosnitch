@@ -315,34 +315,35 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
         error_counter = 0
         while True:
             try:
-                sniff(count=0, prn=lambda x: q_packet.put(parse_packet(x)), lfilter=filter_packet)
+                sniff(count=0, store=False, prn=lambda x: q_packet.put(parse_packet(x)), lfilter=filter_packet)
             except PermissionError:
                 q_error.put("Sniffer permission error, it needs to run with sudo -E")
                 break
             except Exception as e:
                 q_error.put("Sniffer exception: " + type(e).__name__ + str(e.args))
                 error_counter += 1
-                if error_counter >= 42:
+                if error_counter >= 5:
                     break
 
     def sniffer_mon(q_packet, q_error, q_term):
         """monitor the sniffer and parent process, has same privileges as the sniffer for clean termination at the command or death of the parent"""
-        import queue
+        import queue, psutil
         signal.signal(signal.SIGINT, lambda *args: None)
+        terminate_sniffer = lambda p_sniff: p_sniff.terminate() or p_sniff.join(1) or (p_sniff.is_alive() and p_sniff.kill()) or p_sniff.close()
         p_sniff = multiprocessing.Process(name="pico-sniffer", target=sniffer, args=(q_packet, q_error), daemon=True)
         p_sniff.start()
         while True:
             try:
-                if q_term.get(block=True, timeout=5):
+                if q_term.get(block=True, timeout=10):
                     break
+                if psutil.Process(p_sniff.pid).memory_info().vms > 256000000:
+                    terminate_sniffer(p_sniff)
+                    p_sniff = multiprocessing.Process(name="pico-sniffer", target=sniffer, args=(q_packet, q_error), daemon=True)
+                    p_sniff.start()
             except queue.Empty:
                 if not multiprocessing.parent_process().is_alive() or not p_sniff.is_alive():
                     break
-        p_sniff.terminate()
-        p_sniff.join(1)
-        if p_sniff.is_alive():
-            p_sniff.kill()
-        p_sniff.close()
+        terminate_sniffer(p_sniff)
         return 0
 
     if __name__ == "__main__":
