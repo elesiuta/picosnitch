@@ -348,7 +348,6 @@ def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, 
         return 0
 
     if __name__ == "__main__":
-        multiprocessing.set_start_method("spawn")
         q_packet, q_error, q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
         p_sniff = multiprocessing.Process(name="pico-sniffermon", target=sniffer_mon, args=(q_packet, q_error, q_term))
         p_sniff.start()
