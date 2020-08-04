@@ -33,7 +33,7 @@ import typing
 def read() -> dict:
     """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
-        "Config": {"Enable pcap": False, "Polling interval": 0.2, "Remote address unlog": ["firefox"]},
+        "Config": {"Enable pcap": True, "Polling interval": 0.2, "Remote address unlog": ["firefox"]},
         "Errors": [],
         "Latest Entries": [],
         "Names": {},
@@ -217,7 +217,7 @@ def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
             toast("New address: " + reverse_domain_name(reversed_dns) + " (polling missed process)")
         elif pcap["summary"] not in snitch["Remote Addresses"][reversed_dns]:
             get_common_pattern(pcap["summary"], snitch["Remote Addresses"][reversed_dns], 0.8)
-            snitch["Remote Addresses"][reversed_dns][2:] = snitch["Remote Addresses"][reversed_dns][2:].sort()
+            snitch["Remote Addresses"][reversed_dns][2:] = sorted(snitch["Remote Addresses"][reversed_dns][2:])
 
 
 def loop():
