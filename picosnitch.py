@@ -117,6 +117,8 @@ def get_common_pattern(a: str, l: list, cutoff: float) -> None:
             common_pattern += "*" * (match.a - len(common_pattern))
             common_pattern += a[match.a:match.a+match.size]
         l[l.index(b[0])] = common_pattern
+        while l.count(common_pattern) > 1:
+            l.remove(common_pattern)
     else:
         l.append(a)
 
@@ -184,6 +186,7 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
             entry["name"] += " alternative=" + proc["name"]
         if str(proc["cmdline"]) not in entry["cmdlines"]:
             get_common_pattern(str(proc["cmdline"]), entry["cmdlines"], 0.8)
+            entry["cmdlines"].sort()
         if conn.raddr.port not in entry["ports"]:
             entry["ports"].append(conn.raddr.port)
             entry["ports"].sort()
@@ -214,6 +217,7 @@ def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
             toast("New address: " + reverse_domain_name(reversed_dns) + " (polling missed process)")
         elif pcap["summary"] not in snitch["Remote Addresses"][reversed_dns]:
             get_common_pattern(pcap["summary"], snitch["Remote Addresses"][reversed_dns], 0.8)
+            snitch["Remote Addresses"][reversed_dns].sort()
 
 
 def loop():
