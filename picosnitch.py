@@ -217,7 +217,7 @@ def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
             toast("New address: " + reverse_domain_name(reversed_dns) + " (polling missed process)")
         elif pcap["summary"] not in snitch["Remote Addresses"][reversed_dns]:
             get_common_pattern(pcap["summary"], snitch["Remote Addresses"][reversed_dns], 0.8)
-            snitch["Remote Addresses"][reversed_dns].sort()
+            snitch["Remote Addresses"][reversed_dns][2:] = snitch["Remote Addresses"][reversed_dns][2:].sort()
 
 
 def loop():
