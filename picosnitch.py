@@ -197,6 +197,8 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
     if reversed_dns in snitch["Remote Addresses"]:
         if proc["exe"] not in snitch["Remote Addresses"][reversed_dns]:
             snitch["Remote Addresses"][reversed_dns].insert(1, proc["exe"])
+            if "No processes found during polling" in snitch["Remote Addresses"][reversed_dns]:
+                snitch["Remote Addresses"][reversed_dns].remove("No processes found during polling")
     else:
         if conn.raddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
             snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, proc["exe"]]
@@ -208,10 +210,10 @@ def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
     reversed_dns = reversed_dns = reverse_domain_name(reverse_dns_lookup(pcap["raddr_ip"]))
     if pcap["raddr_port"] not in snitch["Config"]["Remote address unlog"]:
         if reversed_dns not in snitch["Remote Addresses"]:
-            snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, pcap["summary"]]
+            snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, "No processes found during polling", pcap["summary"]]
             toast("New address: " + reverse_domain_name(reversed_dns) + " (polling missed process)")
         elif pcap["summary"] not in snitch["Remote Addresses"][reversed_dns]:
-            get_common_pattern(pcap["summary"], snitch["Remote Addresses"][reversed_dns], 0.95)
+            get_common_pattern(pcap["summary"], snitch["Remote Addresses"][reversed_dns], 0.8)
 
 
 def loop():
