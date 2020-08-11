@@ -10,14 +10,16 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/elesiuta/picosnitch",
-    py_modules=["picosnitch"],
-    entry_points={"console_scripts": ["picosnitch = picosnitch:main"]},
-    install_requires=["filelock", "plyer", "psutil", "python-daemon"],
+    py_modules=["picosnitch", "processsnitch"],
+    entry_points={"console_scripts": ["picosnitch = picosnitch:main", "processsnitch = processsnitch:main"]},
+    install_requires=["filelock", "plyer", "psutil", "python-daemon", "vt-py"],
     extras_require={"pcap": ["scapy"]},
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
         "Operating System :: OS Independent",
         "Topic :: System :: Networking :: Monitoring",
+        "Topic :: System :: Monitoring",
+        "Topic :: Security"
     ],
 )

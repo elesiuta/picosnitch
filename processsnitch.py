@@ -35,7 +35,7 @@ try:
     import filelock
     import plyer
     import psutil
-    # import vt
+    import vt
 except Exception as e:
     print(type(e).__name__ + str(e.args))
     print("Make sure dependency is installed, or environment is preserved if running with sudo")
@@ -44,7 +44,7 @@ except Exception as e:
 def read() -> dict:
     """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
-        "Config": {"Execsnoop cmd": "execsnoop-bpfcc", "VT API key": "", "VT file upload": True},
+        "Config": {"execsnoop cmd": ["execsnoop-bpfcc"], "VT API key": "", "VT file upload": False, "VT last request": 0, "VT limit request": 15},
         "Errors": [],
         "Latest Entries": [],
         "Names": {},
@@ -122,9 +122,25 @@ def get_sha256(exe: str) -> str:
     return sha256.hexdigest()
 
 
-def get_vt_results(sha256: str, proc: dict, upload: bool) -> str:
+def get_vt_results(sha256: str, proc: dict, config: dict) -> str:
     """get virustotal results of process executable and toast negative results"""
-    return ""
+    if config["VT API key"]:
+        client = vt.Client(config["VT API key"])
+        time.sleep(max(0, config["VT last request"] + config["VT limit request"] - time.time()))
+        config["VT last request"] = time.time()
+        try:
+            analysis = client.get_object("/files/" + sha256)
+        except Exception:
+            if config["VT file upload"]:
+                toast("Uploading " + proc["name"] + " for analysis")
+                with open(proc["exe"], "rb") as f:
+                    analysis = client.scan_file(f, wait_for_completion=True)
+            else:
+                return "File not analyzed (analysis not found)"
+        if analysis.last_analysis_stats["malicious"] != 0 or analysis.last_analysis_stats["suspicious"] != 0:
+            toast("Suspicious results for " + proc["name"])
+        return str(analysis.last_analysis_stats)
+    return "File not analyzed (no api key)"
 
 
 def process_queue(snitch: dict, new_processes: list) -> None:
@@ -160,7 +176,7 @@ def update_snitch(snitch: dict, proc: dict, sha256: str, ctime: str) -> None:
             "first seen": ctime,
             "last seen": ctime,
             "days seen": 1,
-            "results": {sha256: get_vt_results(sha256, proc, snitch["Config"]["VT file upload"])}
+            "results": {sha256: get_vt_results(sha256, proc, snitch["Config"])}
         }
     else:
         entry = snitch["Processes"][proc["exe"]]
@@ -170,20 +186,23 @@ def update_snitch(snitch: dict, proc: dict, sha256: str, ctime: str) -> None:
             get_common_pattern(str(proc["cmdline"]), entry["cmdlines"], 0.8)
             entry["cmdlines"].sort()
         if sha256 not in entry["results"]:
-            entry["results"][sha256] = get_vt_results(sha256, proc, snitch["Config"]["VT file upload"])
+            entry["results"][sha256] = get_vt_results(sha256, proc, snitch["Config"])
         if ctime.split()[:3] != entry["last seen"].split()[:3]:
             entry["days seen"] += 1
         entry["last seen"] = ctime
 
 
-def loop():
+def loop(vt_api_key: str = ""):
     """main loop"""
     # acquire lock (since the prior one would be released by starting the daemon)
     lock = filelock.FileLock(os.path.join(os.path.expanduser("~"), ".processsnitch_lock"), timeout=1)
     lock.acquire()
-    # read config and init sniffer if enabled
+    # read config
     snitch = read()
-    p_snitch, q_process, q_error, q_term = init_process_monitor()
+    if vt_api_key:
+        snitch["Config"]["VT API key"] = vt_api_key
+    # init process monitor
+    p_snitch, q_process, q_error, q_term = init_process_monitor(snitch["Config"])
     drop_root_privileges()
     # set signal handlers
     signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_snitch, q_term))
@@ -222,9 +241,9 @@ def loop():
                 write(snitch)
 
 
-def init_process_monitor() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
+def init_process_monitor(config: dict) -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
     """init process monitor with root before dropping root privileges"""
-    def process_monitor_linux(q_process, q_error, q_term_monitor):
+    def process_monitor_linux(config, q_process, q_error, q_term_monitor):
         """runs another program to monitor the system for new processes and puts them in the queue"""
         # using: https://github.com/iovisor/bcc/blob/master/tools/execsnoop.py
         # alternative: https://github.com/ColinIanKing/forkstat
@@ -233,7 +252,7 @@ def init_process_monitor() -> typing.Tuple[multiprocessing.Process, multiprocess
             for proc in psutil.process_iter(attrs=["name", "exe", "cmdline"], ad_value=""):
                 if os.path.isfile(proc.info["exe"]):
                     q_process.put(pickle.dumps(proc.info))
-            process_monitor = subprocess.Popen(["execsnoop-bpfcc"], stdout=subprocess.PIPE, universal_newlines=True)
+            process_monitor = subprocess.Popen(config["execsnoop cmd"], stdout=subprocess.PIPE, universal_newlines=True)
             while process_monitor.poll() is None:
                 try:
                     proc = process_monitor.stdout.readline()
@@ -254,7 +273,7 @@ def init_process_monitor() -> typing.Tuple[multiprocessing.Process, multiprocess
             q_error.put("Process monitor permission error, requires root")
         return 1
 
-    def process_monitor_windows(q_process, q_error, q_term_monitor):
+    def process_monitor_windows(config, q_process, q_error, q_term_monitor):
         """runs another program to trace new processes and puts them in the queue"""
         # poll psutil since I don't know an easy way to reliably trace windows process creation events yet
         current_procs = []
@@ -287,7 +306,7 @@ def init_process_monitor() -> typing.Tuple[multiprocessing.Process, multiprocess
                     return 0
         return 1
 
-    def process_mon_master(q_process, q_error, q_term):
+    def process_mon_master(config, q_process, q_error, q_term):
         """monitor the process monitor and parent process, has same privileges as the sniffer for clean termination at the command or death of the parent"""
         signal.signal(signal.SIGINT, lambda *args: None)
         if sys.platform.startswith("linux"):
@@ -299,13 +318,13 @@ def init_process_monitor() -> typing.Tuple[multiprocessing.Process, multiprocess
             return 1
         q_term_monitor = multiprocessing.Queue()
         terminate_monitor = lambda p_monitor: q_term_monitor.put("TERMINATE") or p_monitor.join(2) or (p_monitor.is_alive() and p_monitor.kill()) or p_monitor.close()
-        p_monitor = multiprocessing.Process(name="processsnitchmon", target=process_monitor, args=(q_process, q_error, q_term_monitor), daemon=True)
+        p_monitor = multiprocessing.Process(name="processsnitchmon", target=process_monitor, args=(config, q_process, q_error, q_term_monitor), daemon=True)
         p_monitor.start()
         while True:
             if p_monitor.is_alive() and psutil.Process(p_monitor.pid).memory_info().vms > 256000000:
                 q_error.put("Process monitor memory usage exceeded 256 MB, restarting monitor")
                 terminate_monitor(p_monitor)
-                p_monitor = multiprocessing.Process(name="processsnitchmon", target=process_monitor, args=(q_process, q_error, q_term_monitor), daemon=True)
+                p_monitor = multiprocessing.Process(name="processsnitchmon", target=process_monitor, args=(config, q_process, q_error, q_term_monitor), daemon=True)
                 p_monitor.start()
             try:
                 if q_term.get(block=True, timeout=10):
@@ -318,7 +337,7 @@ def init_process_monitor() -> typing.Tuple[multiprocessing.Process, multiprocess
 
     if __name__ == "__main__":
         q_process, q_error, q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-        p_snitch = multiprocessing.Process(name="processsnitchmonmaster", target=process_mon_master, args=(q_process, q_error, q_term))
+        p_snitch = multiprocessing.Process(name="processsnitchmonmaster", target=process_mon_master, args=(config, q_process, q_error, q_term))
         p_snitch.start()
         return p_snitch, q_process, q_error, q_term
     return None, None, None, None
@@ -334,7 +353,9 @@ def main():
         print("Error: another instance of this application is currently running", file=sys.stderr)
         sys.exit(1)
     try:
-        _ = read()
+        tmp_snitch = read()
+        if not tmp_snitch["Config"]["VT API key"]:
+            tmp_snitch["Config"]["VT API key"] = input("Enter your VirusTotal API key\n>>> ")
     except Exception as e:
         print(type(e).__name__ + str(e.args))
         sys.exit(1)
@@ -345,9 +366,9 @@ def main():
             print("Warning: processsnitch was run as root without preserving environment", file=sys.stderr)
         import daemon
         with daemon.DaemonContext():
-            loop()
+            loop(tmp_snitch["Config"]["VT API key"])
     else:
-        loop()
+        loop(tmp_snitch["Config"]["VT API key"])
 
 
 if __name__ == "__main__":
