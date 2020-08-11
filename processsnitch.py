@@ -19,11 +19,14 @@
 
 import difflib
 import json
+import hashlib
 import multiprocessing
 import os
 import pickle
 import queue
+import shlex
 import signal
+import subprocess
 import sys
 import time
 import typing
@@ -31,14 +34,16 @@ import typing
 import filelock
 import plyer
 import psutil
-import vt-py
+# import vt
 
 
 def read() -> dict:
     """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
-        "Config": {"API key": ""},
+        "Config": {"VT API key": "", "VT file upload": True},
         "Errors": [],
+        "Latest Entries": [],
+        "Names": {},
         "Processes": {}
     }
     if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
@@ -74,7 +79,7 @@ def drop_root_privileges() -> None:
         os.setuid(int(os.getenv("SUDO_UID")))
 
 
-def terminate(snitch: dict, p_snitch: multiprocessing.Process = None, q_term: multiprocessing.Queue = None):
+def terminate(snitch: dict, p_snitch: multiprocessing.Process = None, q_term: multiprocessing.Queue = None) -> None:
     """write snitch one last time, then terminate processsnitch and subprocesses if running"""
     write(snitch)
     if q_term is not None:
@@ -107,42 +112,37 @@ def get_common_pattern(a: str, l: list, cutoff: float) -> None:
         l.append(a)
 
 
-def process_queue(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
+def get_sha256(exe: str) -> str:
+    with open(exe, "rb") as f:
+        sha256 = hashlib.sha256(f.read())
+    return sha256.hexdigest()
+
+
+def get_vt_results(sha256: str, proc: dict, upload: bool) -> str:
+    # toast negative results
+    return ""
+
+
+def process_queue(snitch: dict, new_processes: list) -> None:
     """poll processes and connections using psutil, and queued pcap if available, then run update_snitch_*"""
     ctime = time.ctime()
-    proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
-    current_connections = set(psutil.net_connections(kind="all"))
-    # check processes for all new connections
-    for conn in current_connections - last_connections:
+    # proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
+    for proc in new_processes:
         try:
-            if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
-                # update snitch (if necessary) with new non-local connection (pop from pcap)
-                _ = pcap_dict.pop(str(conn.raddr.ip), None)
-                proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
-                update_snitch_proc(snitch, proc, conn, ctime)
+            sha256 = get_sha256(proc["exe"])
+            update_snitch(snitch, proc, sha256, ctime)
         except Exception as e:
             # too late to grab process info (most likely) or some other error
-            error = str(conn)
-            if conn.pid == proc["pid"]:
-                error += str(proc)
-            else:
-                error += "{process no longer exists}"
-            error += type(e).__name__ + str(e.args)
+            error = type(e).__name__ + str(e.args) + str(proc)
             snitch["Errors"].append(ctime + " " + error)
-            toast("Polling error: " + error, file=sys.stderr)
-    # check any connection still in the pcap that wasn't already identified
-    for pcap in pcap_dict.values():
-        update_snitch_pcap(snitch, pcap, ctime)
-    return current_connections
+            toast("Processsnitch error: " + error, file=sys.stderr)
 
 
-def update_snitch(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime: str) -> None:
+def update_snitch(snitch: dict, proc: dict, sha256: str, ctime: str) -> None:
     """update the snitch with new processes and create a notification if negative vt results"""
-    # Get DNS reverse name and reverse the name for sorting
-    reversed_dns = reverse_domain_name(reverse_dns_lookup(conn.raddr.ip))
     # Update Latest Entries
     if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
-        snitch["Latest Entries"].append(ctime + " " + proc["name"] + " - " + proc["exe"])
+        snitch["Latest Entries"].append(ctime + " " + proc["name"] + ": " + proc["exe"])
     # Update Names
     if proc["name"] in snitch["Names"]:
         if proc["exe"] not in snitch["Names"][proc["name"]]:
@@ -150,7 +150,6 @@ def update_snitch(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime: str)
             toast("New executable detected for " + proc["name"] + ": " + proc["exe"])
     else:
         snitch["Names"][proc["name"]] = [proc["exe"]]
-        toast("First network connection detected for " + proc["name"])
     # Update Processes
     if proc["exe"] not in snitch["Processes"]:
         snitch["Processes"][proc["exe"]] = {
@@ -159,35 +158,20 @@ def update_snitch(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime: str)
             "first seen": ctime,
             "last seen": ctime,
             "days seen": 1,
-            "results": {'sha256(proc["exe"])': 'vt(sha256, proc["exe"])'}
+            "results": {sha256: get_vt_results(sha256, proc, snitch["Config"]["VT file upload"])}
         }
-        if conn.raddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
-            snitch["Processes"][proc["exe"]]["remote addresses"].append(reversed_dns)
     else:
         entry = snitch["Processes"][proc["exe"]]
-        if proc["name"] not in entry["name"]:
-            entry["name"] += " alternative=" + proc["name"]
+        if proc["name"] != entry["name"]:
+            entry["name"] = proc["name"]
         if str(proc["cmdline"]) not in entry["cmdlines"]:
             get_common_pattern(str(proc["cmdline"]), entry["cmdlines"], 0.8)
             entry["cmdlines"].sort()
-        if conn.raddr.port not in entry["ports"]:
-            entry["ports"].append(conn.raddr.port)
-            entry["ports"].sort()
-        if reversed_dns not in entry["remote addresses"]:
-            if conn.raddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
-                entry["remote addresses"].append(reversed_dns)
+        if sha256 not in entry["results"]:
+            entry["results"][sha256] = get_vt_results(sha256, proc, snitch["Config"]["VT file upload"])
         if ctime.split()[:3] != entry["last seen"].split()[:3]:
             entry["days seen"] += 1
         entry["last seen"] = ctime
-    # Update Remote Addresses
-    if reversed_dns in snitch["Remote Addresses"]:
-        if proc["exe"] not in snitch["Remote Addresses"][reversed_dns]:
-            snitch["Remote Addresses"][reversed_dns].insert(1, proc["exe"])
-            if "No processes found during polling" in snitch["Remote Addresses"][reversed_dns]:
-                snitch["Remote Addresses"][reversed_dns].remove("No processes found during polling")
-    else:
-        if conn.raddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
-            snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, proc["exe"]]
 
 
 def loop():
@@ -197,48 +181,37 @@ def loop():
     lock.acquire()
     # read config and init sniffer if enabled
     snitch = read()
-    p_snitch, q_packet, q_error, q_term = None, None, None, None
-    if snitch["Config"]["Enable pcap"]:
-        p_snitch, q_packet, q_error, q_term = init_pcap()
+    p_snitch, q_process, q_error, q_term = init_process_monitor()
     drop_root_privileges()
     # set signal handlers
     signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_snitch, q_term))
     signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_snitch, q_term))
-    # sniffer init checks
-    if snitch["Config"]["Enable pcap"] and p_snitch is None:
-        snitch["Errors"].append(time.ctime() + " Sniffer init failed, __name__ != __main__, try: python -m picosnitch")
-        toast("Sniffer init failed, try: python -m picosnitch", file=sys.stderr)
-    if not snitch["Config"]["Enable pcap"] and os.getenv("SUDO_USER") is not None:
-        toast("Sniffer is disabled, root is not necessary, did you intend to enable it?", file=sys.stderr)
+    # snitch init checks
+    if p_snitch is None:
+        snitch["Errors"].append(time.ctime() + " Process snitch init failed, __name__ != __main__, try: python -m processsnitch")
+        toast("Process snitch init failed, try: python -m processsnitch", file=sys.stderr)
     # init variables for loop
-    connections = set()
-    polling_interval = snitch["Config"]["Polling interval"]
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
     while True:
-        # check sniffer status and for any connections that were missed during the last poll
-        pcap_dict = {}
-        if p_snitch is not None:
-            # list of known connections from last poll, l/raddr could be a path if AF_UNIX socket, and raddr could be None
-            known_raddr = [conn.raddr.ip for conn in connections if hasattr(conn.raddr, "ip")]
-            while not q_packet.empty():
-                packet = q_packet.get()
-                if packet["raddr_ip"] not in known_raddr:
-                    # new connection, log and check during polling
-                    pcap_dict[str(packet["raddr_ip"])] = packet
-            while not q_error.empty():
-                # log sniffer errors
-                error = q_error.get()
-                snitch["Errors"].append(time.ctime() + " " + error)
-                toast(error, file=sys.stderr)
-            if not p_snitch.is_alive():
-                # log sniffer death, stop checking it and try to keep running
-                snitch["Errors"].append(time.ctime() + " picosnitch sniffer process stopped")
-                toast("picosnitch sniffer process stopped", file=sys.stderr)
-                p_snitch, q_packet, q_error, q_term = None, None, None, None
-        # poll connections and processes with psutil
-        connections = poll(snitch, connections, pcap_dict)
-        time.sleep(polling_interval)
+        # check for process monitor errors
+        while not q_error.empty():
+            error = q_error.get()
+            snitch["Errors"].append(time.ctime() + " " + error)
+            toast(error, file=sys.stderr)
+        # log snitch death, exit processsnitch
+        if not p_snitch.is_alive():
+            snitch["Errors"].append(time.ctime() + " process monitor stopped")
+            toast("process monitor stopped, exited processsnitch", file=sys.stderr)
+            terminate(snitch, p_snitch, q_term)
+        # list of new processes since last poll
+        new_processes = []
+        if q_process.empty():
+            time.sleep(5)
+        while not q_process.empty():
+            new_processes.append(pickle.loads(q_process.get()))
+        process_queue(snitch, new_processes)
+        # write snitch
         if time.time() - last_write > 30:
             new_size = sys.getsizeof(pickle.dumps(snitch))
             if new_size != sizeof_snitch or time.time() - last_write > 600:
@@ -247,43 +220,72 @@ def loop():
                 write(snitch)
 
 
-def init_process_snitch() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
-    """init subprocess monitor with root before dropping root privileges (root may not be necessary)"""
-    def process_snitch(q_process, q_error):
-        """runs another program to trace new processes and puts them in the queue"""
+def init_process_monitor() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
+    """init process monitor with root before dropping root privileges"""
+    def process_monitor_linux(q_process, q_error):
+        """runs another program to monitor the system for new processes and puts them in the queue"""
         # use one of
         # https://github.com/iovisor/bcc/blob/master/tools/execsnoop.py
         # https://github.com/ColinIanKing/forkstat
         # https://github.com/DominicBreuker/pspy
-        # and possibly ProcMon for windows
-        pass
-
-    def snitch_mon(q_process, q_error, q_term):
-        """monitor the process snooper and parent process, has same privileges as the sniffer for clean termination at the command or death of the parent"""
-        signal.signal(signal.SIGINT, lambda *args: None)
-        terminate_snitch = lambda p_snitch: p_snitch.terminate() or p_snitch.join(1) or (p_snitch.is_alive() and p_snitch.kill()) or p_snitch.close()
-        p_snitch = multiprocessing.Process(name="processsnitch", target=process_snitch, args=(q_packet, q_error), daemon=True)
-        p_snitch.start()
+        for proc in psutil.process_iter(attrs=["name", "exe", "cmdline", "pid"], ad_value=""):
+            q_process.put(pickle.dumps(proc.info))
+        process_monitor = subprocess.Popen(["execsnoop-bpfcc"], stdout=subprocess.PIPE, universal_newlines=True)
         while True:
-            if p_snitch.is_alive() and psutil.Process(p_snitch.pid).memory_info().vms > 256000000:
-                q_error.put("Sniffer memory usage exceeded 256 MB, restarting sniffer")
-                terminate_snitch(p_snitch)
-                p_snitch = multiprocessing.Process(name="processsnitch", target=process_snitch, args=(q_packet, q_error), daemon=True)
-                p_snitch.start()
+            proc = process_monitor.stdout.readline()
+            # todo: parse, check for root, poll process_monitor to check if running
+        return 1
+
+    def process_monitor_windows(q_process, q_error):
+        """runs another program to trace new processes and puts them in the queue"""
+        # poll psutil since I don't know an easy way to reliably trace windows process creation events yet
+        # todo: add win_service_iter
+        current_procs = []
+        for proc in psutil.process_iter(attrs=["name", "exe", "cmdline", "pid"], ad_value=""):
+            q_process.put(pickle.dumps(proc.info))
+            current_procs.append(proc.info["exe"])
+        while True:
+            previous_procs = current_procs
+            current_procs = []
+            for proc in psutil.process_iter(attrs=["name", "exe", "cmdline", "pid"], ad_value=""):
+                if proc.info["exe"] not in previous_procs:
+                    q_process.put(pickle.dumps(proc.info))
+                current_procs.append(proc.info["exe"])
+            time.sleep(5)
+
+    def process_mon_master(q_process, q_error, q_term):
+        """monitor the process monitor and parent process, has same privileges as the sniffer for clean termination at the command or death of the parent"""
+        signal.signal(signal.SIGINT, lambda *args: None)
+        if sys.platform.startswith("linux"):
+            process_monitor = process_monitor_windows
+        elif sys.platform.startswith("win"):
+            process_monitor = process_monitor_windows
+        else:
+            q_error.put("Did not detect a supported operating system")
+            return 1
+        terminate_monitor = lambda p_monitor: p_monitor.terminate() or p_monitor.join(1) or (p_monitor.is_alive() and p_monitor.kill()) or p_monitor.close()
+        p_monitor = multiprocessing.Process(name="processsnitchmon", target=process_monitor, args=(q_process, q_error), daemon=True)
+        p_monitor.start()
+        while True:
+            if p_monitor.is_alive() and psutil.Process(p_monitor.pid).memory_info().vms > 256000000:
+                q_error.put("Process monitor memory usage exceeded 256 MB, restarting monitor")
+                terminate_monitor(p_monitor)
+                p_monitor = multiprocessing.Process(name="processsnitchmon", target=process_monitor, args=(q_process, q_error), daemon=True)
+                p_monitor.start()
             try:
                 if q_term.get(block=True, timeout=10):
                     break
             except queue.Empty:
-                if not multiprocessing.parent_process().is_alive() or not p_snitch.is_alive():
+                if not multiprocessing.parent_process().is_alive() or not p_monitor.is_alive():
                     break
-        terminate_snitch(p_snitch)
+        terminate_monitor(p_monitor)
         return 0
 
     if __name__ == "__main__":
-        q_packet, q_error, q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-        p_snitch = multiprocessing.Process(name="processsnitchmon", target=snitch_mon, args=(q_packet, q_error, q_term))
+        q_process, q_error, q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
+        p_snitch = multiprocessing.Process(name="processsnitchmonmaster", target=process_mon_master, args=(q_process, q_error, q_term))
         p_snitch.start()
-        return p_snitch, q_packet, q_error, q_term
+        return p_snitch, q_process, q_error, q_term
     return None, None, None, None
 
 
