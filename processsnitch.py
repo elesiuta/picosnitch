@@ -31,16 +31,20 @@ import sys
 import time
 import typing
 
-import filelock
-import plyer
-import psutil
-# import vt
+try:
+    import filelock
+    import plyer
+    import psutil
+    # import vt
+except Exception as e:
+    print(type(e).__name__ + str(e.args))
+    print("Make sure dependency is installed, or environment is preserved if running with sudo")
 
 
 def read() -> dict:
     """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
-        "Config": {"VT API key": "", "VT file upload": True},
+        "Config": {"Execsnoop cmd": "execsnoop-bpfcc", "VT API key": "", "VT file upload": True},
         "Errors": [],
         "Latest Entries": [],
         "Names": {},
@@ -79,18 +83,17 @@ def drop_root_privileges() -> None:
         os.setuid(int(os.getenv("SUDO_UID")))
 
 
-def terminate(snitch: dict, p_snitch: multiprocessing.Process = None, q_term: multiprocessing.Queue = None) -> None:
+def terminate(snitch: dict, p_snitch: multiprocessing.Process, q_term: multiprocessing.Queue) -> None:
     """write snitch one last time, then terminate processsnitch and subprocesses if running"""
     write(snitch)
-    if q_term is not None:
-        q_term.put("TERMINATE")
-        p_snitch.join(5)
-        p_snitch.close()
+    q_term.put("TERMINATE")
+    p_snitch.join(5)
+    p_snitch.close()
     sys.exit(0)
 
 
 def toast(msg: str, file=sys.stdout) -> None:
-    """create a system tray notification, tries printing as a last resort"""
+    """create a system tray notification, tries printing as a last resort, requires -E if running with sudo"""
     try:
         plyer.notification.notify(title="processsnitch", message=msg, app_name="processsnitch")
     except Exception:
@@ -113,33 +116,32 @@ def get_common_pattern(a: str, l: list, cutoff: float) -> None:
 
 
 def get_sha256(exe: str) -> str:
+    """get sha256 of process executable"""
     with open(exe, "rb") as f:
         sha256 = hashlib.sha256(f.read())
     return sha256.hexdigest()
 
 
 def get_vt_results(sha256: str, proc: dict, upload: bool) -> str:
-    # toast negative results
+    """get virustotal results of process executable and toast negative results"""
     return ""
 
 
 def process_queue(snitch: dict, new_processes: list) -> None:
-    """poll processes and connections using psutil, and queued pcap if available, then run update_snitch_*"""
+    """process list of new processes and call update_snitch"""
     ctime = time.ctime()
-    # proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
     for proc in new_processes:
         try:
             sha256 = get_sha256(proc["exe"])
             update_snitch(snitch, proc, sha256, ctime)
         except Exception as e:
-            # too late to grab process info (most likely) or some other error
             error = type(e).__name__ + str(e.args) + str(proc)
             snitch["Errors"].append(ctime + " " + error)
             toast("Processsnitch error: " + error, file=sys.stderr)
 
 
 def update_snitch(snitch: dict, proc: dict, sha256: str, ctime: str) -> None:
-    """update the snitch with new processes and create a notification if negative vt results"""
+    """update the snitch with a new process"""
     # Update Latest Entries
     if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
         snitch["Latest Entries"].append(ctime + " " + proc["name"] + ": " + proc["exe"])
@@ -222,55 +224,88 @@ def loop():
 
 def init_process_monitor() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
     """init process monitor with root before dropping root privileges"""
-    def process_monitor_linux(q_process, q_error):
+    def process_monitor_linux(q_process, q_error, q_term_monitor):
         """runs another program to monitor the system for new processes and puts them in the queue"""
-        # use one of
-        # https://github.com/iovisor/bcc/blob/master/tools/execsnoop.py
-        # https://github.com/ColinIanKing/forkstat
-        # https://github.com/DominicBreuker/pspy
-        for proc in psutil.process_iter(attrs=["name", "exe", "cmdline", "pid"], ad_value=""):
-            q_process.put(pickle.dumps(proc.info))
-        process_monitor = subprocess.Popen(["execsnoop-bpfcc"], stdout=subprocess.PIPE, universal_newlines=True)
-        while True:
-            proc = process_monitor.stdout.readline()
-            # todo: parse, check for root, poll process_monitor to check if running
+        # using: https://github.com/iovisor/bcc/blob/master/tools/execsnoop.py
+        # alternative: https://github.com/ColinIanKing/forkstat
+        # alternative: https://github.com/DominicBreuker/pspy
+        if os.getuid() == 0:
+            for proc in psutil.process_iter(attrs=["name", "exe", "cmdline"], ad_value=""):
+                if os.path.isfile(proc.info["exe"]):
+                    q_process.put(pickle.dumps(proc.info))
+            process_monitor = subprocess.Popen(["execsnoop-bpfcc"], stdout=subprocess.PIPE, universal_newlines=True)
+            while process_monitor.poll() is None:
+                try:
+                    proc = process_monitor.stdout.readline()
+                    proc = shlex.split(proc.strip())
+                    proc = {"name": proc[0], "exe": proc[4], "cmdline": str(proc[4:])}
+                    if os.path.isfile(proc["exe"]):
+                        q_process.put(pickle.dumps(proc))
+                except Exception as e:
+                    error = type(e).__name__ + str(e.args) + str(proc)
+                    q_error.put(error)
+                try:
+                    if q_term_monitor.get(block=False):
+                        return 0
+                except queue.Empty:
+                    if not multiprocessing.parent_process().is_alive():
+                        return 0
+        else:
+            q_error.put("Process monitor permission error, requires root")
         return 1
 
-    def process_monitor_windows(q_process, q_error):
+    def process_monitor_windows(q_process, q_error, q_term_monitor):
         """runs another program to trace new processes and puts them in the queue"""
         # poll psutil since I don't know an easy way to reliably trace windows process creation events yet
-        # todo: add win_service_iter
         current_procs = []
-        for proc in psutil.process_iter(attrs=["name", "exe", "cmdline", "pid"], ad_value=""):
-            q_process.put(pickle.dumps(proc.info))
+        for proc in psutil.process_iter(attrs=["name", "exe", "cmdline"], ad_value=""):
             current_procs.append(proc.info["exe"])
+            q_process.put(pickle.dumps(proc.info))
+        for serv in psutil.win_service_iter():
+            current_procs.append(serv.name)
+            serv = psutil.win_service_get(serv.name)
+            serv = {"name": serv.name(), "exe": shlex.split(serv.binpath())[0], "cmdline": "service"}
+            q_process.put(pickle.dumps(serv))
         while True:
             previous_procs = current_procs
             current_procs = []
-            for proc in psutil.process_iter(attrs=["name", "exe", "cmdline", "pid"], ad_value=""):
+            for proc in psutil.process_iter(attrs=["name", "exe", "cmdline"], ad_value=""):
+                current_procs.append(proc.info["exe"])
                 if proc.info["exe"] not in previous_procs:
                     q_process.put(pickle.dumps(proc.info))
-                current_procs.append(proc.info["exe"])
-            time.sleep(5)
+            for serv in psutil.win_service_iter():
+                current_procs.append(serv.name)
+                if serv.name not in previous_procs:
+                    serv = psutil.win_service_get(serv.name)
+                    serv = {"name": serv.name(), "exe": shlex.split(serv.binpath())[0], "cmdline": "service"}
+                    q_process.put(pickle.dumps(serv))
+            try:
+                if q_term_monitor.get(block=True, timeout=5):
+                    return 0
+            except queue.Empty:
+                if not multiprocessing.parent_process().is_alive():
+                    return 0
+        return 1
 
     def process_mon_master(q_process, q_error, q_term):
         """monitor the process monitor and parent process, has same privileges as the sniffer for clean termination at the command or death of the parent"""
         signal.signal(signal.SIGINT, lambda *args: None)
         if sys.platform.startswith("linux"):
-            process_monitor = process_monitor_windows
+            process_monitor = process_monitor_linux
         elif sys.platform.startswith("win"):
             process_monitor = process_monitor_windows
         else:
             q_error.put("Did not detect a supported operating system")
             return 1
-        terminate_monitor = lambda p_monitor: p_monitor.terminate() or p_monitor.join(1) or (p_monitor.is_alive() and p_monitor.kill()) or p_monitor.close()
-        p_monitor = multiprocessing.Process(name="processsnitchmon", target=process_monitor, args=(q_process, q_error), daemon=True)
+        q_term_monitor = multiprocessing.Queue()
+        terminate_monitor = lambda p_monitor: q_term_monitor.put("TERMINATE") or p_monitor.join(2) or (p_monitor.is_alive() and p_monitor.kill()) or p_monitor.close()
+        p_monitor = multiprocessing.Process(name="processsnitchmon", target=process_monitor, args=(q_process, q_error, q_term_monitor), daemon=True)
         p_monitor.start()
         while True:
             if p_monitor.is_alive() and psutil.Process(p_monitor.pid).memory_info().vms > 256000000:
                 q_error.put("Process monitor memory usage exceeded 256 MB, restarting monitor")
                 terminate_monitor(p_monitor)
-                p_monitor = multiprocessing.Process(name="processsnitchmon", target=process_monitor, args=(q_process, q_error), daemon=True)
+                p_monitor = multiprocessing.Process(name="processsnitchmon", target=process_monitor, args=(q_process, q_error, q_term_monitor), daemon=True)
                 p_monitor.start()
             try:
                 if q_term.get(block=True, timeout=10):
