@@ -168,13 +168,14 @@ def get_vt_results(sha256: str, proc: dict, config: dict) -> str:
     return "File not analyzed (no api key)"
 
 
-def initial_poll(snitch: dict) -> None:
+def initial_poll(snitch: dict, known_pids: dict) -> None:
     """poll initial processes and connections using psutil, then runs update_snitch_*"""
     ctime = time.ctime()
     current_processes = {}
     for proc in psutil.process_iter(attrs=["name", "exe", "cmdline", "pid"], ad_value=""):
         if os.path.isfile(proc.info["exe"]):
             current_processes[proc.info["exe"]] = proc.info
+            known_pids["pid"] = proc.info
     proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
     current_connections = set(psutil.net_connections(kind="all"))
     for conn in current_connections:
@@ -187,26 +188,28 @@ def initial_poll(snitch: dict) -> None:
                 update_snitch(snitch, proc, conn_dict, sha256, ctime)
         except Exception as e:
             # too late to grab process info (most likely) or some other error
-            error = type(e).__name__ + str(e.args) + str(conn)
+            error = "Init " + type(e).__name__ + str(e.args) + str(conn)
             if conn.pid == proc["pid"]:
                 error += str(proc)
             else:
                 error += "{process no longer exists}"
             snitch["Errors"].append(ctime + " " + error)
-    conn = {"ip": "", "port": 0}
-    for proc in current_processes:
-        try:
-            sha256 = get_sha256(proc["exe"])
-            update_snitch(snitch, proc, conn, sha256, ctime)
-        except Exception as e:
-            error = type(e).__name__ + str(e.args) + str(proc)
-            snitch["Errors"].append(ctime + " " + error)
+    if not snitch["Config"]["Only log connections"]:
+        conn = {"ip": "", "port": 0}
+        for proc in current_processes.values():
+            try:
+                sha256 = get_sha256(proc["exe"])
+                update_snitch(snitch, proc, conn, sha256, ctime)
+            except Exception as e:
+                error = "Init " + type(e).__name__ + str(e.args) + str(proc)
+                snitch["Errors"].append(ctime + " " + error)
 
 
-def process_queue(snitch: dict, known_pids: dict, new_processes: list) -> None:
+def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_processes: list) -> list:
     """process list of new processes and call update_snitch"""
     ctime = time.ctime()
     pending_list = []
+    pending_conns = []
     for proc in new_processes:
         if proc["type"] == "exec":
             proc["exe"] = shlex.split(proc["cmdline"])[0]
@@ -222,7 +225,21 @@ def process_queue(snitch: dict, known_pids: dict, new_processes: list) -> None:
                 proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
                 pending_list.append(proc)
             else:
-                snitch["Errors"].append(ctime + " no known process for conn: " + str(proc))
+                # proc["missed"] = 1
+                pending_conns.append(proc)
+    for proc in missed_conns:
+        if proc["pid"] in known_pids:
+            proc["name"] = known_pids[proc["pid"]]["name"]
+            proc["exe"] = known_pids[proc["pid"]]["exe"]
+            proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
+            pending_list.append(proc)
+            # missed_conns.remove(proc)
+        else:  # proc["missed"] > 2:
+            # missed_conns.remove(proc)
+            # _ = proc.pop("missed")
+            snitch["Errors"].append(ctime + " no known process for conn: " + str(proc))
+        # else:
+        #     proc["missed += 1"]
     for proc in pending_list:
         try:
             if proc["type"] == "conn":
@@ -235,6 +252,7 @@ def process_queue(snitch: dict, known_pids: dict, new_processes: list) -> None:
             error = type(e).__name__ + str(e.args) + str(proc)
             snitch["Errors"].append(ctime + " " + error)
             toast("Processsnitch error: " + error, file=sys.stderr)
+    return pending_conns
 
 
 def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str) -> None:
@@ -315,12 +333,13 @@ def loop(vt_api_key: str = ""):
         snitch["Errors"].append(time.ctime() + " Snitch subprocess init failed, __name__ != __main__, try: python -m picosnitch")
         toast("Snitch subprocess init failed, try: python -m picosnitch", file=sys.stderr)
         sys.exit(1)
-    # get initial running processes and connections
-    initial_poll(snitch)
     # init variables for loop
     known_pids = {}
+    missed_conns = []
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
+    # get initial running processes and connections
+    initial_poll(snitch, known_pids)
     while True:
         # check for subprocess errors
         while not q_error.empty():
@@ -338,7 +357,7 @@ def loop(vt_api_key: str = ""):
             time.sleep(5)
         while not q_snitch.empty():
             new_processes.append(pickle.loads(q_snitch.get()))
-        process_queue(snitch, known_pids, new_processes)
+        missed_conns = process_queue(snitch, known_pids, missed_conns, new_processes)
         # write snitch
         if time.time() - last_write > 30:
             new_size = sys.getsizeof(pickle.dumps(snitch))
@@ -387,7 +406,7 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
                 try:
                     b.perf_buffer_poll()
                 except Exception as e:
-                    error = type(e).__name__ + str(e.args)
+                    error = "BPF " + type(e).__name__ + str(e.args)
                     q_error.put(error)
                 try:
                     if q_term_monitor.get(block=False):
@@ -416,8 +435,8 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
         time_last_start = time.time()
         while True:
             if p_snitch_sub.is_alive():
-                if psutil.Process(p_snitch_sub.pid).memory_info().vms > 256000000:
-                    q_error.put("Snitch subprocess memory usage exceeded 256 MB, restarting snitch")
+                if psutil.Process(p_snitch_sub.pid).memory_info().vms > 512000000:
+                    q_error.put("Snitch subprocess memory usage exceeded 512 MB, restarting snitch")
                     terminate_subprocess(p_snitch_sub)
                     p_snitch_sub = multiprocessing.Process(name="processsnitch", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
                     p_snitch_sub.start()
