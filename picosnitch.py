@@ -23,6 +23,7 @@ import ipaddress
 import json
 import hashlib
 import multiprocessing
+from multiprocessing.process import current_process
 import os
 import pickle
 import queue
@@ -139,9 +140,12 @@ def get_common_pattern(a: str, l: list, cutoff: float) -> None:
 
 def get_sha256(exe: str) -> str:
     """get sha256 of process executable"""
-    with open(exe, "rb") as f:
-        sha256 = hashlib.sha256(f.read())
-    return sha256.hexdigest()
+    try:
+        with open(exe, "rb") as f:
+            sha256 = hashlib.sha256(f.read())
+        return sha256.hexdigest()
+    except Exception:
+        return "0000000000000000000000000000000000000000000000000000000000000000"
 
 
 def get_vt_results(sha256: str, proc: dict, config: dict) -> str:
@@ -165,102 +169,79 @@ def get_vt_results(sha256: str, proc: dict, config: dict) -> str:
     return "File not analyzed (no api key)"
 
 
-# NEEDS UPDATING
 def process_queue(snitch: dict, known_pids: dict, new_processes: list) -> None:
     """process list of new processes and call update_snitch"""
     ctime = time.ctime()
-    processed_dict = {}
-    processed_list = []
+    pending_list = []
     for proc in new_processes:
         if proc["type"] == "exec":
             proc["exe"] = shlex.split(proc["cmdline"])[0]
             if proc["exe"] == "exec":
                 proc["exe"] = shlex.split(proc["cmdline"])[1]
-            # known_pids[proc["pid"]] =
-            processed_list.append(proc)
-    for proc in processed_list:
+            known_pids[proc["pid"]] = proc
+            if not snitch["Config"]["Only log connections"]:
+                pending_list.append(proc)
+        elif proc["type"] == "conn":
+            if proc["pid"] in known_pids:
+                proc["name"] = known_pids[proc["pid"]]["name"]
+                proc["exe"] = known_pids[proc["pid"]]["exe"]
+                proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
+                pending_list.append(proc)
+            else:
+                snitch["Errors"].append(ctime + " no known process for conn: " + str(proc))
+    for proc in pending_list:
         try:
+            if proc["type"] == "conn":
+                conn = {"ip": proc["ip"], "port": proc["port"]}
+            else:
+                conn = {"ip": "", "port": 0}
             sha256 = get_sha256(proc["exe"])
-            update_snitch(snitch, proc, sha256, ctime)
+            update_snitch(snitch, proc, conn, sha256, ctime)
         except Exception as e:
             error = type(e).__name__ + str(e.args) + str(proc)
             snitch["Errors"].append(ctime + " " + error)
             toast("Processsnitch error: " + error, file=sys.stderr)
 
-# NEEDS UPDATING
-def update_snitch(snitch: dict, proc: dict, sha256: str, ctime: str) -> None:
-    """update the snitch with a new process"""
-    # Update Latest Entries
-    if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
-        snitch["Latest Entries"].append(ctime + " " + proc["name"] + ": " + proc["exe"])
-    # Update Names
-    if proc["name"] in snitch["Names"]:
-        if proc["exe"] not in snitch["Names"][proc["name"]]:
-            snitch["Names"][proc["name"]].append(proc["exe"])
-            toast("New executable detected for " + proc["name"] + ": " + proc["exe"])
-    else:
-        snitch["Names"][proc["name"]] = [proc["exe"]]
-    # Update Processes
-    if proc["exe"] not in snitch["Processes"]:
-        snitch["Processes"][proc["exe"]] = {
-            "name": proc["name"],
-            "cmdlines": [str(proc["cmdline"])],
-            "first seen": ctime,
-            "last seen": ctime,
-            "days seen": 1,
-            "results": {sha256: get_vt_results(sha256, proc, snitch["Config"])}
-        }
-    else:
-        entry = snitch["Processes"][proc["exe"]]
-        if proc["name"] != entry["name"]:
-            entry["name"] = proc["name"]
-        if str(proc["cmdline"]) not in entry["cmdlines"]:
-            get_common_pattern(str(proc["cmdline"]), entry["cmdlines"], 0.8)
-            entry["cmdlines"].sort()
-        if sha256 not in entry["results"]:
-            entry["results"][sha256] = get_vt_results(sha256, proc, snitch["Config"])
-        if ctime.split()[:3] != entry["last seen"].split()[:3]:
-            entry["days seen"] += 1
-        entry["last seen"] = ctime
 
-# DEPCRECATED
-def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
-    # initially running programs
-    # for proc in psutil.process_iter(attrs=["name", "exe", "cmdline"], ad_value=""):
-    #     if os.path.isfile(proc.info["exe"]):
-    #         q_snitch.put(pickle.dumps(proc.info))
-    """poll processes and connections using psutil, and queued pcap if available, then run update_snitch_*"""
+def initial_poll(snitch: dict) -> None:
+    """poll initial processes and connections using psutil, then runs update_snitch_*"""
     ctime = time.ctime()
+    current_processes = {}
+    for proc in psutil.process_iter(attrs=["name", "exe", "cmdline", "pid"], ad_value=""):
+        if os.path.isfile(proc.info["exe"]):
+            current_processes[proc.info["exe"]] = proc.info
     proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
     current_connections = set(psutil.net_connections(kind="all"))
-    # check processes for all new connections
-    for conn in current_connections - last_connections:
+    for conn in current_connections:
         try:
             if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
-                # update snitch (if necessary) with new non-local connection (pop from pcap)
-                _ = pcap_dict.pop(str(conn.raddr.ip), None)
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
-                update_snitch_proc(snitch, proc, conn, ctime)
+                conn_dict = {"ip": conn.raddr.ip, "port": conn.raddr.port}
+                sha256 = get_sha256(proc["exe"])
+                _ = current_processes.pop(proc["exe"], 0)
+                update_snitch(snitch, proc, conn_dict, sha256, ctime)
         except Exception as e:
             # too late to grab process info (most likely) or some other error
-            error = str(conn)
+            error = type(e).__name__ + str(e.args) + str(conn)
             if conn.pid == proc["pid"]:
                 error += str(proc)
             else:
                 error += "{process no longer exists}"
-            error += type(e).__name__ + str(e.args)
             snitch["Errors"].append(ctime + " " + error)
-            toast("Polling error: " + error, file=sys.stderr)
-    # check any connection still in the pcap that wasn't already identified
-    for pcap in pcap_dict.values():
-        update_snitch_pcap(snitch, pcap, ctime)
-    return current_connections
+    conn = {"ip": "", "port": 0}
+    for proc in current_processes:
+        try:
+            sha256 = get_sha256(proc["exe"])
+            update_snitch(snitch, proc, conn, sha256, ctime)
+        except Exception as e:
+            error = type(e).__name__ + str(e.args) + str(proc)
+            snitch["Errors"].append(ctime + " " + error)
 
-# DEPRECATED
-def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime: str) -> None:
-    """update the snitch with polled data from psutil and create a notification if new"""
+
+def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str) -> None:
+    """update the snitch with data from queues and create a notification if new entry"""
     # Get DNS reverse name and reverse the name for sorting
-    reversed_dns = reverse_domain_name(reverse_dns_lookup(conn.raddr.ip))
+    reversed_dns = reverse_domain_name(reverse_dns_lookup(conn["ip"]))
     # Update Latest Entries
     if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
         snitch["Latest Entries"].append(ctime + " " + proc["name"] + " - " + proc["exe"])
@@ -269,7 +250,7 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
         if proc["exe"] not in snitch["Names"][proc["name"]]:
             snitch["Names"][proc["name"]].append(proc["exe"])
             toast("New executable detected for " + proc["name"] + ": " + proc["exe"])
-    else:
+    elif conn["ip"] or conn["port"]:
         snitch["Names"][proc["name"]] = [proc["exe"]]
         toast("First network connection detected for " + proc["name"])
     # Update Processes
@@ -280,10 +261,11 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
             "first seen": ctime,
             "last seen": ctime,
             "days seen": 1,
-            "ports": [conn.raddr.port],
-            "remote addresses": []
+            "ports": [conn["port"]],
+            "remote addresses": [],
+            "results": {sha256: get_vt_results(sha256, proc, snitch["Config"])}
         }
-        if conn.raddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
+        if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
             snitch["Processes"][proc["exe"]]["remote addresses"].append(reversed_dns)
     else:
         entry = snitch["Processes"][proc["exe"]]
@@ -292,12 +274,14 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
         if str(proc["cmdline"]) not in entry["cmdlines"]:
             get_common_pattern(str(proc["cmdline"]), entry["cmdlines"], 0.8)
             entry["cmdlines"].sort()
-        if conn.raddr.port not in entry["ports"]:
-            entry["ports"].append(conn.raddr.port)
+        if conn["port"] not in entry["ports"]:
+            entry["ports"].append(conn["port"])
             entry["ports"].sort()
         if reversed_dns not in entry["remote addresses"]:
-            if conn.raddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
+            if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
                 entry["remote addresses"].append(reversed_dns)
+        if sha256 not in entry["results"]:
+            entry["results"][sha256] = get_vt_results(sha256, proc, snitch["Config"])
         if ctime.split()[:3] != entry["last seen"].split()[:3]:
             entry["days seen"] += 1
         entry["last seen"] = ctime
@@ -308,21 +292,8 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
             if "No processes found during polling" in snitch["Remote Addresses"][reversed_dns]:
                 snitch["Remote Addresses"][reversed_dns].remove("No processes found during polling")
     else:
-        if conn.raddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
+        if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
             snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, proc["exe"]]
-
-# DEPRECATED
-def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
-    """update the snitch with queued data from Scapy and create a notification if new"""
-    # Get DNS reverse name and reverse the name for sorting
-    reversed_dns = reversed_dns = reverse_domain_name(reverse_dns_lookup(pcap["raddr_ip"]))
-    if pcap["raddr_port"] not in snitch["Config"]["Remote address unlog"]:
-        if reversed_dns not in snitch["Remote Addresses"]:
-            snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, "No processes found during polling", pcap["summary"]]
-            toast("New address: " + reverse_domain_name(reversed_dns) + " (polling missed process)")
-        elif pcap["summary"] not in snitch["Remote Addresses"][reversed_dns]:
-            get_common_pattern(pcap["summary"], snitch["Remote Addresses"][reversed_dns], 0.8)
-            snitch["Remote Addresses"][reversed_dns][2:] = sorted(snitch["Remote Addresses"][reversed_dns][2:])
 
 
 def loop(vt_api_key: str = ""):
@@ -345,8 +316,10 @@ def loop(vt_api_key: str = ""):
         snitch["Errors"].append(time.ctime() + " Snitch subprocess init failed, __name__ != __main__, try: python -m picosnitch")
         toast("Snitch subprocess init failed, try: python -m picosnitch", file=sys.stderr)
         sys.exit(1)
+    # get initial running processes and connections
+    initial_poll(snitch)
     # init variables for loop
-    known_pids = collections.defaultdict(str)
+    known_pids = {}
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
     while True:
@@ -377,7 +350,7 @@ def loop(vt_api_key: str = ""):
 
 
 def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
-    """init subprocess for bpf program and monitor with root (before dropping root privileges)"""
+    """init snitch subprocess and monitor with root (before dropping root privileges)"""
     def snitch_linux(config, q_snitch, q_error, q_term_monitor):
         """runs a bpf program to monitor the system for new processes and connections and puts them in the queue"""
         if os.getuid() == 0:
@@ -392,22 +365,21 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
                 if event.type == 0:  # EVENT_ARG
                     argv[event.pid].append(event.argv)
                 elif event.type == 1:  # EVENT_RET
-                    if event.retval == 0:  # skip failed execs
-                        argv_text = b' '.join(argv[event.pid]).replace(b'\n', b'\\n')
-                        q_snitch.put(pickle.dumps({"type": "exec", "pid": event.pid, "name": event.comm.decode(), "cmdline": argv_text.decode()}))
+                    argv_text = b' '.join(argv[event.pid]).replace(b'\n', b'\\n')
+                    q_snitch.put(pickle.dumps({"type": "exec", "pid": event.pid, "name": event.comm.decode(), "cmdline": argv_text.decode()}))
                     try:
                         del(argv[event.pid])
                     except Exception:
                         pass
             def queue_ipv4_event(cpu, data, size):
                 event = b["ipv4_events"].event(data)
-                q_snitch.put(pickle.dumps({"type": "ipv4", "pid": event.pid, "addr": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+                q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
             def queue_ipv6_event(cpu, data, size):
                 event = b["ipv6_events"].event(data)
-                q_snitch.put(pickle.dumps({"type": "ipv6", "pid": event.pid, "addr": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
+                q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
             def queue_other_event(cpu, data, size):
                 event = b["other_socket_events"].event(data)
-                q_snitch.put(pickle.dumps({"type": "other", "pid": event.pid}))
+                q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "port": 0, "ip": ""}))
             b["exec_events"].open_perf_buffer(queue_exec_event)
             b["ipv4_events"].open_perf_buffer(queue_ipv4_event)
             b["ipv6_events"].open_perf_buffer(queue_ipv6_event)
@@ -428,7 +400,6 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
             q_error.put("Snitch subprocess permission error, requires root")
         return 1
 
-
     def snitch_monitor(config, q_snitch, q_error, q_term):
         """monitor the snitch subprocess and parent process, has same privileges as subprocess for clean termination at the command or death of the parent"""
         signal.signal(signal.SIGINT, lambda *args: None)
@@ -440,15 +411,23 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
             q_error.put("Did not detect a supported operating system")
             return 1
         q_term_monitor = multiprocessing.Queue()
-        terminate_subprocess = lambda p_snitch_sub: q_term_monitor.put("TERMINATE") or p_snitch_sub.join(2) or (p_snitch_sub.is_alive() and p_snitch_sub.kill()) or p_snitch_sub.close()
+        terminate_subprocess = lambda p_snitch_sub: q_term_monitor.put("TERMINATE") or p_snitch_sub.join(5) or (p_snitch_sub.is_alive() and p_snitch_sub.kill()) or p_snitch_sub.close()
         p_snitch_sub = multiprocessing.Process(name="processsnitch", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
         p_snitch_sub.start()
+        time_last_start = time.time()
         while True:
-            if p_snitch_sub.is_alive() and psutil.Process(p_snitch_sub.pid).memory_info().vms > 256000000:
-                q_error.put("Snitch subprocess memory usage exceeded 256 MB, restarting snitch")
-                terminate_subprocess(p_snitch_sub)
+            if p_snitch_sub.is_alive():
+                if psutil.Process(p_snitch_sub.pid).memory_info().vms > 256000000:
+                    q_error.put("Snitch subprocess memory usage exceeded 256 MB, restarting snitch")
+                    terminate_subprocess(p_snitch_sub)
+                    p_snitch_sub = multiprocessing.Process(name="processsnitch", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
+                    p_snitch_sub.start()
+                    time_last_start = time.time()
+            elif time.time() - time_last_start > 300:
+                q_error.put("Snitch subprocess died, restarting snitch")
                 p_snitch_sub = multiprocessing.Process(name="processsnitch", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
                 p_snitch_sub.start()
+                time_last_start = time.time()
             try:
                 if q_term.get(block=True, timeout=10):
                     break

@@ -2,8 +2,6 @@
 # picosnitch
 - Monitors your system to notify you whenever a program makes its first remote network connection (while picosnitch has been running)
 - Logs and config are stored in ~/.config/picosnitch/snitch.json
-- Polls connections and processes at 0.2s intervals by default
-- Optionally sniff all traffic for new connections using Scapy for improved reliability
 - Inspired by programs such as:
   - GlassWire
   - Little Snitch
@@ -15,28 +13,19 @@
 ## linux
 - install from PyPI with  
 `pip3 install picosnitch --upgrade --user`
-- optionally install Scapy
-  - you should be able to just install scapy or python3-scapy using your distribution's package manager
-  - [https://scapy.readthedocs.io/en/latest/installation.html](https://scapy.readthedocs.io/en/latest/installation.html)
+- depends on the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md)  
+`sudo apt install python3-bpfcc`
 - run daemon with  
-`picosnitch`
-- or run daemon as root to use Scapy  
 `sudo -E python3 -m picosnitch`
 ## windows
-- install from PyPI with  
-`pip install picosnitch --upgrade`
-- optionally install Scapy
-  - [https://scapy.readthedocs.io/en/latest/installation.html](https://scapy.readthedocs.io/en/latest/installation.html)
-- run with  
-`picosnitch`
-- you'll probably need to run it as an administrator if using Scapy
+- no longer supported for now, use a version <= v0.2.5
 ## building from source
 - install from source using python 3 with  
 `python setup.py install --user`
 - required dependencies (installed automatically from PyPI on setup if not already present)  
-`filelock plyer psutil python-daemon`
-- optional dependency (requires manual installation)  
-`scapy`
+`filelock plyer psutil python-daemon vt-py`
+- additional dependency (requires manual installation)  
+`bcc`
 - picosnitch.py can also be run directly
 # configuration
 - stored in ~/.config/picosnitch/snitch.json
@@ -44,20 +33,22 @@
 ```python
 {
   "Config": {
-    "Enable pcap": false, # bool, use Scapy to sniff traffic
-    "Polling interval": 0.2, # float in seconds
-    "Remote address unlog": [80, "firefox"] # list of process names (str) or remote ports (int)
+    "Only log connections": True, # Only log processes that make remote network connections
+    # otherwise log every new process from exec()
+    "Remote address unlog": [80, "firefox"], # List of process names (str) or remote ports (int)
     # will omit connections that match any of these from the log of remote addresses to avoid clutter
     # the process and executable will still be logged if it has not been already
+    "VT API key": "", # API key for VirusTotal, leave blank otherwise
+    "VT file upload": False, # Only hashes are uploaded by default
+    "VT last request": 0, # Used for rate limiting
+    "VT limit request": 15 # Number of seconds between requests
   },
   "Errors": [], # Log of errors by time
   "Latest Entries": [], # Log of entries by time
   "Names": {}, # Log of processes by name containing respective executable(s)
   "Processes": {}, # Log of processes by executable containing:
   # cmdlines, days seen, first seen, last seen, name, ports, remote addresses
-  # some cmdlines are consolidated using * as a wildcard, ports are remote ports
+  # some cmdlines are consolidated using * as a wildcard
   "Remote Addresses": {} # Log of remote addresses containing respective executable(s)
-  # and packet summaries if pcap is enabled and process was too short lived for detection via polling
-  # some packet summaries are consolidated using * as a wildcard
 }
 ```
