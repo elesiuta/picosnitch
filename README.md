@@ -1,6 +1,7 @@
 
 # picosnitch
 - Monitors your system to notify you whenever a program makes its first remote network connection (while picosnitch has been running)
+- Or when the sha256 changes for one of these programs
 - Logs and config are stored in ~/.config/picosnitch/snitch.json
 - Inspired by programs such as:
   - GlassWire
