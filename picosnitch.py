@@ -23,7 +23,6 @@ import ipaddress
 import json
 import hashlib
 import multiprocessing
-from multiprocessing.process import current_process
 import os
 import pickle
 import queue
@@ -89,12 +88,12 @@ def drop_root_privileges() -> None:
         os.setuid(int(os.getenv("SUDO_UID")))
 
 
-def terminate(snitch: dict, p_sniff: multiprocessing.Process, q_term: multiprocessing.Queue):
+def terminate(snitch: dict, p_snitch: multiprocessing.Process, q_term: multiprocessing.Queue):
     """write snitch one last time, then terminate picosnitch and subprocesses if running"""
     write(snitch)
     q_term.put("TERMINATE")
-    p_sniff.join(5)
-    p_sniff.close()
+    p_snitch.join(5)
+    p_snitch.close()
     sys.exit(0)
 
 
@@ -169,40 +168,6 @@ def get_vt_results(sha256: str, proc: dict, config: dict) -> str:
     return "File not analyzed (no api key)"
 
 
-def process_queue(snitch: dict, known_pids: dict, new_processes: list) -> None:
-    """process list of new processes and call update_snitch"""
-    ctime = time.ctime()
-    pending_list = []
-    for proc in new_processes:
-        if proc["type"] == "exec":
-            proc["exe"] = shlex.split(proc["cmdline"])[0]
-            if proc["exe"] == "exec":
-                proc["exe"] = shlex.split(proc["cmdline"])[1]
-            known_pids[proc["pid"]] = proc
-            if not snitch["Config"]["Only log connections"]:
-                pending_list.append(proc)
-        elif proc["type"] == "conn":
-            if proc["pid"] in known_pids:
-                proc["name"] = known_pids[proc["pid"]]["name"]
-                proc["exe"] = known_pids[proc["pid"]]["exe"]
-                proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
-                pending_list.append(proc)
-            else:
-                snitch["Errors"].append(ctime + " no known process for conn: " + str(proc))
-    for proc in pending_list:
-        try:
-            if proc["type"] == "conn":
-                conn = {"ip": proc["ip"], "port": proc["port"]}
-            else:
-                conn = {"ip": "", "port": 0}
-            sha256 = get_sha256(proc["exe"])
-            update_snitch(snitch, proc, conn, sha256, ctime)
-        except Exception as e:
-            error = type(e).__name__ + str(e.args) + str(proc)
-            snitch["Errors"].append(ctime + " " + error)
-            toast("Processsnitch error: " + error, file=sys.stderr)
-
-
 def initial_poll(snitch: dict) -> None:
     """poll initial processes and connections using psutil, then runs update_snitch_*"""
     ctime = time.ctime()
@@ -236,6 +201,40 @@ def initial_poll(snitch: dict) -> None:
         except Exception as e:
             error = type(e).__name__ + str(e.args) + str(proc)
             snitch["Errors"].append(ctime + " " + error)
+
+
+def process_queue(snitch: dict, known_pids: dict, new_processes: list) -> None:
+    """process list of new processes and call update_snitch"""
+    ctime = time.ctime()
+    pending_list = []
+    for proc in new_processes:
+        if proc["type"] == "exec":
+            proc["exe"] = shlex.split(proc["cmdline"])[0]
+            if proc["exe"] == "exec":
+                proc["exe"] = shlex.split(proc["cmdline"])[1]
+            known_pids[proc["pid"]] = proc
+            if not snitch["Config"]["Only log connections"]:
+                pending_list.append(proc)
+        elif proc["type"] == "conn":
+            if proc["pid"] in known_pids:
+                proc["name"] = known_pids[proc["pid"]]["name"]
+                proc["exe"] = known_pids[proc["pid"]]["exe"]
+                proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
+                pending_list.append(proc)
+            else:
+                snitch["Errors"].append(ctime + " no known process for conn: " + str(proc))
+    for proc in pending_list:
+        try:
+            if proc["type"] == "conn":
+                conn = {"ip": proc["ip"], "port": proc["port"]}
+            else:
+                conn = {"ip": "", "port": 0}
+            sha256 = get_sha256(proc["exe"])
+            update_snitch(snitch, proc, conn, sha256, ctime)
+        except Exception as e:
+            error = type(e).__name__ + str(e.args) + str(proc)
+            snitch["Errors"].append(ctime + " " + error)
+            toast("Processsnitch error: " + error, file=sys.stderr)
 
 
 def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str) -> None:
@@ -301,7 +300,7 @@ def loop(vt_api_key: str = ""):
     # acquire lock (since the prior one would be released by starting the daemon)
     lock = filelock.FileLock(os.path.join(os.path.expanduser("~"), ".picosnitch_lock"), timeout=1)
     lock.acquire()
-    # read config and init sniffer if enabled
+    # read config and set VT API key if entered
     snitch = read()
     if vt_api_key:
         snitch["Config"]["VT API key"] = vt_api_key
@@ -411,7 +410,7 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
             q_error.put("Did not detect a supported operating system")
             return 1
         q_term_monitor = multiprocessing.Queue()
-        terminate_subprocess = lambda p_snitch_sub: q_term_monitor.put("TERMINATE") or p_snitch_sub.join(5) or (p_snitch_sub.is_alive() and p_snitch_sub.kill()) or p_snitch_sub.close()
+        terminate_subprocess = lambda p_snitch_sub: q_term_monitor.put("TERMINATE") or p_snitch_sub.join(3) or (p_snitch_sub.is_alive() and p_snitch_sub.kill()) or p_snitch_sub.close()
         p_snitch_sub = multiprocessing.Process(name="processsnitch", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
         p_snitch_sub.start()
         time_last_start = time.time()
