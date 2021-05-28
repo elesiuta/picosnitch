@@ -35,11 +35,9 @@ import time
 import typing
 
 try:
-    from bcc import BPF
     import filelock
     import plyer
     import psutil
-    import vt
 except Exception as e:
     print(type(e).__name__ + str(e.args))
     print("Make sure dependency is installed, or environment is preserved if running with sudo")
@@ -354,9 +352,8 @@ def loop(vt_api_key: str = ""):
             toast("snitch subprocess stopped, exiting picosnitch", file=sys.stderr)
             terminate(snitch, p_snitch_mon, q_term, q_vt_term)
         # list of new processes and connections since last poll
+        time.sleep(5)
         new_processes = []
-        if q_snitch.empty():
-            time.sleep(5)
         while not q_snitch.empty():
             new_processes.append(pickle.loads(q_snitch.get()))
         missed_conns = process_queue(snitch, known_pids, missed_conns, new_processes, q_vt_pending)
@@ -375,6 +372,7 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
     """init snitch subprocess and monitor with root (before dropping root privileges)"""
     def snitch_linux(config, q_snitch, q_error, q_term_monitor):
         """runs a bpf program to monitor the system for new processes and connections and puts them in the queue"""
+        from bcc import BPF
         if os.getuid() == 0:
             b = BPF(text=bpf_text)
             execve_fnname = b.get_syscall_fnname("execve")
@@ -471,15 +469,13 @@ def init_virustotal_subprocess(config: dict) -> typing.Tuple[multiprocessing.Pro
     """init virustotal subprocess"""
     def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
         """get virustotal results of process executable"""
-        # last_request_time = 0
+        import vt
         while q_vt_term.empty() and multiprocessing.parent_process().is_alive():
             time.sleep(config["VT limit request"])
             proc, sha256 = pickle.loads(q_vt_pending.get(block=True, timeout=None))
             suspicious = False
             if config["VT API key"]:
                 client = vt.Client(config["VT API key"])
-                # time.sleep(max(0, last_request_time + config["VT limit request"] - time.time()))
-                # last_request_time = time.time()
                 try:
                     analysis = client.get_object("/files/" + sha256)
                 except Exception:
