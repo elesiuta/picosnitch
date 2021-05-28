@@ -66,6 +66,7 @@ def read() -> dict:
         assert all(key in data and type(data[key]) == type(template[key]) for key in template), "Invalid snitch.json"
         assert all(key in data["Config"] for key in template["Config"]), "Invalid config"
         return data
+    template["Template"] = True
     return template
 
 
@@ -225,7 +226,9 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
                 proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
                 pending_list.append(proc)
             else:
-                # proc["missed"] = 1
+                proc_psutil = psutil.Process(proc["pid"]).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
+                if proc_psutil["exe"]:
+                    known_pids[proc_psutil["pid"]] = proc_psutil
                 pending_conns.append(proc)
     for proc in missed_conns:
         if proc["pid"] in known_pids:
@@ -233,13 +236,8 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
             proc["exe"] = known_pids[proc["pid"]]["exe"]
             proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
             pending_list.append(proc)
-            # missed_conns.remove(proc)
-        else:  # proc["missed"] > 2:
-            # missed_conns.remove(proc)
-            # _ = proc.pop("missed")
+        else:
             snitch["Errors"].append(ctime + " no known process for conn: " + str(proc))
-        # else:
-        #     proc["missed += 1"]
     for proc in pending_list:
         try:
             if proc["type"] == "conn":
@@ -320,6 +318,7 @@ def loop(vt_api_key: str = ""):
     lock.acquire()
     # read config and set VT API key if entered
     snitch = read()
+    _ = snitch.pop("Template", 0)
     if vt_api_key:
         snitch["Config"]["VT API key"] = vt_api_key
     # init bpf program
@@ -474,7 +473,7 @@ def main():
         sys.exit(1)
     try:
         tmp_snitch = read()
-        if not tmp_snitch["Config"]["VT API key"]:
+        if not tmp_snitch["Config"]["VT API key"] and "Template" in tmp_snitch:
             tmp_snitch["Config"]["VT API key"] = input("Enter your VirusTotal API key (optional)\n>>> ")
     except Exception as e:
         print(type(e).__name__ + str(e.args))
