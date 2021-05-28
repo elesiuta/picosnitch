@@ -40,7 +40,6 @@
     # the process and executable will still be logged if it has not been already
     "VT API key": "", # API key for VirusTotal, leave blank otherwise
     "VT file upload": False, # Only hashes are uploaded by default
-    "VT last request": 0, # Used for rate limiting
     "VT limit request": 15 # Number of seconds between requests
   },
   "Errors": [], # Log of errors by time

@@ -48,7 +48,7 @@ except Exception as e:
 def read() -> dict:
     """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
-        "Config": {"Only log connections": True, "Remote address unlog": ["firefox"], "VT API key": "", "VT file upload": False, "VT last request": 0, "VT limit request": 15},
+        "Config": {"Only log connections": True, "Remote address unlog": [80, "chrome", "firefox"], "VT API key": "", "VT file upload": False, "VT limit request": 15},
         "Errors": [],
         "Latest Entries": [],
         "Names": {},
@@ -89,12 +89,13 @@ def drop_root_privileges() -> None:
         os.setuid(int(os.getenv("SUDO_UID")))
 
 
-def terminate(snitch: dict, p_snitch: multiprocessing.Process, q_term: multiprocessing.Queue):
+def terminate(snitch: dict, p_snitch_mon: multiprocessing.Process, q_term: multiprocessing.Queue, q_vt_term: multiprocessing.Queue):
     """write snitch one last time, then terminate picosnitch and subprocesses if running"""
     write(snitch)
+    q_vt_term.put("TERMINATE")
     q_term.put("TERMINATE")
-    p_snitch.join(5)
-    p_snitch.close()
+    p_snitch_mon.join(5)
+    p_snitch_mon.close()
     sys.exit(0)
 
 
@@ -148,28 +149,23 @@ def get_sha256(exe: str) -> str:
         return "0000000000000000000000000000000000000000000000000000000000000000"
 
 
-def get_vt_results(sha256: str, proc: dict, config: dict) -> str:
-    """get virustotal results of process executable and toast negative results"""
-    if config["VT API key"]:
-        client = vt.Client(config["VT API key"])
-        time.sleep(max(0, config["VT last request"] + config["VT limit request"] - time.time()))
-        config["VT last request"] = time.time()
-        try:
-            analysis = client.get_object("/files/" + sha256)
-        except Exception:
-            if config["VT file upload"]:
-                toast("Uploading " + proc["name"] + " for analysis")
-                with open(proc["exe"], "rb") as f:
-                    analysis = client.scan_file(f, wait_for_completion=True)
-            else:
-                return "File not analyzed (analysis not found)"
-        if analysis.last_analysis_stats["malicious"] != 0 or analysis.last_analysis_stats["suspicious"] != 0:
-            toast("Suspicious results for " + proc["name"])
-        return str(analysis.last_analysis_stats)
-    return "File not analyzed (no api key)"
+def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, check_pending: bool = False):
+    """get virustotal results from subprocess and update snitch"""
+    if check_pending:
+        for exe in snitch["Processes"]:
+            for sha256 in snitch["Processes"][exe]["results"]:
+                if snitch["Processes"][exe]["results"][sha256] == "Pending":
+                    proc = {"exe": exe}
+                    q_vt.put(pickle.dumps((proc, sha256)))
+    else:
+        while not q_vt.empty():
+            proc, sha256, result, suspicious = pickle.loads(q_vt.get())
+            snitch["Processes"][proc["exe"]]["results"][sha256] = result
+            if suspicious:
+                toast("Suspicious results for " + proc["name"])
 
 
-def initial_poll(snitch: dict, known_pids: dict) -> None:
+def initial_poll(snitch: dict, known_pids: dict, q_vt_pending: multiprocessing.Queue) -> None:
     """poll initial processes and connections using psutil, then runs update_snitch_*"""
     ctime = time.ctime()
     current_processes = {}
@@ -186,7 +182,7 @@ def initial_poll(snitch: dict, known_pids: dict) -> None:
                 conn_dict = {"ip": conn.raddr.ip, "port": conn.raddr.port}
                 sha256 = get_sha256(proc["exe"])
                 _ = current_processes.pop(proc["exe"], 0)
-                update_snitch(snitch, proc, conn_dict, sha256, ctime)
+                update_snitch(snitch, proc, conn_dict, sha256, ctime, q_vt_pending)
         except Exception as e:
             # too late to grab process info (most likely) or some other error
             error = "Init " + type(e).__name__ + str(e.args) + str(conn)
@@ -200,13 +196,13 @@ def initial_poll(snitch: dict, known_pids: dict) -> None:
         for proc in current_processes.values():
             try:
                 sha256 = get_sha256(proc["exe"])
-                update_snitch(snitch, proc, conn, sha256, ctime)
+                update_snitch(snitch, proc, conn, sha256, ctime, q_vt_pending)
             except Exception as e:
                 error = "Init " + type(e).__name__ + str(e.args) + str(proc)
                 snitch["Errors"].append(ctime + " " + error)
 
 
-def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_processes: list) -> list:
+def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_processes: list, q_vt_pending: multiprocessing.Queue) -> list:
     """process list of new processes and call update_snitch"""
     ctime = time.ctime()
     pending_list = []
@@ -245,15 +241,15 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
             else:
                 conn = {"ip": "", "port": 0}
             sha256 = get_sha256(proc["exe"])
-            update_snitch(snitch, proc, conn, sha256, ctime)
+            update_snitch(snitch, proc, conn, sha256, ctime, q_vt_pending)
         except Exception as e:
-            error = type(e).__name__ + str(e.args) + str(proc)
+            error = "Processsnitch " + type(e).__name__ + str(e.args) + str(proc)
             snitch["Errors"].append(ctime + " " + error)
             toast("Processsnitch error: " + error, file=sys.stderr)
     return pending_conns
 
 
-def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str) -> None:
+def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str, q_vt_pending: multiprocessing.Queue) -> None:
     """update the snitch with data from queues and create a notification if new entry"""
     # Get DNS reverse name and reverse the name for sorting
     reversed_dns = reverse_domain_name(reverse_dns_lookup(conn["ip"]))
@@ -278,8 +274,9 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str)
             "days seen": 1,
             "ports": [conn["port"]],
             "remote addresses": [],
-            "results": {sha256: get_vt_results(sha256, proc, snitch["Config"])}
+            "results": {sha256: "Pending"}
         }
+        q_vt_pending.put(pickle.dumps((proc, sha256)))
         if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
             snitch["Processes"][proc["exe"]]["remote addresses"].append(reversed_dns)
     else:
@@ -296,7 +293,9 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str)
             if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
                 entry["remote addresses"].append(reversed_dns)
         if sha256 not in entry["results"]:
-            entry["results"][sha256] = get_vt_results(sha256, proc, snitch["Config"])
+            entry["results"][sha256] = "Pending"
+            q_vt_pending.put(pickle.dumps((proc, sha256)))
+            toast("New sha256 detected for " + proc["name"] + ": " + proc["exe"])
         if ctime.split()[:3] != entry["last seen"].split()[:3]:
             entry["days seen"] += 1
         entry["last seen"] = ctime
@@ -324,21 +323,25 @@ def loop(vt_api_key: str = ""):
     # init bpf program
     p_snitch_mon, q_snitch, q_error, q_term = init_snitch_subprocess(snitch["Config"])
     drop_root_privileges()
+    # init virustotal subprocess
+    p_virustotal, q_vt_pending, q_vt_results, q_vt_term = init_virustotal_subprocess(snitch["Config"])
     # set signal handlers
-    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_snitch_mon, q_term))
-    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_snitch_mon, q_term))
+    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_snitch_mon, q_term, q_vt_term))
+    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_snitch_mon, q_term, q_vt_term))
     # snitch init checks
     if p_snitch_mon is None:
         snitch["Errors"].append(time.ctime() + " Snitch subprocess init failed, __name__ != __main__, try: python -m picosnitch")
         toast("Snitch subprocess init failed, try: python -m picosnitch", file=sys.stderr)
         sys.exit(1)
+    # check if there are pending virtustotal results from last time
+    get_vt_results(snitch, q_vt_pending, True)
     # init variables for loop
     known_pids = {}
     missed_conns = []
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
     # get initial running processes and connections
-    initial_poll(snitch, known_pids)
+    initial_poll(snitch, known_pids, q_vt_pending)
     while True:
         # check for subprocess errors
         while not q_error.empty():
@@ -349,14 +352,16 @@ def loop(vt_api_key: str = ""):
         if not p_snitch_mon.is_alive():
             snitch["Errors"].append(time.ctime() + " snitch subprocess stopped")
             toast("snitch subprocess stopped, exiting picosnitch", file=sys.stderr)
-            terminate(snitch, p_snitch_mon, q_term)
+            terminate(snitch, p_snitch_mon, q_term, q_vt_term)
         # list of new processes and connections since last poll
         new_processes = []
         if q_snitch.empty():
             time.sleep(5)
         while not q_snitch.empty():
             new_processes.append(pickle.loads(q_snitch.get()))
-        missed_conns = process_queue(snitch, known_pids, missed_conns, new_processes)
+        missed_conns = process_queue(snitch, known_pids, missed_conns, new_processes, q_vt_pending)
+        # update snitch with virtustotal results
+        get_vt_results(snitch, q_vt_results, False)
         # write snitch
         if time.time() - last_write > 30:
             new_size = sys.getsizeof(pickle.dumps(snitch))
@@ -429,7 +434,7 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
             return 1
         q_term_monitor = multiprocessing.Queue()
         terminate_subprocess = lambda p_snitch_sub: q_term_monitor.put("TERMINATE") or p_snitch_sub.join(3) or (p_snitch_sub.is_alive() and p_snitch_sub.kill()) or p_snitch_sub.close()
-        p_snitch_sub = multiprocessing.Process(name="processsnitch", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
+        p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
         p_snitch_sub.start()
         time_last_start = time.time()
         while True:
@@ -437,12 +442,12 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
                 if psutil.Process(p_snitch_sub.pid).memory_info().vms > 512000000:
                     q_error.put("Snitch subprocess memory usage exceeded 512 MB, restarting snitch")
                     terminate_subprocess(p_snitch_sub)
-                    p_snitch_sub = multiprocessing.Process(name="processsnitch", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
+                    p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
                     p_snitch_sub.start()
                     time_last_start = time.time()
             elif time.time() - time_last_start > 300:
                 q_error.put("Snitch subprocess died, restarting snitch")
-                p_snitch_sub = multiprocessing.Process(name="processsnitch", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
+                p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
                 p_snitch_sub.start()
                 time_last_start = time.time()
             try:
@@ -456,9 +461,50 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
 
     if __name__ == "__main__":
         q_snitch, q_error, q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-        p_snitch_mon = multiprocessing.Process(name="processsnitchmonitor", target=snitch_monitor, args=(config, q_snitch, q_error, q_term))
+        p_snitch_mon = multiprocessing.Process(name="snitchsubprocessmonitor", target=snitch_monitor, args=(config, q_snitch, q_error, q_term))
         p_snitch_mon.start()
         return p_snitch_mon, q_snitch, q_error, q_term
+    return None, None, None, None
+
+
+def init_virustotal_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
+    """init virustotal subprocess"""
+    def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
+        """get virustotal results of process executable"""
+        # last_request_time = 0
+        while q_vt_term.empty() and multiprocessing.parent_process().is_alive():
+            time.sleep(config["VT limit request"])
+            proc, sha256 = pickle.loads(q_vt_pending.get(block=True, timeout=None))
+            suspicious = False
+            if config["VT API key"]:
+                client = vt.Client(config["VT API key"])
+                # time.sleep(max(0, last_request_time + config["VT limit request"] - time.time()))
+                # last_request_time = time.time()
+                try:
+                    analysis = client.get_object("/files/" + sha256)
+                except Exception:
+                    if config["VT file upload"]:
+                        try:
+                            with open(proc["exe"], "rb") as f:
+                                analysis = client.scan_file(f, wait_for_completion=True)
+                        except Exception:
+                            q_vt_results.put(pickle.dumps((proc, sha256, "Failed to read file for upload", suspicious)))
+                            continue
+                    else:
+                        q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (analysis not found)", suspicious)))
+                        continue
+                if analysis.last_analysis_stats["malicious"] != 0 or analysis.last_analysis_stats["suspicious"] != 0:
+                    suspicious = True
+                q_vt_results.put(pickle.dumps((proc, sha256, str(analysis.last_analysis_stats), suspicious)))
+            else:
+                q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (no api key)", suspicious)))
+        return 0
+
+    if __name__ == "__main__":
+        q_vt_pending, q_vt_results, q_vt_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
+        p_virustotal = multiprocessing.Process(name="virustotalsnitch", target=virustotal_subprocess, args=(config, q_vt_pending, q_vt_results, q_vt_term), daemon=True)
+        p_virustotal.start()
+        return p_virustotal, q_vt_pending, q_vt_results, q_vt_term
     return None, None, None, None
 
 
