@@ -17,23 +17,38 @@
 
 # https://github.com/elesiuta/picosnitch
 
+import collections
 import difflib
 import ipaddress
 import json
+import hashlib
 import multiprocessing
 import os
 import pickle
+import queue
+import shlex
 import signal
 import socket
+import struct
 import sys
 import time
 import typing
+
+try:
+    from bcc import BPF
+    import filelock
+    import plyer
+    import psutil
+    import vt
+except Exception as e:
+    print(type(e).__name__ + str(e.args))
+    print("Make sure dependency is installed, or environment is preserved if running with sudo")
 
 
 def read() -> dict:
     """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
-        "Config": {"Enable pcap": True, "Polling interval": 0.2, "Remote address unlog": ["firefox"]},
+        "Config": {"Only log connections": True, "Remote address unlog": ["firefox"], "VT API key": "", "VT file upload": False, "VT last request": 0, "VT limit request": 15},
         "Errors": [],
         "Latest Entries": [],
         "Names": {},
@@ -73,18 +88,17 @@ def drop_root_privileges() -> None:
         os.setuid(int(os.getenv("SUDO_UID")))
 
 
-def terminate(snitch: dict, p_sniff: multiprocessing.Process = None, q_term: multiprocessing.Queue = None):
+def terminate(snitch: dict, p_sniff: multiprocessing.Process, q_term: multiprocessing.Queue):
     """write snitch one last time, then terminate picosnitch and subprocesses if running"""
     write(snitch)
-    if q_term is not None:
-        q_term.put("TERMINATE")
-        p_sniff.join(5)
-        p_sniff.close()
+    q_term.put("TERMINATE")
+    p_sniff.join(5)
+    p_sniff.close()
     sys.exit(0)
 
 
 def toast(msg: str, file=sys.stdout) -> None:
-    """create a system tray notification, tries printing as a last resort"""
+    """create a system tray notification, tries printing as a last resort, requires -E if running with sudo"""
     try:
         plyer.notification.notify(title="picosnitch", message=msg, app_name="picosnitch")
     except Exception:
@@ -123,7 +137,98 @@ def get_common_pattern(a: str, l: list, cutoff: float) -> None:
         l.append(a)
 
 
+def get_sha256(exe: str) -> str:
+    """get sha256 of process executable"""
+    with open(exe, "rb") as f:
+        sha256 = hashlib.sha256(f.read())
+    return sha256.hexdigest()
+
+
+def get_vt_results(sha256: str, proc: dict, config: dict) -> str:
+    """get virustotal results of process executable and toast negative results"""
+    if config["VT API key"]:
+        client = vt.Client(config["VT API key"])
+        time.sleep(max(0, config["VT last request"] + config["VT limit request"] - time.time()))
+        config["VT last request"] = time.time()
+        try:
+            analysis = client.get_object("/files/" + sha256)
+        except Exception:
+            if config["VT file upload"]:
+                toast("Uploading " + proc["name"] + " for analysis")
+                with open(proc["exe"], "rb") as f:
+                    analysis = client.scan_file(f, wait_for_completion=True)
+            else:
+                return "File not analyzed (analysis not found)"
+        if analysis.last_analysis_stats["malicious"] != 0 or analysis.last_analysis_stats["suspicious"] != 0:
+            toast("Suspicious results for " + proc["name"])
+        return str(analysis.last_analysis_stats)
+    return "File not analyzed (no api key)"
+
+
+# NEEDS UPDATING
+def process_queue(snitch: dict, known_pids: dict, new_processes: list) -> None:
+    """process list of new processes and call update_snitch"""
+    ctime = time.ctime()
+    processed_dict = {}
+    processed_list = []
+    for proc in new_processes:
+        if proc["type"] == "exec":
+            proc["exe"] = shlex.split(proc["cmdline"])[0]
+            if proc["exe"] == "exec":
+                proc["exe"] = shlex.split(proc["cmdline"])[1]
+            # known_pids[proc["pid"]] =
+            processed_list.append(proc)
+    for proc in processed_list:
+        try:
+            sha256 = get_sha256(proc["exe"])
+            update_snitch(snitch, proc, sha256, ctime)
+        except Exception as e:
+            error = type(e).__name__ + str(e.args) + str(proc)
+            snitch["Errors"].append(ctime + " " + error)
+            toast("Processsnitch error: " + error, file=sys.stderr)
+
+# NEEDS UPDATING
+def update_snitch(snitch: dict, proc: dict, sha256: str, ctime: str) -> None:
+    """update the snitch with a new process"""
+    # Update Latest Entries
+    if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
+        snitch["Latest Entries"].append(ctime + " " + proc["name"] + ": " + proc["exe"])
+    # Update Names
+    if proc["name"] in snitch["Names"]:
+        if proc["exe"] not in snitch["Names"][proc["name"]]:
+            snitch["Names"][proc["name"]].append(proc["exe"])
+            toast("New executable detected for " + proc["name"] + ": " + proc["exe"])
+    else:
+        snitch["Names"][proc["name"]] = [proc["exe"]]
+    # Update Processes
+    if proc["exe"] not in snitch["Processes"]:
+        snitch["Processes"][proc["exe"]] = {
+            "name": proc["name"],
+            "cmdlines": [str(proc["cmdline"])],
+            "first seen": ctime,
+            "last seen": ctime,
+            "days seen": 1,
+            "results": {sha256: get_vt_results(sha256, proc, snitch["Config"])}
+        }
+    else:
+        entry = snitch["Processes"][proc["exe"]]
+        if proc["name"] != entry["name"]:
+            entry["name"] = proc["name"]
+        if str(proc["cmdline"]) not in entry["cmdlines"]:
+            get_common_pattern(str(proc["cmdline"]), entry["cmdlines"], 0.8)
+            entry["cmdlines"].sort()
+        if sha256 not in entry["results"]:
+            entry["results"][sha256] = get_vt_results(sha256, proc, snitch["Config"])
+        if ctime.split()[:3] != entry["last seen"].split()[:3]:
+            entry["days seen"] += 1
+        entry["last seen"] = ctime
+
+# DEPCRECATED
 def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
+    # initially running programs
+    # for proc in psutil.process_iter(attrs=["name", "exe", "cmdline"], ad_value=""):
+    #     if os.path.isfile(proc.info["exe"]):
+    #         q_snitch.put(pickle.dumps(proc.info))
     """poll processes and connections using psutil, and queued pcap if available, then run update_snitch_*"""
     ctime = time.ctime()
     proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
@@ -151,7 +256,7 @@ def poll(snitch: dict, last_connections: set, pcap_dict: dict) -> set:
         update_snitch_pcap(snitch, pcap, ctime)
     return current_connections
 
-
+# DEPRECATED
 def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime: str) -> None:
     """update the snitch with polled data from psutil and create a notification if new"""
     # Get DNS reverse name and reverse the name for sorting
@@ -206,7 +311,7 @@ def update_snitch_proc(snitch: dict, proc: dict, conn: typing.NamedTuple, ctime:
         if conn.raddr.port not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
             snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, proc["exe"]]
 
-
+# DEPRECATED
 def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
     """update the snitch with queued data from Scapy and create a notification if new"""
     # Get DNS reverse name and reverse the name for sorting
@@ -220,58 +325,49 @@ def update_snitch_pcap(snitch: dict, pcap: dict, ctime: str) -> None:
             snitch["Remote Addresses"][reversed_dns][2:] = sorted(snitch["Remote Addresses"][reversed_dns][2:])
 
 
-def loop():
+def loop(vt_api_key: str = ""):
     """main loop"""
     # acquire lock (since the prior one would be released by starting the daemon)
     lock = filelock.FileLock(os.path.join(os.path.expanduser("~"), ".picosnitch_lock"), timeout=1)
     lock.acquire()
     # read config and init sniffer if enabled
     snitch = read()
-    p_sniff, q_packet, q_error, q_term = None, None, None, None
-    if snitch["Config"]["Enable pcap"]:
-        p_sniff, q_packet, q_error, q_term = init_pcap()
+    if vt_api_key:
+        snitch["Config"]["VT API key"] = vt_api_key
+    # init bpf program
+    p_snitch_mon, q_snitch, q_error, q_term = init_snitch_subprocess(snitch["Config"])
     drop_root_privileges()
-    # import dependencies here to save memory since sniffer doesn't need to load them
-    global plyer, psutil
-    import plyer, psutil
     # set signal handlers
-    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_sniff, q_term))
-    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_sniff, q_term))
-    # sniffer init checks
-    if snitch["Config"]["Enable pcap"] and p_sniff is None:
-        snitch["Errors"].append(time.ctime() + " Sniffer init failed, __name__ != __main__, try: python -m picosnitch")
-        toast("Sniffer init failed, try: python -m picosnitch", file=sys.stderr)
-    if not snitch["Config"]["Enable pcap"] and os.getenv("SUDO_USER") is not None:
-        toast("Sniffer is disabled, root is not necessary, did you intend to enable it?", file=sys.stderr)
+    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_snitch_mon, q_term))
+    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_snitch_mon, q_term))
+    # snitch init checks
+    if p_snitch_mon is None:
+        snitch["Errors"].append(time.ctime() + " Snitch subprocess init failed, __name__ != __main__, try: python -m picosnitch")
+        toast("Snitch subprocess init failed, try: python -m picosnitch", file=sys.stderr)
+        sys.exit(1)
     # init variables for loop
-    connections = set()
-    polling_interval = snitch["Config"]["Polling interval"]
+    known_pids = collections.defaultdict(str)
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
     while True:
-        # check sniffer status and for any connections that were missed during the last poll
-        pcap_dict = {}
-        if p_sniff is not None:
-            # list of known connections from last poll, l/raddr could be a path if AF_UNIX socket, and raddr could be None
-            known_raddr = [conn.raddr.ip for conn in connections if hasattr(conn.raddr, "ip")]
-            while not q_packet.empty():
-                packet = q_packet.get()
-                if packet["raddr_ip"] not in known_raddr:
-                    # new connection, log and check during polling
-                    pcap_dict[str(packet["raddr_ip"])] = packet
-            while not q_error.empty():
-                # log sniffer errors
-                error = q_error.get()
-                snitch["Errors"].append(time.ctime() + " " + error)
-                toast(error, file=sys.stderr)
-            if not p_sniff.is_alive():
-                # log sniffer death, stop checking it and try to keep running
-                snitch["Errors"].append(time.ctime() + " picosnitch sniffer process stopped")
-                toast("picosnitch sniffer process stopped", file=sys.stderr)
-                p_sniff, q_packet, q_error, q_term = None, None, None, None
-        # poll connections and processes with psutil
-        connections = poll(snitch, connections, pcap_dict)
-        time.sleep(polling_interval)
+        # check for subprocess errors
+        while not q_error.empty():
+            error = q_error.get()
+            snitch["Errors"].append(time.ctime() + " " + error)
+            toast(error, file=sys.stderr)
+        # log snitch death, exit picosnitch
+        if not p_snitch_mon.is_alive():
+            snitch["Errors"].append(time.ctime() + " snitch subprocess stopped")
+            toast("snitch subprocess stopped, exiting picosnitch", file=sys.stderr)
+            terminate(snitch, p_snitch_mon, q_term)
+        # list of new processes and connections since last poll
+        new_processes = []
+        if q_snitch.empty():
+            time.sleep(5)
+        while not q_snitch.empty():
+            new_processes.append(pickle.loads(q_snitch.get()))
+        process_queue(snitch, known_pids, new_processes)
+        # write snitch
         if time.time() - last_write > 30:
             new_size = sys.getsizeof(pickle.dumps(snitch))
             if new_size != sizeof_snitch or time.time() - last_write > 600:
@@ -280,91 +376,98 @@ def loop():
                 write(snitch)
 
 
-def init_pcap() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
-    """init sniffing subprocess and monitor with root (before dropping root privileges)"""
-    def parse_packet(packet) -> dict:
-        """create a dict from the packet"""
-        output = {"summary": packet.summary(), "laddr_port": None, "raddr_port": None}
-        # output["packet"] = str(packet.show(dump=True))
-        src = packet.getlayer(scapy.layers.all.IP).src
-        dst = packet.getlayer(scapy.layers.all.IP).dst
-        if ipaddress.ip_address(src).is_private:
-            output["direction"] = "outgoing"
-            output["laddr_ip"], output["raddr_ip"] = src, dst
-            if hasattr(packet, "dport"):
-                output["raddr_port"] = packet.dport
-        elif ipaddress.ip_address(dst).is_private:
-            output["direction"] = "incoming"
-            output["laddr_ip"], output["raddr_ip"] = dst, src
-            if hasattr(packet, "sport"):
-                output["raddr_port"] = packet.sport
-        return output
+def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
+    """init subprocess for bpf program and monitor with root (before dropping root privileges)"""
+    def snitch_linux(config, q_snitch, q_error, q_term_monitor):
+        """runs a bpf program to monitor the system for new processes and connections and puts them in the queue"""
+        if os.getuid() == 0:
+            b = BPF(text=bpf_text)
+            execve_fnname = b.get_syscall_fnname("execve")
+            b.attach_kprobe(event=execve_fnname, fn_name="syscall__execve")
+            b.attach_kretprobe(event=execve_fnname, fn_name="do_ret_sys_execve")
+            b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
+            argv = collections.defaultdict(list)
+            def queue_exec_event(cpu, data, size):
+                event = b["exec_events"].event(data)
+                if event.type == 0:  # EVENT_ARG
+                    argv[event.pid].append(event.argv)
+                elif event.type == 1:  # EVENT_RET
+                    if event.retval == 0:  # skip failed execs
+                        argv_text = b' '.join(argv[event.pid]).replace(b'\n', b'\\n')
+                        q_snitch.put(pickle.dumps({"type": "exec", "pid": event.pid, "name": event.comm.decode(), "cmdline": argv_text.decode()}))
+                    try:
+                        del(argv[event.pid])
+                    except Exception:
+                        pass
+            def queue_ipv4_event(cpu, data, size):
+                event = b["ipv4_events"].event(data)
+                q_snitch.put(pickle.dumps({"type": "ipv4", "pid": event.pid, "addr": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+            def queue_ipv6_event(cpu, data, size):
+                event = b["ipv6_events"].event(data)
+                q_snitch.put(pickle.dumps({"type": "ipv6", "pid": event.pid, "addr": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
+            def queue_other_event(cpu, data, size):
+                event = b["other_socket_events"].event(data)
+                q_snitch.put(pickle.dumps({"type": "other", "pid": event.pid}))
+            b["exec_events"].open_perf_buffer(queue_exec_event)
+            b["ipv4_events"].open_perf_buffer(queue_ipv4_event)
+            b["ipv6_events"].open_perf_buffer(queue_ipv6_event)
+            b["other_socket_events"].open_perf_buffer(queue_other_event)
+            while True:
+                try:
+                    b.perf_buffer_poll()
+                except Exception as e:
+                    error = type(e).__name__ + str(e.args)
+                    q_error.put(error)
+                try:
+                    if q_term_monitor.get(block=False):
+                        return 0
+                except queue.Empty:
+                    if not multiprocessing.parent_process().is_alive():
+                        return 0
+        else:
+            q_error.put("Snitch subprocess permission error, requires root")
+        return 1
 
-    def filter_packet(packet) -> bool:
-        """filter remote connections (ignore local only) (either src or dst is remote)"""
-        try:
-            src = ipaddress.ip_address(packet.getlayer(scapy.layers.all.IP).src)
-            dst = ipaddress.ip_address(packet.getlayer(scapy.layers.all.IP).dst)
-            return src.is_private != dst.is_private
-        except Exception:
-            return False
 
-    def sniffer(q_packet, q_error):
-        """always running packet sniffer that queues parsed packets after filtering"""
-        global scapy
-        try:
-            import scapy
-            from scapy.all import sniff
-        except Exception as e:
-            q_error.put("Sniffer " + type(e).__name__ + str(e.args))
-            return 1
-        error_counter = 0
-        while True:
-            try:
-                sniff(count=0, store=False, prn=lambda x: q_packet.put(parse_packet(x)), lfilter=filter_packet)
-            except PermissionError:
-                q_error.put("Sniffer permission error, it needs to run with sudo -E")
-                break
-            except Exception as e:
-                q_error.put("Sniffer exception: " + type(e).__name__ + str(e.args))
-                error_counter += 1
-                if error_counter >= 5:
-                    break
-
-    def sniffer_mon(q_packet, q_error, q_term):
-        """monitor the sniffer and parent process, has same privileges as the sniffer for clean termination at the command or death of the parent"""
-        import queue, psutil
+    def snitch_monitor(config, q_snitch, q_error, q_term):
+        """monitor the snitch subprocess and parent process, has same privileges as subprocess for clean termination at the command or death of the parent"""
         signal.signal(signal.SIGINT, lambda *args: None)
-        terminate_sniffer = lambda p_sniff: p_sniff.terminate() or p_sniff.join(1) or (p_sniff.is_alive() and p_sniff.kill()) or p_sniff.close()
-        p_sniff = multiprocessing.Process(name="pico-sniffer", target=sniffer, args=(q_packet, q_error), daemon=True)
-        p_sniff.start()
+        if sys.platform.startswith("linux"):
+            p_snitch_func = snitch_linux
+        # elif sys.platform.startswith("win"):
+        #     process_monitor = snitch_windows
+        else:
+            q_error.put("Did not detect a supported operating system")
+            return 1
+        q_term_monitor = multiprocessing.Queue()
+        terminate_subprocess = lambda p_snitch_sub: q_term_monitor.put("TERMINATE") or p_snitch_sub.join(2) or (p_snitch_sub.is_alive() and p_snitch_sub.kill()) or p_snitch_sub.close()
+        p_snitch_sub = multiprocessing.Process(name="processsnitch", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
+        p_snitch_sub.start()
         while True:
-            if p_sniff.is_alive() and psutil.Process(p_sniff.pid).memory_info().vms > 256000000:
-                q_error.put("Sniffer memory usage exceeded 256 MB, restarting sniffer")
-                terminate_sniffer(p_sniff)
-                p_sniff = multiprocessing.Process(name="pico-sniffer", target=sniffer, args=(q_packet, q_error), daemon=True)
-                p_sniff.start()
+            if p_snitch_sub.is_alive() and psutil.Process(p_snitch_sub.pid).memory_info().vms > 256000000:
+                q_error.put("Snitch subprocess memory usage exceeded 256 MB, restarting snitch")
+                terminate_subprocess(p_snitch_sub)
+                p_snitch_sub = multiprocessing.Process(name="processsnitch", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
+                p_snitch_sub.start()
             try:
                 if q_term.get(block=True, timeout=10):
                     break
             except queue.Empty:
-                if not multiprocessing.parent_process().is_alive() or not p_sniff.is_alive():
+                if not multiprocessing.parent_process().is_alive() or not p_snitch_sub.is_alive():
                     break
-        terminate_sniffer(p_sniff)
+        terminate_subprocess(p_snitch_sub)
         return 0
 
     if __name__ == "__main__":
-        q_packet, q_error, q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-        p_sniff = multiprocessing.Process(name="pico-sniffermon", target=sniffer_mon, args=(q_packet, q_error, q_term))
-        p_sniff.start()
-        return p_sniff, q_packet, q_error, q_term
+        q_snitch, q_error, q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
+        p_snitch_mon = multiprocessing.Process(name="processsnitchmonitor", target=snitch_monitor, args=(config, q_snitch, q_error, q_term))
+        p_snitch_mon.start()
+        return p_snitch_mon, q_snitch, q_error, q_term
     return None, None, None, None
 
 
 def main():
     """startup picosnitch as a daemon on posix systems, regular process otherwise, and ensure only one instance is running"""
-    global filelock
-    import filelock
     lock = filelock.FileLock(os.path.join(os.path.expanduser("~"), ".picosnitch_lock"), timeout=1)
     try:
         lock.acquire()
@@ -373,7 +476,9 @@ def main():
         print("Error: another instance of this application is currently running", file=sys.stderr)
         sys.exit(1)
     try:
-        _ = read()
+        tmp_snitch = read()
+        if not tmp_snitch["Config"]["VT API key"]:
+            tmp_snitch["Config"]["VT API key"] = input("Enter your VirusTotal API key (optional)\n>>> ")
     except Exception as e:
         print(type(e).__name__ + str(e.args))
         sys.exit(1)
@@ -384,10 +489,228 @@ def main():
             print("Warning: picosnitch was run as root without preserving environment", file=sys.stderr)
         import daemon
         with daemon.DaemonContext():
-            loop()
+            loop(tmp_snitch["Config"]["VT API key"])
     else:
-        loop()
+        # not really supported right now (waiting to see what happens with https://github.com/microsoft/ebpf-for-windows)
+        loop(tmp_snitch["Config"]["VT API key"])
 
+
+bpf_text = """
+// This BPF program was adapted from the following sources, both licensed under the Apache License, Version 2.0
+// https://github.com/iovisor/bcc/blob/023154c7708087ddf6c2031cef5d25c2445b70c4/tools/execsnoop.py
+// https://github.com/p-/socket-connect-bpf/blob/7f386e368759e53868a078570254348e73e73e22/securitySocketConnectSrc.bpf
+// Copyright 2016 Netflix, Inc.
+// Copyright 2019 Peter Stöckli
+
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+
+//     http://www.apache.org/licenses/LICENSE-2.0
+
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include <uapi/linux/ptrace.h>
+#include <linux/socket.h>
+#include <linux/sched.h>
+#include <linux/fs.h>
+#include <linux/in.h>
+#include <linux/in6.h>
+#include <linux/ip.h>
+
+#define ARGSIZE  128
+
+enum event_type {
+    EVENT_ARG,
+    EVENT_RET,
+};
+
+struct data_t {
+    u32 pid;  // PID as in the userspace term (i.e. task->tgid in kernel)
+    u32 ppid; // Parent PID as in the userspace term (i.e task->real_parent->tgid in kernel)
+    u32 uid;
+    char comm[TASK_COMM_LEN];
+    enum event_type type;
+    char argv[ARGSIZE];
+    int retval;
+};
+BPF_PERF_OUTPUT(exec_events);
+
+struct ipv4_event_t {
+    u64 ts_us;
+    u32 pid;
+    u32 uid;
+    u32 af;
+    char task[TASK_COMM_LEN];
+    u32 daddr;
+    u16 dport;
+} __attribute__((packed));
+BPF_PERF_OUTPUT(ipv4_events);
+
+struct ipv6_event_t {
+    u64 ts_us;
+    u32 pid;
+    u32 uid;
+    u32 af;
+    char task[TASK_COMM_LEN];
+    unsigned __int128 daddr;
+    u16 dport;
+} __attribute__((packed));
+BPF_PERF_OUTPUT(ipv6_events);
+
+struct other_socket_event_t {
+    u64 ts_us;
+    u32 pid;
+    u32 uid;
+    u32 af;
+    char task[TASK_COMM_LEN];
+} __attribute__((packed));
+BPF_PERF_OUTPUT(other_socket_events);
+
+static int __submit_arg(struct pt_regs *ctx, void *ptr, struct data_t *data)
+{
+    bpf_probe_read_user(data->argv, sizeof(data->argv), ptr);
+    exec_events.perf_submit(ctx, data, sizeof(struct data_t));
+    return 1;
+}
+
+static int submit_arg(struct pt_regs *ctx, void *ptr, struct data_t *data)
+{
+    const char *argp = NULL;
+    bpf_probe_read_user(&argp, sizeof(argp), ptr);
+    if (argp) {
+        return __submit_arg(ctx, (void *)(argp), data);
+    }
+    return 0;
+}
+
+int syscall__execve(struct pt_regs *ctx,
+    const char __user *filename,
+    const char __user *const __user *__argv,
+    const char __user *const __user *__envp)
+{
+
+    u32 uid = bpf_get_current_uid_gid() & 0xffffffff;
+
+    // create data here and pass to submit_arg to save stack space (#555)
+    struct data_t data = {};
+    struct task_struct *task;
+
+    data.pid = bpf_get_current_pid_tgid() >> 32;
+
+    task = (struct task_struct *)bpf_get_current_task();
+    // Some kernels, like Ubuntu 4.13.0-generic, return 0
+    // as the real_parent->tgid.
+    // We use the get_ppid function as a fallback in those cases. (#1883)
+    data.ppid = task->real_parent->tgid;
+
+    bpf_get_current_comm(&data.comm, sizeof(data.comm));
+    data.type = EVENT_ARG;
+
+    __submit_arg(ctx, (void *)filename, &data);
+
+    // skip first arg, as we submitted filename
+    #pragma unroll
+    for (int i = 1; i < 20; i++) {
+        if (submit_arg(ctx, (void *)&__argv[i], &data) == 0)
+             goto out;
+    }
+
+    // handle truncated argument list
+    char ellipsis[] = "...";
+    __submit_arg(ctx, (void *)ellipsis, &data);
+out:
+    return 0;
+}
+
+int do_ret_sys_execve(struct pt_regs *ctx)
+{
+    struct data_t data = {};
+    struct task_struct *task;
+
+    u32 uid = bpf_get_current_uid_gid() & 0xffffffff;
+
+    data.pid = bpf_get_current_pid_tgid() >> 32;
+    data.uid = uid;
+
+    task = (struct task_struct *)bpf_get_current_task();
+    // Some kernels, like Ubuntu 4.13.0-generic, return 0
+    // as the real_parent->tgid.
+    // We use the get_ppid function as a fallback in those cases. (#1883)
+    data.ppid = task->real_parent->tgid;
+
+    bpf_get_current_comm(&data.comm, sizeof(data.comm));
+    data.type = EVENT_RET;
+    data.retval = PT_REGS_RC(ctx);
+    exec_events.perf_submit(ctx, &data, sizeof(data));
+
+    return 0;
+}
+
+int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, struct sockaddr *address, int addrlen)
+{
+    int ret = PT_REGS_RC(ctx);
+
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+
+    u32 uid = bpf_get_current_uid_gid();
+
+    struct sock *skp = sock->sk;
+
+    // The AF options are listed in https://github.com/torvalds/linux/blob/master/include/linux/socket.h
+
+    u32 address_family = address->sa_family;
+    if (address_family == AF_INET) {
+        struct ipv4_event_t data4 = {.pid = pid, .uid = uid, .af = address_family};
+        data4.ts_us = bpf_ktime_get_ns() / 1000;
+
+        struct sockaddr_in *daddr = (struct sockaddr_in *)address;
+
+        bpf_probe_read(&data4.daddr, sizeof(data4.daddr), &daddr->sin_addr.s_addr);
+
+        u16 dport = 0;
+        bpf_probe_read(&dport, sizeof(dport), &daddr->sin_port);
+        data4.dport = ntohs(dport);
+
+        bpf_get_current_comm(&data4.task, sizeof(data4.task));
+
+        if (data4.dport != 0) {
+            ipv4_events.perf_submit(ctx, &data4, sizeof(data4));
+        }
+    }
+    else if (address_family == AF_INET6) {
+        struct ipv6_event_t data6 = {.pid = pid, .uid = uid, .af = address_family};
+        data6.ts_us = bpf_ktime_get_ns() / 1000;
+
+        struct sockaddr_in6 *daddr6 = (struct sockaddr_in6 *)address;
+
+        bpf_probe_read(&data6.daddr, sizeof(data6.daddr), &daddr6->sin6_addr.in6_u.u6_addr32);
+
+        u16 dport6 = 0;
+        bpf_probe_read(&dport6, sizeof(dport6), &daddr6->sin6_port);
+        data6.dport = ntohs(dport6);
+
+        bpf_get_current_comm(&data6.task, sizeof(data6.task));
+
+        if (data6.dport != 0) {
+            ipv6_events.perf_submit(ctx, &data6, sizeof(data6));
+        }
+    }
+    else if (address_family != AF_UNIX && address_family != AF_UNSPEC) { // other sockets, except UNIX and UNSPEC sockets
+        struct other_socket_event_t socket_event = {.pid = pid, .uid = uid, .af = address_family};
+        socket_event.ts_us = bpf_ktime_get_ns() / 1000;
+        bpf_get_current_comm(&socket_event.task, sizeof(socket_event.task));
+        other_socket_events.perf_submit(ctx, &socket_event, sizeof(socket_event));
+    }
+
+    return 0;
+}
+"""
 
 if __name__ == "__main__":
     sys.exit(main())
