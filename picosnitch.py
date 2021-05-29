@@ -345,8 +345,8 @@ def loop(vt_api_key: str = ""):
     signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_snitch_mon, q_term, q_vt_term))
     # snitch init checks
     if p_snitch_mon is None:
-        snitch["Errors"].append(time.ctime() + " Snitch subprocess init failed, __name__ != __main__, try: python -m picosnitch")
-        toast("Snitch subprocess init failed, try: python -m picosnitch", file=sys.stderr)
+        snitch["Errors"].append(time.ctime() + " Snitch subprocess init failed, __name__ != __main__, try: sudo -E python -m picosnitch")
+        toast("Snitch subprocess init failed, try: sudo -E python -m picosnitch", file=sys.stderr)
         sys.exit(1)
     # check if there are pending virtustotal results from last time
     get_vt_results(snitch, q_vt_pending, True)
