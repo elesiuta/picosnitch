@@ -405,6 +405,12 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
             b.attach_kprobe(event=execve_fnname, fn_name="syscall__execve")
             b.attach_kretprobe(event=execve_fnname, fn_name="do_ret_sys_execve")
             b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
+            b.attach_uprobe(name="c", sym="getaddrinfo", fn_name="do_entry", pid=-1)
+            b.attach_uprobe(name="c", sym="gethostbyname", fn_name="do_entry", pid=-1)
+            b.attach_uprobe(name="c", sym="gethostbyname2", fn_name="do_entry", pid=-1)
+            b.attach_uretprobe(name="c", sym="getaddrinfo", fn_name="do_return", pid=-1)
+            b.attach_uretprobe(name="c", sym="gethostbyname", fn_name="do_return", pid=-1)
+            b.attach_uretprobe(name="c", sym="gethostbyname2", fn_name="do_return", pid=-1)
             argv = collections.defaultdict(list)
             def queue_exec_event(cpu, data, size):
                 event = b["exec_events"].event(data)
@@ -426,10 +432,14 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
             def queue_other_event(cpu, data, size):
                 event = b["other_socket_events"].event(data)
                 q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "port": 0, "ip": ""}))
+            def queue_dns_event(cpu, data, size):
+                event = b["dns_events"].event(data)
+                q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "port": 0, "ip": ""}))
             b["exec_events"].open_perf_buffer(queue_exec_event)
             b["ipv4_events"].open_perf_buffer(queue_ipv4_event)
             b["ipv6_events"].open_perf_buffer(queue_ipv6_event)
             b["other_socket_events"].open_perf_buffer(queue_other_event)
+            b["dns_events"].open_perf_buffer(queue_dns_event)
             while True:
                 try:
                     b.perf_buffer_poll()
@@ -570,7 +580,9 @@ def main():
 bpf_text = """
 // This BPF program was adapted from the following sources, both licensed under the Apache License, Version 2.0
 // https://github.com/iovisor/bcc/blob/023154c7708087ddf6c2031cef5d25c2445b70c4/tools/execsnoop.py
+// https://github.com/iovisor/bcc/blob/ab14fafec3fc13f89bd4678b7fc94829dcacaa7b/tools/gethostlatency.py
 // https://github.com/p-/socket-connect-bpf/blob/7f386e368759e53868a078570254348e73e73e22/securitySocketConnectSrc.bpf
+// https://github.com/p-/socket-connect-bpf/blob/7f386e368759e53868a078570254348e73e73e22/dnsLookupSrc.bpf
 // Copyright 2016 Netflix, Inc.
 // Copyright 2019 Peter Stöckli
 
@@ -594,6 +606,8 @@ bpf_text = """
 #include <linux/in6.h>
 #include <linux/ip.h>
 
+// execsnoop structs
+
 #define ARGSIZE  128
 
 enum event_type {
@@ -611,6 +625,8 @@ struct data_t {
     int retval;
 };
 BPF_PERF_OUTPUT(exec_events);
+
+// securitySocketConnect structs
 
 struct ipv4_event_t {
     u64 ts_us;
@@ -642,6 +658,25 @@ struct other_socket_event_t {
     char task[TASK_COMM_LEN];
 } __attribute__((packed));
 BPF_PERF_OUTPUT(other_socket_events);
+
+// gethostlatency structs
+
+struct val_t {
+    u32 pid;
+    char comm[TASK_COMM_LEN];
+    char host[80];
+};
+
+struct data_dns_t {
+    u32 pid;
+    char comm[TASK_COMM_LEN];
+    char host[80];
+};
+
+BPF_HASH(start, u32, struct val_t);
+BPF_PERF_OUTPUT(dns_events);
+
+// execsnoop functions
 
 static int __submit_arg(struct pt_regs *ctx, void *ptr, struct data_t *data)
 {
@@ -723,6 +758,8 @@ int do_ret_sys_execve(struct pt_regs *ctx)
     return 0;
 }
 
+// securitySocketConnect functions
+
 int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, struct sockaddr *address, int addrlen)
 {
     int ret = PT_REGS_RC(ctx);
@@ -780,6 +817,40 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
         other_socket_events.perf_submit(ctx, &socket_event, sizeof(socket_event));
     }
 
+    return 0;
+}
+
+// gethostlatency functions
+
+int do_entry(struct pt_regs *ctx) {
+    if (!PT_REGS_PARM1(ctx))
+        return 0;
+    struct val_t val = {};
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+    u32 tid = (u32)pid_tgid;
+    if (bpf_get_current_comm(&val.comm, sizeof(val.comm)) == 0) {
+        bpf_probe_read_user(&val.host, sizeof(val.host),
+                       (void *)PT_REGS_PARM1(ctx));
+        val.pid = pid;
+        start.update(&tid, &val);
+    }
+    return 0;
+}
+
+int do_return(struct pt_regs *ctx) {
+    struct val_t *valp;
+    struct data_dns_t data = {};
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 tid = (u32)pid_tgid;
+    valp = start.lookup(&tid);
+    if (valp == 0)
+        return 0;       // missed start
+    bpf_probe_read_kernel(&data.comm, sizeof(data.comm), valp->comm);
+    bpf_probe_read_kernel(&data.host, sizeof(data.host), (void *)valp->host);
+    data.pid = valp->pid;
+    dns_events.perf_submit(ctx, &data, sizeof(data));
+    start.delete(&tid);
     return 0;
 }
 """
