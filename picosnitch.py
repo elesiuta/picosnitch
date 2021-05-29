@@ -176,15 +176,18 @@ def initial_poll(snitch: dict, known_pids: dict, q_vt_pending: multiprocessing.Q
     ctime = time.ctime()
     current_processes = {}
     for proc in psutil.process_iter(attrs=["name", "exe", "cmdline", "pid"], ad_value=""):
-        if os.path.isfile(proc.info["exe"]):
-            current_processes[proc.info["exe"]] = proc.info
-            known_pids["pid"] = proc.info
+        proc = proc.info
+        if os.path.isfile(proc["exe"]):
+            proc["cmdline"] = shlex.join(proc["cmdline"])
+            current_processes[proc["exe"]] = proc
+            known_pids[proc["pid"]] = proc
     proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
     current_connections = set(psutil.net_connections(kind="all"))
     for conn in current_connections:
         try:
             if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
+                proc["cmdline"] = shlex.join(proc["cmdline"])
                 conn_dict = {"ip": conn.raddr.ip, "port": conn.raddr.port}
                 sha256 = get_sha256(proc["exe"])
                 _ = current_processes.pop(proc["exe"], 0)
@@ -236,6 +239,7 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
                     try:
                         proc_psutil = psutil.Process(proc["pid"]).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
                         if proc_psutil["exe"]:
+                            proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
                             known_pids[proc_psutil["pid"]] = proc_psutil
                     except Exception:
                         pass
@@ -297,7 +301,7 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
     if proc["exe"] not in snitch["Processes"]:
         snitch["Processes"][proc["exe"]] = {
             "name": proc["name"],
-            "cmdlines": [str(proc["cmdline"])],
+            "cmdlines": [proc["cmdline"]],
             "first seen": ctime,
             "last seen": ctime,
             "days seen": 1,
@@ -312,8 +316,8 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
         entry = snitch["Processes"][proc["exe"]]
         if proc["name"] not in entry["name"]:
             entry["name"] += " alternative=" + proc["name"]
-        if str(proc["cmdline"]) not in entry["cmdlines"]:
-            get_common_pattern(str(proc["cmdline"]), entry["cmdlines"], 0.8)
+        if proc["cmdline"] not in entry["cmdlines"]:
+            get_common_pattern(proc["cmdline"], entry["cmdlines"], 0.8)
             entry["cmdlines"].sort()
         if conn["port"] not in entry["ports"]:
             entry["ports"].append(conn["port"])
@@ -405,7 +409,7 @@ def loop(vt_api_key: str = ""):
 
 
 def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
-    """init snitch subprocess and monitor with root (before dropping root privileges)"""
+    """init snitch subprocesses and monitor with root (before dropping root privileges)"""
     def snitch_linux(config, q_snitch, q_error, q_term_monitor):
         """runs a bpf program to monitor the system for new processes and connections and puts them in the queue"""
         from bcc import BPF
@@ -505,7 +509,7 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
 
     if __name__ == "__main__":
         q_snitch, q_error, q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-        p_snitch_mon = multiprocessing.Process(name="snitchsubprocessmonitor", target=snitch_monitor, args=(config, q_snitch, q_error, q_term))
+        p_snitch_mon = multiprocessing.Process(name="snitchmonitor", target=snitch_monitor, args=(config, q_snitch, q_error, q_term))
         p_snitch_mon.start()
         return p_snitch_mon, q_snitch, q_error, q_term
     return None, None, None, None
@@ -552,7 +556,7 @@ def init_virustotal_subprocess(config: dict) -> typing.Tuple[multiprocessing.Pro
 
     if __name__ == "__main__":
         q_vt_pending, q_vt_results, q_vt_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-        p_virustotal = multiprocessing.Process(name="virustotalsnitch", target=virustotal_subprocess, args=(config, q_vt_pending, q_vt_results, q_vt_term), daemon=True)
+        p_virustotal = multiprocessing.Process(name="snitchvirustotal", target=virustotal_subprocess, args=(config, q_vt_pending, q_vt_results, q_vt_term), daemon=True)
         p_virustotal.start()
         return p_virustotal, q_vt_pending, q_vt_results, q_vt_term
     return None, None, None, None
@@ -836,14 +840,12 @@ int do_entry(struct pt_regs *ctx) {
     if (!PT_REGS_PARM1(ctx))
         return 0;
     struct val_t val = {};
-    u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 pid = pid_tgid >> 32;
-    u32 tid = (u32)pid_tgid;
+    u32 pid = bpf_get_current_pid_tgid();
     if (bpf_get_current_comm(&val.comm, sizeof(val.comm)) == 0) {
         bpf_probe_read_user(&val.host, sizeof(val.host),
                        (void *)PT_REGS_PARM1(ctx));
         val.pid = pid;
-        start.update(&tid, &val);
+        start.update(&pid, &val);
     }
     return 0;
 }
@@ -851,16 +853,15 @@ int do_entry(struct pt_regs *ctx) {
 int do_return(struct pt_regs *ctx) {
     struct val_t *valp;
     struct data_dns_t data = {};
-    u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 tid = (u32)pid_tgid;
-    valp = start.lookup(&tid);
+    u32 pid = bpf_get_current_pid_tgid();
+    valp = start.lookup(&pid);
     if (valp == 0)
         return 0;       // missed start
     bpf_probe_read_kernel(&data.comm, sizeof(data.comm), valp->comm);
     bpf_probe_read_kernel(&data.host, sizeof(data.host), (void *)valp->host);
     data.pid = valp->pid;
     dns_events.perf_submit(ctx, &data, sizeof(data));
-    start.delete(&tid);
+    start.delete(&pid);
     return 0;
 }
 """
