@@ -34,9 +34,11 @@
 ```python
 {
   "Config": {
+    "Log command lines": True, # Log command line args for each executable
+    "Log remote address": True, # Log remote addresses for each executable
     "Only log connections": True, # Only log processes that make remote network connections
     # otherwise log every new process from exec()
-    "Remote address unlog": [80, "firefox"], # List of process names (str) or remote ports (int)
+    "Remote address unlog": [80, "chrome", "firefox"], # List of process names (str) or ports (int)
     # will omit connections that match any of these from the log of remote addresses to avoid clutter
     # the process and executable will still be logged if it has not been already
     "VT API key": "", # API key for VirusTotal, leave blank otherwise

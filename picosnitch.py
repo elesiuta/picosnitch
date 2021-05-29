@@ -46,7 +46,15 @@ except Exception as e:
 def read() -> dict:
     """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
-        "Config": {"Only log connections": True, "Remote address unlog": [80, "chrome", "firefox"], "VT API key": "", "VT file upload": False, "VT limit request": 15},
+        "Config": {
+            "Log command lines": True,
+            "Log remote address": True,
+            "Only log connections": True,
+            "Remote address unlog": [80, "chrome", "firefox"],
+            "VT API key": "",
+            "VT file upload": False,
+            "VT limit request": 15
+        },
         "Errors": [],
         "Latest Entries": [],
         "Names": {},
@@ -255,6 +263,11 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
     """update the snitch with data from queues and create a notification if new entry"""
     # Get DNS reverse name and reverse the name for sorting
     reversed_dns = reverse_domain_name(reverse_dns_lookup(conn["ip"]))
+    # Omit fields from log
+    if not snitch["Config"]["Log command lines"]:
+        proc["cmdline"] = ""
+    if not snitch["Config"]["Log remote address"]:
+        reversed_dns = ""
     # Update Latest Entries
     if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
         snitch["Latest Entries"].append(ctime + " " + proc["name"] + " - " + proc["exe"])
