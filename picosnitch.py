@@ -216,9 +216,13 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
     for proc in new_processes:
         try:
             if proc["type"] == "exec":
-                proc["exe"] = shlex.split(proc["cmdline"])[0]
+                try:
+                    cmdline = shlex.split(proc["cmdline"])
+                except Exception:
+                    cmdline = proc["cmdline"].strip().split()
+                proc["exe"] = cmdline[0]
                 if proc["exe"] == "exec":
-                    proc["exe"] = shlex.split(proc["cmdline"])[1]
+                    proc["exe"] = cmdline[1]
                 known_pids[proc["pid"]] = proc
                 if not snitch["Config"]["Only log connections"]:
                     pending_list.append(proc)
@@ -407,7 +411,6 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
                 if event.type == 0:  # EVENT_ARG
                     argv[event.pid].append(event.argv)
                 elif event.type == 1:  # EVENT_RET
-                    argv[event.pid] = [b"\"" + arg.replace(b"\"", b"\\\"") + b"\"" for arg in argv[event.pid]]
                     argv_text = b' '.join(argv[event.pid]).replace(b'\n', b'\\n')
                     q_snitch.put(pickle.dumps({"type": "exec", "pid": event.pid, "name": event.comm.decode(), "cmdline": argv_text.decode()}))
                     try:
