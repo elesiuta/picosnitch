@@ -198,7 +198,7 @@ def initial_poll(snitch: dict, known_pids: dict, q_vt_pending: multiprocessing.Q
                 error += "{process no longer exists}"
             snitch["Errors"].append(ctime + " " + error)
     if not snitch["Config"]["Only log connections"]:
-        conn = {"ip": "", "port": 0}
+        conn = {"ip": "", "port": -1}
         for proc in current_processes.values():
             try:
                 sha256 = get_sha256(proc["exe"])
@@ -233,9 +233,13 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
                     proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
                     pending_list.append(proc)
                 else:
-                    proc_psutil = psutil.Process(proc["pid"]).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
-                    if proc_psutil["exe"]:
-                        known_pids[proc_psutil["pid"]] = proc_psutil
+                    try:
+                        proc_psutil = psutil.Process(proc["pid"]).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
+                        if proc_psutil["exe"]:
+                            known_pids[proc_psutil["pid"]] = proc_psutil
+                    except Exception:
+                        pass
+                    proc["missed"] = 1
                     pending_conns.append(proc)
         except Exception as e:
             error = "Process queue " + type(e).__name__ + str(e.args) + str(proc)
@@ -246,14 +250,18 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
             proc["exe"] = known_pids[proc["pid"]]["exe"]
             proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
             pending_list.append(proc)
+        elif proc["missed"] < 5:
+            proc["missed"] += 1
+            pending_conns.append(proc)
         else:
+            _ = proc.pop("missed")
             snitch["Errors"].append(ctime + " no known process for conn: " + str(proc))
     for proc in pending_list:
         try:
             if proc["type"] == "conn":
                 conn = {"ip": proc["ip"], "port": proc["port"]}
             else:
-                conn = {"ip": "", "port": 0}
+                conn = {"ip": "", "port": -1}
             sha256 = get_sha256(proc["exe"])
             update_snitch(snitch, proc, conn, sha256, ctime, q_vt_pending)
         except Exception as e:
@@ -280,9 +288,11 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
         if proc["exe"] not in snitch["Names"][proc["name"]]:
             snitch["Names"][proc["name"]].append(proc["exe"])
             toast("New executable detected for " + proc["name"] + ": " + proc["exe"])
-    elif conn["ip"] or conn["port"]:
+    elif conn["ip"] or conn["port"] >= 0:  # port 0 is a conn where port wasn't detected, -1 is proc without conn detected
         snitch["Names"][proc["name"]] = [proc["exe"]]
         toast("First network connection detected for " + proc["name"])
+    elif not snitch["Config"]["Only log connections"]:
+        snitch["Names"][proc["name"]] = [proc["exe"]]
     # Update Processes
     if proc["exe"] not in snitch["Processes"]:
         snitch["Processes"][proc["exe"]] = {
