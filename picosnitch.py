@@ -206,24 +206,28 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
     pending_list = []
     pending_conns = []
     for proc in new_processes:
-        if proc["type"] == "exec":
-            proc["exe"] = shlex.split(proc["cmdline"])[0]
-            if proc["exe"] == "exec":
-                proc["exe"] = shlex.split(proc["cmdline"])[1]
-            known_pids[proc["pid"]] = proc
-            if not snitch["Config"]["Only log connections"]:
-                pending_list.append(proc)
-        elif proc["type"] == "conn":
-            if proc["pid"] in known_pids:
-                proc["name"] = known_pids[proc["pid"]]["name"]
-                proc["exe"] = known_pids[proc["pid"]]["exe"]
-                proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
-                pending_list.append(proc)
-            else:
-                proc_psutil = psutil.Process(proc["pid"]).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
-                if proc_psutil["exe"]:
-                    known_pids[proc_psutil["pid"]] = proc_psutil
-                pending_conns.append(proc)
+        try:
+            if proc["type"] == "exec":
+                proc["exe"] = shlex.split(proc["cmdline"])[0]
+                if proc["exe"] == "exec":
+                    proc["exe"] = shlex.split(proc["cmdline"])[1]
+                known_pids[proc["pid"]] = proc
+                if not snitch["Config"]["Only log connections"]:
+                    pending_list.append(proc)
+            elif proc["type"] == "conn":
+                if proc["pid"] in known_pids:
+                    proc["name"] = known_pids[proc["pid"]]["name"]
+                    proc["exe"] = known_pids[proc["pid"]]["exe"]
+                    proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
+                    pending_list.append(proc)
+                else:
+                    proc_psutil = psutil.Process(proc["pid"]).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
+                    if proc_psutil["exe"]:
+                        known_pids[proc_psutil["pid"]] = proc_psutil
+                    pending_conns.append(proc)
+        except Exception as e:
+            error = "Process queue " + type(e).__name__ + str(e.args) + str(proc)
+            snitch["Errors"].append(ctime + " " + error)
     for proc in missed_conns:
         if proc["pid"] in known_pids:
             proc["name"] = known_pids[proc["pid"]]["name"]
@@ -241,9 +245,9 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
             sha256 = get_sha256(proc["exe"])
             update_snitch(snitch, proc, conn, sha256, ctime, q_vt_pending)
         except Exception as e:
-            error = "Processsnitch " + type(e).__name__ + str(e.args) + str(proc)
+            error = "Update snitch " + type(e).__name__ + str(e.args) + str(proc)
             snitch["Errors"].append(ctime + " " + error)
-            toast("Processsnitch error: " + error, file=sys.stderr)
+            toast("Update snitch error: " + error, file=sys.stderr)
     return pending_conns
 
 
@@ -354,8 +358,12 @@ def loop(vt_api_key: str = ""):
         # list of new processes and connections since last poll
         time.sleep(5)
         new_processes = []
-        while not q_snitch.empty():
-            new_processes.append(pickle.loads(q_snitch.get()))
+        try:
+            while True:
+                new_processes.append(q_snitch.get(block=False))
+        except queue.Empty:
+            pass
+        new_processes = [pickle.loads(proc) for proc in new_processes]
         missed_conns = process_queue(snitch, known_pids, missed_conns, new_processes, q_vt_pending)
         # update snitch with virtustotal results
         get_vt_results(snitch, q_vt_results, False)
@@ -385,6 +393,7 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
                 if event.type == 0:  # EVENT_ARG
                     argv[event.pid].append(event.argv)
                 elif event.type == 1:  # EVENT_RET
+                    argv[event.pid] = [b"\"" + arg.replace(b"\"", b"\\\"") + b"\"" for arg in argv[event.pid]]
                     argv_text = b' '.join(argv[event.pid]).replace(b'\n', b'\\n')
                     q_snitch.put(pickle.dumps({"type": "exec", "pid": event.pid, "name": event.comm.decode(), "cmdline": argv_text.decode()}))
                     try:
