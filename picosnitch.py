@@ -357,6 +357,7 @@ def loop(vt_api_key: str = ""):
     last_write = 0
     # get initial running processes and connections
     initial_poll(snitch, known_pids, q_vt_pending)
+    known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
     while True:
         # check for subprocess errors
         while not q_error.empty():
@@ -492,31 +493,39 @@ def init_virustotal_subprocess(config: dict) -> typing.Tuple[multiprocessing.Pro
     def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
         """get virustotal results of process executable"""
         import vt
-        while q_vt_term.empty() and multiprocessing.parent_process().is_alive():
-            time.sleep(config["VT limit request"])
-            proc, sha256 = pickle.loads(q_vt_pending.get(block=True, timeout=None))
-            suspicious = False
-            if config["VT API key"]:
-                client = vt.Client(config["VT API key"])
-                try:
-                    analysis = client.get_object("/files/" + sha256)
-                except Exception:
-                    if config["VT file upload"]:
-                        try:
-                            with open(proc["exe"], "rb") as f:
-                                analysis = client.scan_file(f, wait_for_completion=True)
-                        except Exception:
-                            q_vt_results.put(pickle.dumps((proc, sha256, "Failed to read file for upload", suspicious)))
+        last_error = 0
+        while True:
+            try:
+                if not q_vt_term.empty() or not multiprocessing.parent_process().is_alive():
+                    return 0
+                time.sleep(config["VT limit request"])
+                proc, sha256 = pickle.loads(q_vt_pending.get(block=True, timeout=None))
+                suspicious = False
+                if config["VT API key"]:
+                    client = vt.Client(config["VT API key"])
+                    try:
+                        analysis = client.get_object("/files/" + sha256)
+                    except Exception:
+                        if config["VT file upload"]:
+                            try:
+                                with open(proc["exe"], "rb") as f:
+                                    analysis = client.scan_file(f, wait_for_completion=True)
+                            except Exception:
+                                q_vt_results.put(pickle.dumps((proc, sha256, "Failed to read file for upload", suspicious)))
+                                continue
+                        else:
+                            q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (analysis not found)", suspicious)))
                             continue
-                    else:
-                        q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (analysis not found)", suspicious)))
-                        continue
-                if analysis.last_analysis_stats["malicious"] != 0 or analysis.last_analysis_stats["suspicious"] != 0:
-                    suspicious = True
-                q_vt_results.put(pickle.dumps((proc, sha256, str(analysis.last_analysis_stats), suspicious)))
-            else:
-                q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (no api key)", suspicious)))
-        return 0
+                    if analysis.last_analysis_stats["malicious"] != 0 or analysis.last_analysis_stats["suspicious"] != 0:
+                        suspicious = True
+                    q_vt_results.put(pickle.dumps((proc, sha256, str(analysis.last_analysis_stats), suspicious)))
+                else:
+                    q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (no api key)", suspicious)))
+            except Exception:
+                if time.time() - last_error < 30:
+                    return 1
+                last_error = time.time()
+
 
     if __name__ == "__main__":
         q_vt_pending, q_vt_results, q_vt_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
