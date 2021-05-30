@@ -79,8 +79,8 @@ def read() -> dict:
 def write(snitch: dict) -> None:
     """write snitch to correct location (root privileges should be dropped first)"""
     file_path = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "snitch.json")
-    ## if snitch.pop("WRITELOCK", False):
-    ##     file_path += "~"
+    if snitch.pop("WRITELOCK", False):
+        file_path += "~"
     if not os.path.isdir(os.path.dirname(file_path)):
         os.makedirs(os.path.dirname(file_path))
     try:
@@ -254,9 +254,8 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
                     pending_list.append(proc)
                 else:
                     try:
-                        ## q_psutil_pending.put(pickle.dumps(proc["pid"]))
-                        ## proc_psutil = pickle.loads(q_psutil_results.get())
-                        proc_psutil = psutil.Process(proc["pid"]).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
+                        q_psutil_pending.put(pickle.dumps(proc["pid"]))
+                        proc_psutil = pickle.loads(q_psutil_results.get())
                         if proc_psutil["exe"]:
                             proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
                             known_pids[proc_psutil["pid"]] = proc_psutil
@@ -298,9 +297,8 @@ def update_snitch_wrapper(snitch: dict, update_snitch_pending: list,
     """loop over update_snitch() with pending update list"""
     for proc, conn, ctime in update_snitch_pending:
         try:
-            ## q_sha_pending.put(pickle.dumps(proc["exe"]))
-            ## sha256 = pickle.loads(q_sha_results.get())
-            sha256 = get_sha256(proc["exe"])
+            q_sha_pending.put(pickle.dumps(proc["exe"]))
+            sha256 = pickle.loads(q_sha_results.get())
             update_snitch(snitch, proc, conn, sha256, ctime, q_vt_pending)
         except Exception as e:
             error = "Update snitch " + type(e).__name__ + str(e.args) + str(proc)
@@ -311,7 +309,7 @@ def update_snitch_wrapper(snitch: dict, update_snitch_pending: list,
 def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str, q_vt_pending: multiprocessing.Queue) -> None:
     """update the snitch with data from queues and create a notification if new entry"""
     # Prevent overwriting the snitch before this function completes in the event of a termination signal
-    ## snitch["WRITELOCK"] = True
+    snitch["WRITELOCK"] = True
     # Get DNS reverse name and reverse the name for sorting
     reversed_dns = reverse_domain_name(reverse_dns_lookup(conn["ip"]))
     # Omit fields from log
@@ -377,7 +375,7 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
         if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
             snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, proc["exe"]]
     # Unlock the snitch for writing
-    ## _ = snitch.pop("WRITELOCK")
+    _ = snitch.pop("WRITELOCK")
 
 
 def loop(vt_api_key: str = ""):
@@ -392,12 +390,10 @@ def loop(vt_api_key: str = ""):
         snitch["Config"]["VT API key"] = vt_api_key
     # init root subprocesses and do initial poll with root before dropping privileges
     p_snitch_mon, q_snitch, q_error, q_term = init_snitch_subprocess(snitch["Config"])
-    ## p_sha, q_sha_pending, q_sha_results, q_sha_term = init_func_subprocess("snitchsha", get_sha256)
-    ## p_psutil, q_psutil_pending, q_psutil_results, q_psutil_term = init_func_subprocess("snitchpsutil", get_proc_info)
-    q_sha_pending, q_sha_results, q_sha_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    q_psutil_pending, q_psutil_results, q_psutil_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
+    p_sha, q_sha_pending, q_sha_results, q_sha_term = init_func_subprocess("snitchsha", get_sha256)
+    p_psutil, q_psutil_pending, q_psutil_results, q_psutil_term = init_func_subprocess("snitchpsutil", get_proc_info)
     known_pids = {}
-    ## update_snitch_pending = initial_poll(snitch, known_pids)
+    update_snitch_pending = initial_poll(snitch, known_pids)
     drop_root_privileges()
     # init subprocesses without root (just virustotal)
     p_virustotal, q_vt_pending, q_vt_results, q_vt_term = init_virustotal_subprocess(snitch["Config"])
@@ -416,7 +412,7 @@ def loop(vt_api_key: str = ""):
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
     # update snitch with initial running processes and connections
-    ## update_snitch_wrapper(snitch, update_snitch_pending, q_sha_pending, q_sha_results, q_vt_pending)
+    update_snitch_wrapper(snitch, update_snitch_pending, q_sha_pending, q_sha_results, q_vt_pending)
     known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
     while True:
         # check for subprocess errors
@@ -567,10 +563,14 @@ def init_func_subprocess(name: str, func: typing.Callable) -> typing.Tuple[multi
             try:
                 if not q_term.empty() or not multiprocessing.parent_process().is_alive():
                     return 0
-                arg = pickle.loads(q_pending.get(block=True, timeout=5))
+                arg = pickle.loads(q_pending.get(block=True, timeout=15))
                 q_results.put(pickle.dumps(func(arg)))
+            except queue.Empty:
+                # have to timeout here to check whether to terminate otherwise this could stay hanging
+                # daemon=True flag for multiprocessing.Process does not work after root privileges are dropped for parent
+                pass
             except Exception:
-                if time.time() - last_error < 3:
+                if time.time() - last_error < 30:
                     return 1
                 last_error = time.time()
     if __name__ == "__main__":
