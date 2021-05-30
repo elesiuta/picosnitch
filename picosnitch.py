@@ -515,6 +515,61 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
     return None, None, None, None
 
 
+def init_sha_subprocess() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
+    """init sha subprocess"""
+    def sha_subprocess(q_sha_pending, q_sha_results, q_sha_term):
+        """get sha256 of process executable"""
+        last_error = 0
+        while True:
+            try:
+                if not q_sha_term.empty() or not multiprocessing.parent_process().is_alive():
+                    return 0
+                exe = pickle.loads(q_sha_pending.get(block=True, timeout=None))
+                try:
+                    with open(exe, "rb") as f:
+                        sha256 = hashlib.sha256(f.read()).hexdigest()
+                except Exception:
+                    sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+                q_sha_results.put(pickle.dumps((exe, sha256)))
+            except Exception:
+                if time.time() - last_error < 30:
+                    return 1
+                last_error = time.time()
+    if __name__ == "__main__":
+        q_sha_pending, q_sha_results, q_sha_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
+        p_sha = multiprocessing.Process(name="snitchsha", target=sha_subprocess, args=(q_sha_pending, q_sha_results, q_sha_term), daemon=True)
+        p_sha.start()
+        return p_sha, q_sha_pending, q_sha_results, q_sha_term
+    return None, None, None, None
+
+
+def init_psutil_subprocess() -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
+    """init psutil subprocess"""
+    def psutil_subprocess(q_psutil_pending, q_psutil_results, q_psutil_term):
+        """get psutil of process executable"""
+        last_error = 0
+        while True:
+            try:
+                if not q_psutil_term.empty() or not multiprocessing.parent_process().is_alive():
+                    return 0
+                pid = pickle.loads(q_psutil_pending.get(block=True, timeout=None))
+                try:
+                    proc = psutil.Process(pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
+                except Exception:
+                    proc = None
+                q_psutil_results.put(pickle.dumps(proc))
+            except Exception:
+                if time.time() - last_error < 30:
+                    return 1
+                last_error = time.time()
+    if __name__ == "__main__":
+        q_psutil_pending, q_psutil_results, q_psutil_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
+        p_psutil = multiprocessing.Process(name="snitchpsutil", target=psutil_subprocess, args=(q_psutil_pending, q_psutil_results, q_psutil_term), daemon=True)
+        p_psutil.start()
+        return p_psutil, q_psutil_pending, q_psutil_results, q_psutil_term
+    return None, None, None, None
+
+
 def init_virustotal_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
     """init virustotal subprocess"""
     def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
