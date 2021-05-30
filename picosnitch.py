@@ -279,14 +279,11 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
             _ = proc.pop("missed")
             snitch["Errors"].append(ctime + " no known process for conn: " + str(proc))
     for proc in pending_list:
-        try:
-            if proc["type"] == "conn":
-                conn = {"ip": proc["ip"], "port": proc["port"]}
-            else:
-                conn = {"ip": "", "port": -1}
-            update_snitch_pending.append((proc, conn, ctime))
-        except Exception:
-            pass
+        if proc["type"] == "conn":
+            conn = {"ip": proc["ip"], "port": proc["port"]}
+        else:
+            conn = {"ip": "", "port": -1}
+        update_snitch_pending.append((proc, conn, ctime))
     return pending_conns, update_snitch_pending
 
 
