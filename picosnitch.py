@@ -19,6 +19,7 @@
 
 import collections
 import difflib
+import functools
 import ipaddress
 import json
 import hashlib
@@ -387,9 +388,9 @@ def loop(vt_api_key: str = ""):
         snitch["Config"]["VT API key"] = vt_api_key
     # init root subprocesses and do initial poll with root before dropping privileges
     p_snitch_mon, q_snitch, q_error, q_term = init_snitch_subprocess(snitch["Config"])
-    p_sha, q_sha_pending, q_sha_results, q_sha_term = init_func_subprocess("snitchsha", get_sha256)
+    p_sha, q_sha_pending, q_sha_results, q_sha_term = init_func_subprocess("snitchsha", functools.lru_cache(get_sha256))
     p_psutil, q_psutil_pending, q_psutil_results, q_psutil_term = init_func_subprocess("snitchpsutil", get_proc_info)
-    known_pids = {}
+    known_pids = collections.OrderedDict()
     update_snitch_pending = initial_poll(snitch, known_pids)
     drop_root_privileges()
     # init subprocesses without root (just virustotal)
@@ -435,6 +436,9 @@ def loop(vt_api_key: str = ""):
         update_snitch_wrapper(snitch, update_snitch_pending, q_sha_pending, q_sha_results, q_vt_pending)
         # update snitch with virtustotal results
         get_vt_results(snitch, q_vt_results, False)
+        # free some memory
+        while len(known_pids) > 9000:
+            _ = known_pids.popitem(last=False)
         # write snitch
         if time.time() - last_write > 30:
             new_size = sys.getsizeof(pickle.dumps(snitch))
