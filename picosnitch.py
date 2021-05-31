@@ -20,6 +20,7 @@
 import collections
 import difflib
 import functools
+import gc
 import ipaddress
 import json
 import hashlib
@@ -412,6 +413,7 @@ def loop(vt_api_key: str = ""):
     # update snitch with initial running processes and connections
     update_snitch_wrapper(snitch, update_snitch_pending, q_sha_pending, q_sha_results, q_vt_pending)
     known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
+    # the actual main loop
     while True:
         # check for subprocess errors
         while not q_error.empty():
@@ -423,7 +425,7 @@ def loop(vt_api_key: str = ""):
             snitch["Errors"].append(time.ctime() + " snitch subprocess stopped")
             toast("snitch subprocess stopped, exiting picosnitch", file=sys.stderr)
             terminate(snitch, p_snitch_mon, q_term, q_sha_term, q_psutil_term, q_vt_term)
-        # list of new processes and connections since last poll
+        # get list of new processes and connections since last update
         time.sleep(5)
         new_processes = []
         try:
@@ -431,14 +433,17 @@ def loop(vt_api_key: str = ""):
                 new_processes.append(q_snitch.get(block=False))
         except queue.Empty:
             pass
+        # process the list and update snitch
         new_processes = [pickle.loads(proc) for proc in new_processes]
         missed_conns, update_snitch_pending = process_queue(snitch, known_pids, missed_conns, new_processes, q_psutil_pending, q_psutil_results)
         update_snitch_wrapper(snitch, update_snitch_pending, q_sha_pending, q_sha_results, q_vt_pending)
-        # update snitch with virtustotal results
         get_vt_results(snitch, q_vt_results, False)
         # free some memory
         while len(known_pids) > 9000:
             _ = known_pids.popitem(last=False)
+        del(new_processes)
+        del(update_snitch_pending)
+        gc.collect()
         # write snitch
         if time.time() - last_write > 30:
             new_size = sys.getsizeof(pickle.dumps(snitch))
