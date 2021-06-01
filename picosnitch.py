@@ -235,6 +235,7 @@ def process_queue(snitch: dict, known_pids: dict, known_forks: dict, missed_conn
     update_snitch_pending = []
     pending_list = []
     pending_conns = []
+    pending_forks = []
     for proc in new_processes:
         try:
             if proc["type"] == "exec":
@@ -253,13 +254,14 @@ def process_queue(snitch: dict, known_pids: dict, known_forks: dict, missed_conn
                     known_pids[proc["pid"]] = known_pids[proc["ppid"]]
                 else:
                     known_forks[proc["pid"]] = proc["ppid"]
+                    pending_forks.append(proc["pid"])
             elif proc["type"] == "conn":
                 if proc["pid"] in known_pids:
                     proc["name"] = known_pids[proc["pid"]]["name"]
                     proc["exe"] = known_pids[proc["pid"]]["exe"]
                     proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
                     pending_list.append(proc)
-                elif proc["pid"] in known_forks and known_forks["pid"] in known_pids:
+                elif proc["pid"] in known_forks and known_forks[proc["pid"]] in known_pids:
                     known_pids[proc["pid"]] = known_pids[known_forks[proc["pid"]]] 
                 else:
                     try:
@@ -289,8 +291,19 @@ def process_queue(snitch: dict, known_pids: dict, known_forks: dict, missed_conn
             proc["exe"] = known_pids[proc["pid"]]["exe"]
             proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
             pending_list.append(proc)
-        elif proc["pid"] in known_forks and known_forks[proc["pid"]] in known_pids:
-            known_pids[proc["pid"]] = known_pids[known_forks[proc["pid"]]]
+        elif proc["pid"] in pending_forks:
+            if known_forks[proc["pid"]] in known_pids:
+                known_pids[proc["pid"]] = known_pids[known_forks[proc["pid"]]]
+            else:
+                try:
+                    q_psutil_pending.put(pickle.dumps(known_forks[proc["pid"]]))
+                    proc_psutil = pickle.loads(q_psutil_results.get())
+                    if proc_psutil["exe"]:
+                        proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
+                        known_pids[proc_psutil["pid"]] = proc_psutil
+                        known_pids[proc["pid"]] = proc_psutil
+                except Exception:
+                    pass
         elif proc["missed"] < 5:
             proc["missed"] += 1
             pending_conns.append(proc)
