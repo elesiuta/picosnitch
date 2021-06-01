@@ -226,7 +226,7 @@ def initial_poll(snitch: dict, known_pids: dict) -> list:
     return update_snitch_pending
 
 
-def process_queue(snitch: dict, known_pids: dict, known_forks: dict, missed_conns: list, new_processes: list,
+def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_processes: list,
                   q_psutil_pending: multiprocessing.Queue,
                   q_psutil_results: multiprocessing.Queue
                   ) -> tuple:
@@ -235,7 +235,6 @@ def process_queue(snitch: dict, known_pids: dict, known_forks: dict, missed_conn
     update_snitch_pending = []
     pending_list = []
     pending_conns = []
-    pending_forks = []
     for proc in new_processes:
         try:
             if proc["type"] == "exec":
@@ -249,20 +248,12 @@ def process_queue(snitch: dict, known_pids: dict, known_forks: dict, missed_conn
                 known_pids[proc["pid"]] = proc
                 if not snitch["Config"]["Only log connections"]:
                     pending_list.append(proc)
-            elif proc["type"] == "fork":
-                if proc["pid"] not in known_pids and proc["ppid"] in known_pids:
-                    known_pids[proc["pid"]] = known_pids[proc["ppid"]]
-                else:
-                    known_forks[proc["pid"]] = proc["ppid"]
-                    pending_forks.append(proc["pid"])
             elif proc["type"] == "conn":
                 if proc["pid"] in known_pids:
                     proc["name"] = known_pids[proc["pid"]]["name"]
                     proc["exe"] = known_pids[proc["pid"]]["exe"]
                     proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
                     pending_list.append(proc)
-                elif proc["pid"] in known_forks and known_forks[proc["pid"]] in known_pids:
-                    known_pids[proc["pid"]] = known_pids[known_forks[proc["pid"]]] 
                 else:
                     try:
                         q_psutil_pending.put(pickle.dumps(proc["pid"]))
@@ -271,15 +262,16 @@ def process_queue(snitch: dict, known_pids: dict, known_forks: dict, missed_conn
                             proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
                             known_pids[proc_psutil["pid"]] = proc_psutil
                     except Exception:
-                        try:
-                            q_psutil_pending.put(pickle.dumps(known_forks[proc["pid"]]))
-                            proc_psutil = pickle.loads(q_psutil_results.get())
-                            if proc_psutil["exe"]:
-                                proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
-                                known_pids[proc_psutil["pid"]] = proc_psutil
-                                known_pids[proc["pid"]] = proc_psutil
-                        except Exception:
-                            pass
+                        if proc["ppid"] not in known_pids:
+                            try:
+                                q_psutil_pending.put(pickle.dumps(proc["ppid"]))
+                                proc_psutil = pickle.loads(q_psutil_results.get())
+                                if proc_psutil["exe"]:
+                                    proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
+                                    known_pids[proc_psutil["pid"]] = proc_psutil
+                                    known_pids[proc["pid"]] = proc_psutil
+                            except Exception:
+                                pass
                     proc["missed"] = 1
                     pending_conns.append(proc)
         except Exception as e:
@@ -291,19 +283,6 @@ def process_queue(snitch: dict, known_pids: dict, known_forks: dict, missed_conn
             proc["exe"] = known_pids[proc["pid"]]["exe"]
             proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
             pending_list.append(proc)
-        elif proc["pid"] in pending_forks:
-            if known_forks[proc["pid"]] in known_pids:
-                known_pids[proc["pid"]] = known_pids[known_forks[proc["pid"]]]
-            else:
-                try:
-                    q_psutil_pending.put(pickle.dumps(known_forks[proc["pid"]]))
-                    proc_psutil = pickle.loads(q_psutil_results.get())
-                    if proc_psutil["exe"]:
-                        proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
-                        known_pids[proc_psutil["pid"]] = proc_psutil
-                        known_pids[proc["pid"]] = proc_psutil
-                except Exception:
-                    pass
         elif proc["missed"] < 5:
             proc["missed"] += 1
             pending_conns.append(proc)
@@ -437,7 +416,6 @@ def loop(vt_api_key: str = ""):
     # check if there are pending virtustotal results from last time
     get_vt_results(snitch, q_vt_pending, True)
     # init variables for loop
-    known_forks = collections.OrderedDict()
     missed_conns = []
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
@@ -466,14 +444,12 @@ def loop(vt_api_key: str = ""):
             pass
         # process the list and update snitch
         new_processes = [pickle.loads(proc) for proc in new_processes]
-        missed_conns, update_snitch_pending = process_queue(snitch, known_pids, known_forks, missed_conns, new_processes, q_psutil_pending, q_psutil_results)
+        missed_conns, update_snitch_pending = process_queue(snitch, known_pids, missed_conns, new_processes, q_psutil_pending, q_psutil_results)
         update_snitch_wrapper(snitch, update_snitch_pending, q_sha_pending, q_sha_results, q_vt_pending)
         get_vt_results(snitch, q_vt_results, False)
         # free some memory
         while len(known_pids) > 9000:
             _ = known_pids.popitem(last=False)
-        while len(known_forks) > 9000:
-            _ = known_forks.popitem(last=False)
         del(new_processes)
         del(update_snitch_pending)
         gc.collect()
@@ -497,7 +473,6 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
             execve_fnname = b.get_syscall_fnname("execve")
             b.attach_kprobe(event=execve_fnname, fn_name="syscall__execve")
             b.attach_kretprobe(event=execve_fnname, fn_name="do_ret_sys_execve")
-            b.attach_kprobe(event=b.get_syscall_fnname("clone"), fn_name="clonesnoop")
             b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
             b.attach_uprobe(name="c", sym="getaddrinfo", fn_name="do_entry", pid=-1)
             b.attach_uprobe(name="c", sym="gethostbyname", fn_name="do_entry", pid=-1)
@@ -517,26 +492,19 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
                         del(argv[event.pid])
                     except Exception:
                         pass
-            def queue_clone_event(cpu, data, size):
-                # todo: add fork and vfork
-                event = b["clone_events"].event(data)
-                if last_data["pid"] != event.pid or last_data["ppid"] != event.ppid:
-                    q_snitch.put(pickle.dumps({"type": "fork", "pid": event.pid, "ppid": event.ppid}))
-                    last_data["pid"], last_data["ppid"] = event.pid, event.ppid
             def queue_ipv4_event(cpu, data, size):
                 event = b["ipv4_events"].event(data)
-                q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+                q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.task.decode(), "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
             def queue_ipv6_event(cpu, data, size):
                 event = b["ipv6_events"].event(data)
-                q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
+                q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.task.decode(), "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
             def queue_other_event(cpu, data, size):
                 event = b["other_socket_events"].event(data)
-                q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "port": 0, "ip": ""}))
+                q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.task.decode(), "port": 0, "ip": ""}))
             def queue_dns_event(cpu, data, size):
                 event = b["dns_events"].event(data)
-                q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "port": 0, "ip": ""}))
+                q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.comm.decode(), "port": 0, "ip": ""}))
             b["exec_events"].open_perf_buffer(queue_exec_event)
-            b["clone_events"].open_perf_buffer(queue_clone_event)
             b["ipv4_events"].open_perf_buffer(queue_ipv4_event)
             b["ipv6_events"].open_perf_buffer(queue_ipv6_event)
             b["other_socket_events"].open_perf_buffer(queue_other_event)
@@ -752,19 +720,12 @@ struct data_t {
 };
 BPF_PERF_OUTPUT(exec_events);
 
-// clonesnoop structs
-
-struct data_clone_t {
-    u32 pid;
-    u32 ppid;
-};
-BPF_PERF_OUTPUT(clone_events);
-
 // securitySocketConnect structs
 
 struct ipv4_event_t {
     u64 ts_us;
     u32 pid;
+    u32 ppid;
     u32 uid;
     u32 af;
     char task[TASK_COMM_LEN];
@@ -776,6 +737,7 @@ BPF_PERF_OUTPUT(ipv4_events);
 struct ipv6_event_t {
     u64 ts_us;
     u32 pid;
+    u32 ppid;
     u32 uid;
     u32 af;
     char task[TASK_COMM_LEN];
@@ -787,6 +749,7 @@ BPF_PERF_OUTPUT(ipv6_events);
 struct other_socket_event_t {
     u64 ts_us;
     u32 pid;
+    u32 ppid;
     u32 uid;
     u32 af;
     char task[TASK_COMM_LEN];
@@ -803,6 +766,7 @@ struct val_t {
 
 struct data_dns_t {
     u32 pid;
+    u32 ppid;
     char comm[TASK_COMM_LEN];
     char host[80];
 };
@@ -892,22 +856,11 @@ int do_ret_sys_execve(struct pt_regs *ctx)
     return 0;
 }
 
-// clonesnoop functions
-
-int clonesnoop(void *ctx) {
-    struct data_clone_t data = {};
-    struct task_struct *task;
-    data.pid = bpf_get_current_pid_tgid() >> 32;
-    task = (struct task_struct *)bpf_get_current_task();
-    data.ppid = task->real_parent->tgid;
-    clone_events.perf_submit(ctx, &data, sizeof(data));
-    return 0;
-};
-
 // securitySocketConnect functions
 
 int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, struct sockaddr *address, int addrlen)
 {
+    struct task_struct *task;
     int ret = PT_REGS_RC(ctx);
 
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -915,13 +868,16 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
 
     u32 uid = bpf_get_current_uid_gid();
 
+    task = (struct task_struct *)bpf_get_current_task();
+    u32 ppid = task->real_parent->tgid;
+
     struct sock *skp = sock->sk;
 
     // The AF options are listed in https://github.com/torvalds/linux/blob/master/include/linux/socket.h
 
     u32 address_family = address->sa_family;
     if (address_family == AF_INET) {
-        struct ipv4_event_t data4 = {.pid = pid, .uid = uid, .af = address_family};
+        struct ipv4_event_t data4 = {.pid = pid, .ppid = ppid, .uid = uid, .af = address_family};
         data4.ts_us = bpf_ktime_get_ns() / 1000;
 
         struct sockaddr_in *daddr = (struct sockaddr_in *)address;
@@ -939,7 +895,7 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
         }
     }
     else if (address_family == AF_INET6) {
-        struct ipv6_event_t data6 = {.pid = pid, .uid = uid, .af = address_family};
+        struct ipv6_event_t data6 = {.pid = pid, .ppid = ppid, .uid = uid, .af = address_family};
         data6.ts_us = bpf_ktime_get_ns() / 1000;
 
         struct sockaddr_in6 *daddr6 = (struct sockaddr_in6 *)address;
@@ -957,7 +913,7 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
         }
     }
     else if (address_family != AF_UNIX && address_family != AF_UNSPEC) { // other sockets, except UNIX and UNSPEC sockets
-        struct other_socket_event_t socket_event = {.pid = pid, .uid = uid, .af = address_family};
+        struct other_socket_event_t socket_event = {.pid = pid, .ppid = ppid, .uid = uid, .af = address_family};
         socket_event.ts_us = bpf_ktime_get_ns() / 1000;
         bpf_get_current_comm(&socket_event.task, sizeof(socket_event.task));
         other_socket_events.perf_submit(ctx, &socket_event, sizeof(socket_event));
@@ -985,6 +941,7 @@ int do_entry(struct pt_regs *ctx) {
 int do_return(struct pt_regs *ctx) {
     struct val_t *valp;
     struct data_dns_t data = {};
+    struct task_struct *task;
     u32 pid = bpf_get_current_pid_tgid();
     valp = start.lookup(&pid);
     if (valp == 0)
@@ -992,6 +949,8 @@ int do_return(struct pt_regs *ctx) {
     bpf_probe_read_kernel(&data.comm, sizeof(data.comm), valp->comm);
     bpf_probe_read_kernel(&data.host, sizeof(data.host), (void *)valp->host);
     data.pid = valp->pid;
+    task = (struct task_struct *)bpf_get_current_task();
+    data.ppid = task->real_parent->tgid;
     dns_events.perf_submit(ctx, &data, sizeof(data));
     start.delete(&pid);
     return 0;
