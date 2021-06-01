@@ -269,6 +269,9 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
                                 if proc_psutil["exe"]:
                                     proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
                                     known_pids[proc_psutil["pid"]] = proc_psutil
+                                    # use this as best guess for child too since it probably forked and was short lived
+                                    # if not, exec should have caught it on the next round
+                                    # this is why pending conns is now postponed till the next iteration
                                     known_pids[proc["pid"]] = proc_psutil
                             except Exception:
                                 pass
@@ -284,6 +287,9 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
             proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
             pending_list.append(proc)
         elif proc["missed"] < 5:
+            # give it 5 rounds to find the pid in exec (2 should be enough)
+            # don't waste cpu checking psutil anymore since it would be short lived
+            # therefore ppid is also unlikely to appear (less harm in checking this maybe once more)
             proc["missed"] += 1
             pending_conns.append(proc)
         else:
@@ -462,7 +468,7 @@ def loop(vt_api_key: str = ""):
                 write(snitch)
 
 
-def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
+def init_snitch_subprocess(config: dict, p_sha, p_psutil) -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
     """init snitch subprocesses and monitor with root (before dropping root privileges)"""
     def snitch_linux(config, q_snitch, q_error, q_term_monitor):
         """runs a bpf program to monitor the system for new processes and connections and puts them in the queue"""
@@ -503,7 +509,7 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
                 q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.task.decode(), "port": 0, "ip": ""}))
             def queue_dns_event(cpu, data, size):
                 event = b["dns_events"].event(data)
-                q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.comm.decode(), "port": 0, "ip": ""}))
+                q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.comm.decode(), "port": 0, "ip": "", "host": event.host.decode()}))
             b["exec_events"].open_perf_buffer(queue_exec_event)
             b["ipv4_events"].open_perf_buffer(queue_ipv4_event)
             b["ipv6_events"].open_perf_buffer(queue_ipv6_event)
@@ -525,7 +531,7 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
             q_error.put("Snitch subprocess permission error, requires root")
         return 1
 
-    def snitch_monitor(config, q_snitch, q_error, q_term):
+    def snitch_monitor(config, q_snitch, q_error, q_term, p_sha, p_psutil):
         """monitor the snitch subprocess and parent process, has same privileges as subprocess for clean termination at the command or death of the parent"""
         signal.signal(signal.SIGINT, lambda *args: None)
         if sys.platform.startswith("linux"):
@@ -553,6 +559,15 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
                 p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
                 p_snitch_sub.start()
                 time_last_start = time.time()
+            if not (p_sha.is_alive() and p_psutil.is_alive()):
+                # if either of these die, the main process will hang on the next request to either of them
+                # therefore any error message won't be recorded either # q_error.put("sha256 or psutil subprocess died, terminating")
+                # better to just take everything down so the user can see it stopped running and doesn't get the impression that everything is still working
+                # the only way this temporary solution should hang is if:
+                # a) the main process hangs and this monitor is killed before the 10 second timeout
+                # b) this monitor is killed then p_sha or p_psutil is killed causing the main process to hang before it checks if the monitor is still alive
+                # todo: handle this better at some point (basically restructure everything)
+                break
             try:
                 if q_term.get(block=True, timeout=10):
                     break
@@ -564,7 +579,7 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
 
     if __name__ == "__main__":
         q_snitch, q_error, q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-        p_snitch_mon = multiprocessing.Process(name="snitchmonitor", target=snitch_monitor, args=(config, q_snitch, q_error, q_term))
+        p_snitch_mon = multiprocessing.Process(name="snitchmonitor", target=snitch_monitor, args=(config, q_snitch, q_error, q_term, p_sha, p_psutil))
         p_snitch_mon.start()
         return p_snitch_mon, q_snitch, q_error, q_term
     return None, None, None, None
