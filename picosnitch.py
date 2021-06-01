@@ -248,6 +248,12 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
                 known_pids[proc["pid"]] = proc
                 if not snitch["Config"]["Only log connections"]:
                     pending_list.append(proc)
+            elif proc["type"] == "fork":
+                if proc["pid"] not in known_pids and proc["ppid"] in known_pids:
+                    known_pids[proc["pid"]] = known_pids[proc["ppid"]]
+                # else:
+                    # todo: try psutil here for ppid then pid (or just store the relationship until there's a conn)
+                    # snitch["Errors"].append(ctime + " fork of unknown process: " + str(proc))
             elif proc["type"] == "conn":
                 if proc["pid"] in known_pids:
                     proc["name"] = known_pids[proc["pid"]]["name"]
@@ -459,10 +465,12 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
         """runs a bpf program to monitor the system for new processes and connections and puts them in the queue"""
         from bcc import BPF
         if os.getuid() == 0:
+            last_data = {"pid": 0, "ppid": 0}
             b = BPF(text=bpf_text)
             execve_fnname = b.get_syscall_fnname("execve")
             b.attach_kprobe(event=execve_fnname, fn_name="syscall__execve")
             b.attach_kretprobe(event=execve_fnname, fn_name="do_ret_sys_execve")
+            b.attach_kprobe(event=b.get_syscall_fnname("clone"), fn_name="clonesnoop")
             b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
             b.attach_uprobe(name="c", sym="getaddrinfo", fn_name="do_entry", pid=-1)
             b.attach_uprobe(name="c", sym="gethostbyname", fn_name="do_entry", pid=-1)
@@ -482,6 +490,12 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
                         del(argv[event.pid])
                     except Exception:
                         pass
+            def queue_clone_event(cpu, data, size):
+                # todo: add fork and vfork
+                event = b["clone_events"].event(data)
+                if last_data["pid"] != event.pid or last_data["ppid"] != event.ppid:
+                    q_snitch.put(pickle.dumps({"type": "fork", "pid": event.pid, "ppid": event.ppid}))
+                    last_data["pid"], last_data["ppid"] = event.pid, event.ppid
             def queue_ipv4_event(cpu, data, size):
                 event = b["ipv4_events"].event(data)
                 q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
@@ -495,6 +509,7 @@ def init_snitch_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process
                 event = b["dns_events"].event(data)
                 q_snitch.put(pickle.dumps({"type": "conn", "pid": event.pid, "port": 0, "ip": ""}))
             b["exec_events"].open_perf_buffer(queue_exec_event)
+            b["clone_events"].open_perf_buffer(queue_clone_event)
             b["ipv4_events"].open_perf_buffer(queue_ipv4_event)
             b["ipv6_events"].open_perf_buffer(queue_ipv6_event)
             b["other_socket_events"].open_perf_buffer(queue_other_event)
@@ -710,6 +725,14 @@ struct data_t {
 };
 BPF_PERF_OUTPUT(exec_events);
 
+// clonesnoop structs
+
+struct data_clone_t {
+    u32 pid;
+    u32 ppid;
+};
+BPF_PERF_OUTPUT(clone_events);
+
 // securitySocketConnect structs
 
 struct ipv4_event_t {
@@ -841,6 +864,18 @@ int do_ret_sys_execve(struct pt_regs *ctx)
 
     return 0;
 }
+
+// clonesnoop functions
+
+int clonesnoop(void *ctx) {
+    struct data_clone_t data = {};
+    struct task_struct *task;
+    data.pid = bpf_get_current_pid_tgid() >> 32;
+    task = (struct task_struct *)bpf_get_current_task();
+    data.ppid = task->real_parent->tgid;
+    clone_events.perf_submit(ctx, &data, sizeof(data));
+    return 0;
+};
 
 // securitySocketConnect functions
 
