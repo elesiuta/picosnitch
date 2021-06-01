@@ -100,11 +100,15 @@ def drop_root_privileges() -> None:
 
 
 def terminate(snitch: dict, p_snitch_mon: multiprocessing.Process,
+              q_error: multiprocessing.Queue,
               q_term: multiprocessing.Queue,
               q_sha_term: multiprocessing.Queue,
               q_psutil_term: multiprocessing.Queue,
               q_vt_term: multiprocessing.Queue):
     """write snitch one last time, then terminate picosnitch and subprocesses if running"""
+    while not q_error.empty():
+        error = q_error.get()
+        snitch["Errors"].append(time.ctime() + " " + error)
     write(snitch)
     q_vt_term.put("TERMINATE")
     q_psutil_term.put("TERMINATE")
@@ -412,8 +416,8 @@ def loop(vt_api_key: str = ""):
     # init subprocesses without root (just virustotal)
     p_virustotal, q_vt_pending, q_vt_results, q_vt_term = init_virustotal_subprocess(snitch["Config"])
     # set signal handlers
-    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_snitch_mon, q_term, q_sha_term, q_psutil_term, q_vt_term))
-    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_snitch_mon, q_term, q_sha_term, q_psutil_term, q_vt_term))
+    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_snitch_mon, q_error, q_term, q_sha_term, q_psutil_term, q_vt_term))
+    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_snitch_mon, q_error, q_term, q_sha_term, q_psutil_term, q_vt_term))
     # snitch init checks
     if p_snitch_mon is None:
         snitch["Errors"].append(time.ctime() + " Snitch subprocess init failed, __name__ != __main__, try: sudo -E python -m picosnitch")
@@ -439,7 +443,7 @@ def loop(vt_api_key: str = ""):
         if not p_snitch_mon.is_alive():
             snitch["Errors"].append(time.ctime() + " snitch subprocess stopped")
             toast("snitch subprocess stopped, exiting picosnitch", file=sys.stderr)
-            terminate(snitch, p_snitch_mon, q_term, q_sha_term, q_psutil_term, q_vt_term)
+            terminate(snitch, p_snitch_mon, q_error, q_term, q_sha_term, q_psutil_term, q_vt_term)
         # get list of new processes and connections since last update
         time.sleep(5)
         new_processes = []
@@ -562,12 +566,13 @@ def init_snitch_subprocess(config: dict, p_sha, p_psutil) -> typing.Tuple[multip
                 time_last_start = time.time()
             if not (p_sha.is_running() and p_sha.status() != "zombie" and p_psutil.is_running() and p_psutil.status() != "zombie"):
                 # if either of these die, the main process will hang on the next request to either of them
-                # therefore any error message won't be recorded either # q_error.put("sha256 or psutil subprocess died, terminating")
                 # better to just take everything down so the user can see it stopped running and doesn't get the impression that everything is still working
                 # the only way this temporary solution should hang is if:
                 # a) the main process hangs and this monitor is killed before the 10 second timeout
                 # b) this monitor is killed then p_sha or p_psutil is killed causing the main process to hang before it checks if the monitor is still alive
                 # todo: handle this better at some point (basically restructure everything)
+                q_error.put("sha256 or psutil subprocess died, terminating")
+                psutil.Process(multiprocessing.parent_process().pid).terminate()
                 break
             try:
                 if q_term.get(block=True, timeout=10):
