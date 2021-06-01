@@ -541,6 +541,7 @@ def init_snitch_subprocess(config: dict, p_sha, p_psutil) -> typing.Tuple[multip
         else:
             q_error.put("Did not detect a supported operating system")
             return 1
+        p_sha, p_psutil = psutil.Process(p_sha.pid), psutil.Process(p_psutil.pid)
         q_term_monitor = multiprocessing.Queue()
         terminate_subprocess = lambda p_snitch_sub: q_term_monitor.put("TERMINATE") or p_snitch_sub.join(3) or (p_snitch_sub.is_alive() and p_snitch_sub.kill()) or p_snitch_sub.close()
         p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
@@ -559,7 +560,7 @@ def init_snitch_subprocess(config: dict, p_sha, p_psutil) -> typing.Tuple[multip
                 p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
                 p_snitch_sub.start()
                 time_last_start = time.time()
-            if not (p_sha.is_alive() and p_psutil.is_alive()):
+            if not (p_sha.is_running() and p_sha.status() != "zombie" and p_psutil.is_running() and p_psutil.status() != "zombie"):
                 # if either of these die, the main process will hang on the next request to either of them
                 # therefore any error message won't be recorded either # q_error.put("sha256 or psutil subprocess died, terminating")
                 # better to just take everything down so the user can see it stopped running and doesn't get the impression that everything is still working
