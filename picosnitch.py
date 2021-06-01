@@ -226,7 +226,7 @@ def initial_poll(snitch: dict, known_pids: dict) -> list:
     return update_snitch_pending
 
 
-def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_processes: list,
+def process_queue(snitch: dict, known_pids: dict, known_forks: dict, missed_conns: list, new_processes: list,
                   q_psutil_pending: multiprocessing.Queue,
                   q_psutil_results: multiprocessing.Queue
                   ) -> tuple:
@@ -251,15 +251,16 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
             elif proc["type"] == "fork":
                 if proc["pid"] not in known_pids and proc["ppid"] in known_pids:
                     known_pids[proc["pid"]] = known_pids[proc["ppid"]]
-                # else:
-                    # todo: try psutil here for ppid then pid (or just store the relationship until there's a conn)
-                    # snitch["Errors"].append(ctime + " fork of unknown process: " + str(proc))
+                else:
+                    known_forks[proc["pid"]] = proc["ppid"]
             elif proc["type"] == "conn":
                 if proc["pid"] in known_pids:
                     proc["name"] = known_pids[proc["pid"]]["name"]
                     proc["exe"] = known_pids[proc["pid"]]["exe"]
                     proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
                     pending_list.append(proc)
+                elif proc["pid"] in known_forks and known_forks["pid"] in known_pids:
+                    known_pids[proc["pid"]] = known_pids[known_forks[proc["pid"]]] 
                 else:
                     try:
                         q_psutil_pending.put(pickle.dumps(proc["pid"]))
@@ -268,7 +269,15 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
                             proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
                             known_pids[proc_psutil["pid"]] = proc_psutil
                     except Exception:
-                        pass
+                        try:
+                            q_psutil_pending.put(pickle.dumps(known_forks[proc["pid"]]))
+                            proc_psutil = pickle.loads(q_psutil_results.get())
+                            if proc_psutil["exe"]:
+                                proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
+                                known_pids[proc_psutil["pid"]] = proc_psutil
+                                known_pids[proc["pid"]] = proc_psutil
+                        except Exception:
+                            pass
                     proc["missed"] = 1
                     pending_conns.append(proc)
         except Exception as e:
@@ -280,6 +289,8 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
             proc["exe"] = known_pids[proc["pid"]]["exe"]
             proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
             pending_list.append(proc)
+        elif proc["pid"] in known_forks and known_forks[proc["pid"]] in known_pids:
+            known_pids[proc["pid"]] = known_pids[known_forks[proc["pid"]]]
         elif proc["missed"] < 5:
             proc["missed"] += 1
             pending_conns.append(proc)
@@ -413,6 +424,7 @@ def loop(vt_api_key: str = ""):
     # check if there are pending virtustotal results from last time
     get_vt_results(snitch, q_vt_pending, True)
     # init variables for loop
+    known_forks = collections.OrderedDict()
     missed_conns = []
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
@@ -441,12 +453,14 @@ def loop(vt_api_key: str = ""):
             pass
         # process the list and update snitch
         new_processes = [pickle.loads(proc) for proc in new_processes]
-        missed_conns, update_snitch_pending = process_queue(snitch, known_pids, missed_conns, new_processes, q_psutil_pending, q_psutil_results)
+        missed_conns, update_snitch_pending = process_queue(snitch, known_pids, known_forks, missed_conns, new_processes, q_psutil_pending, q_psutil_results)
         update_snitch_wrapper(snitch, update_snitch_pending, q_sha_pending, q_sha_results, q_vt_pending)
         get_vt_results(snitch, q_vt_results, False)
         # free some memory
         while len(known_pids) > 9000:
             _ = known_pids.popitem(last=False)
+        while len(known_forks) > 9000:
+            _ = known_forks.popitem(last=False)
         del(new_processes)
         del(update_snitch_pending)
         gc.collect()
