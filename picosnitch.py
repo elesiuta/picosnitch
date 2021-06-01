@@ -109,6 +109,7 @@ def terminate(snitch: dict, p_snitch_mon: multiprocessing.Process,
     while not q_error.empty():
         error = q_error.get()
         snitch["Errors"].append(time.ctime() + " " + error)
+        toast(error, file=sys.stderr)
     write(snitch)
     q_vt_term.put("TERMINATE")
     q_psutil_term.put("TERMINATE")
@@ -571,7 +572,7 @@ def init_snitch_subprocess(config: dict, p_sha, p_psutil) -> typing.Tuple[multip
                 # a) the main process hangs and this monitor is killed before the 10 second timeout
                 # b) this monitor is killed then p_sha or p_psutil is killed causing the main process to hang before it checks if the monitor is still alive
                 # todo: handle this better at some point (basically restructure everything)
-                q_error.put("sha256 or psutil subprocess died, terminating")
+                q_error.put("sha256 or psutil subprocess died, terminating picosnitch")
                 psutil.Process(multiprocessing.parent_process().pid).terminate()
                 break
             try:
