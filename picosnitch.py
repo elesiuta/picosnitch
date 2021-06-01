@@ -403,9 +403,9 @@ def loop(vt_api_key: str = ""):
     if vt_api_key:
         snitch["Config"]["VT API key"] = vt_api_key
     # init root subprocesses and do initial poll with root before dropping privileges
-    p_snitch_mon, q_snitch, q_error, q_term = init_snitch_subprocess(snitch["Config"])
     p_sha, q_sha_pending, q_sha_results, q_sha_term = init_func_subprocess("snitchsha", functools.lru_cache(get_sha256))
     p_psutil, q_psutil_pending, q_psutil_results, q_psutil_term = init_func_subprocess("snitchpsutil", get_proc_info)
+    p_snitch_mon, q_snitch, q_error, q_term = init_snitch_subprocess(snitch["Config"], p_sha, p_psutil)
     known_pids = collections.OrderedDict()
     update_snitch_pending = initial_poll(snitch, known_pids)
     drop_root_privileges()
