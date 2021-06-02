@@ -101,7 +101,7 @@ def drop_root_privileges() -> None:
 
 def terminate(snitch: dict,
               q_error: multiprocessing.Queue,
-              q_term: multiprocessing.Queue,
+              q_mon_term: multiprocessing.Queue,
               q_sha_term: multiprocessing.Queue,
               q_psutil_term: multiprocessing.Queue,
               q_vt_term: multiprocessing.Queue):
@@ -114,7 +114,7 @@ def terminate(snitch: dict,
     q_vt_term.put("TERMINATE")
     q_psutil_term.put("TERMINATE")
     q_sha_term.put("TERMINATE")
-    q_term.put("TERMINATE")
+    q_mon_term.put("TERMINATE")
     sys.exit(0)
 
 
@@ -397,26 +397,25 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
 
 
 
-def snitch_updater_subprocess(snitch: dict, known_pids: bytes, update_snitch_pending: list = None,
-    p_sha, q_sha_pending, q_sha_results, q_sha_term,
-    p_psutil, q_psutil_pending, q_psutil_results, q_psutil_term,
-    q_snitch, q_error, q_term,
-    p_virustotal, q_vt_pending, q_vt_results, q_vt_term
-    ):
+def snitch_updater_subprocess(snitch_updater_pickle, p_virustotal,
+                              q_snitch, q_error, q_updater_restart, q_updater_term, q_mon_term,
+                              q_sha_pending, q_sha_results, q_sha_term,
+                              q_psutil_pending, q_psutil_results, q_psutil_term,
+                              q_vt_pending, q_vt_results, q_vt_term
+                              ):
     # drop root privileges and init signal handlers
     drop_root_privileges()
-    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, q_error, q_term, q_sha_term, q_psutil_term, q_vt_term))
-    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, q_error, q_term, q_sha_term, q_psutil_term, q_vt_term))
-    # check if there are pending virtustotal results from last time
-    get_vt_results(snitch, q_vt_pending, True)
+    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, q_error, q_mon_term, q_sha_term, q_psutil_term, q_vt_term))
+    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, q_error, q_mon_term, q_sha_term, q_psutil_term, q_vt_term))
     # init variables for loop
-    known_pids = pickle.loads(known_pids)
-    missed_conns = []
+    snitch, known_pids, missed_conns, update_snitch_pending = pickle.loads(snitch_updater_pickle)
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
     # update snitch with initial running processes and connections
-    update_snitch_wrapper(snitch, update_snitch_pending, q_sha_pending, q_sha_results, q_vt_pending)
-    known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
+    if p_virustotal:
+        get_vt_results(snitch, q_vt_pending, True)
+        update_snitch_wrapper(snitch, update_snitch_pending, q_sha_pending, q_sha_results, q_vt_pending)
+        known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
     # the actual main loop
     while True:
         # check for subprocess errors
@@ -428,7 +427,12 @@ def snitch_updater_subprocess(snitch: dict, known_pids: bytes, update_snitch_pen
         if not multiprocessing.parent_process().is_alive():
             snitch["Errors"].append(time.ctime() + " snitch subprocess stopped")
             toast("snitch subprocess stopped, exiting picosnitch", file=sys.stderr)
-            terminate(snitch, q_error, q_term, q_sha_term, q_psutil_term, q_vt_term)
+            terminate(snitch, q_error, q_mon_term, q_sha_term, q_psutil_term, q_vt_term)
+        # check if this subprocess needs to restart
+        # try:
+        #     pass
+        # except:
+        #     pass
         # get list of new processes and connections since last update
         time.sleep(5)
         new_processes = []
@@ -590,24 +594,32 @@ def picosnitch_process_monitor(config, snitch_updater_pickle):
     p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(q_snitch, q_error, q_sub_term), daemon=True)
     p_snitch_sub.start()
     q_sha_pending, q_sha_results, q_sha_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    p_sha = multiprocessing.Process(name="snitchsha", target=functools.lru_cache(get_sha256), args=(q_sha_pending, q_sha_results, q_sha_term), daemon=True)
+    p_sha = multiprocessing.Process(name="snitchsha", target=func_subprocess, args=(functools.lru_cache(get_sha256), q_sha_pending, q_sha_results, q_sha_term), daemon=True)
     p_sha.start()
     q_psutil_pending, q_psutil_results, q_psutil_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    p_psutil = multiprocessing.Process(name="snitchpsutil", target=get_proc_info, args=(q_psutil_pending, q_psutil_results, q_psutil_term))
+    p_psutil = multiprocessing.Process(name="snitchpsutil", target=func_subprocess, args=(get_proc_info, q_psutil_pending, q_psutil_results, q_psutil_term), daemon=True)
     p_psutil.start()
     q_vt_pending, q_vt_results, q_vt_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
     p_virustotal = multiprocessing.Process(name="snitchvirustotal", target=virustotal_subprocess, args=(config, q_vt_pending, q_vt_results, q_vt_term), daemon=True)
     p_virustotal.start()
-    q_restart, q_term = multiprocessing.Queue(), multiprocessing.Queue()
+    q_updater_restart, q_updater_term, q_mon_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
+    p_updater = multiprocessing.Process(name="snitchupdater", target=snitch_updater_subprocess, daemon=True,
+                                        args=(snitch_updater_pickle, p_virustotal,
+                                              q_snitch, q_error, q_updater_restart, q_updater_term, q_mon_term,
+                                              q_sha_pending, q_sha_results, q_sha_term,
+                                              q_psutil_pending, q_psutil_results, q_psutil_term,
+                                              q_vt_pending, q_vt_results, q_vt_term)
+                                        )
+    p_updater.start()
     # monitor subprocesses
     p_sha, p_psutil = psutil.Process(p_sha.pid), psutil.Process(p_psutil.pid)
-    terminate_subprocess = lambda p_snitch_sub: q_sub_term.put("TERMINATE") or p_snitch_sub.join(3) or (p_snitch_sub.is_alive() and p_snitch_sub.kill()) or p_snitch_sub.close()
+    terminate_subprocess = lambda p, q, t: q.put("TERMINATE") or p.join(t) or (p.is_alive() and p.kill()) or p.close()
     time_last_start = time.time()
     while True:
         if p_snitch_sub.is_alive():
             if psutil.Process(p_snitch_sub.pid).memory_info().vms > 512000000:
                 q_error.put("Snitch subprocess memory usage exceeded 512 MB, restarting snitch")
-                terminate_subprocess(p_snitch_sub)
+                terminate_subprocess(p_snitch_sub, q_sub_term, 3)
                 p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_sub_term), daemon=True)
                 p_snitch_sub.start()
                 time_last_start = time.time()
@@ -624,15 +636,16 @@ def picosnitch_process_monitor(config, snitch_updater_pickle):
             # b) this monitor is killed then p_sha or p_psutil is killed causing the main process to hang before it checks if the monitor is still alive
             # todo: handle this better at some point (basically restructure everything)
             q_error.put("sha256 or psutil subprocess died, terminating picosnitch")
-            psutil.Process(multiprocessing.parent_process().pid).terminate()
+            p_updater.terminate()
             break
         try:
-            if q_term.get(block=True, timeout=10):
+            if q_mon_term.get(block=True, timeout=10):
                 break
         except queue.Empty:
-            if not multiprocessing.parent_process().is_alive() or not p_snitch_sub.is_alive():
+            if not (p_snitch_sub.is_alive() and p_updater.is_alive()):
                 break
-    terminate_subprocess(p_snitch_sub)
+    terminate_subprocess(p_snitch_sub, q_sub_term, 3)
+    terminate_subprocess(p_updater, q_updater_term, 10)
     return 0
 
 
