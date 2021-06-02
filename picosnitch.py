@@ -397,26 +397,7 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
     _ = snitch.pop("WRITELOCK")
 
 
-def main(vt_api_key: str = ""):
-    """main loop"""
-    # acquire lock (since the prior one would be released by starting the daemon)
-    lock = filelock.FileLock(os.path.join(os.path.expanduser("~"), ".picosnitch_lock"), timeout=1)
-    lock.acquire()
-    # read config and set VT API key if entered
-    snitch = read()
-    _ = snitch.pop("Template", 0)
-    if vt_api_key:
-        snitch["Config"]["VT API key"] = vt_api_key
-    # init root subprocesses and do initial poll with root before dropping privileges
-    p_sha, q_sha_pending, q_sha_results, q_sha_term = init_func_subprocess("snitchsha", functools.lru_cache(get_sha256))
-    p_psutil, q_psutil_pending, q_psutil_results, q_psutil_term = init_func_subprocess("snitchpsutil", get_proc_info)
-    p_snitch_mon, q_snitch, q_error, q_term = init_snitch_subprocess(snitch["Config"], p_sha, p_psutil)
-    known_pids = collections.OrderedDict()
-    update_snitch_pending = initial_poll(snitch, known_pids)
 
-
-# init subprocesses without root (just virustotal)
-    p_virustotal, q_vt_pending, q_vt_results, q_vt_term = init_virustotal_subprocess(snitch["Config"])
 
 def snitch_updater_subprocess(snitch: dict, known_pids: bytes, update_snitch_pending: list = None,
     p_sha, q_sha_pending, q_sha_results, q_sha_term,
@@ -544,54 +525,6 @@ def snitch_linux_subprocess(config, q_snitch, q_error, q_term_monitor):
         q_error.put("Snitch subprocess permission error, requires root")
     return 1
 
-def picosnitch_process_monitor(config, q_snitch, q_error, q_term, p_sha, p_psutil):
-    """monitor the snitch subprocess and parent process, has same privileges as subprocess for clean termination at the command or death of the parent"""
-    signal.signal(signal.SIGINT, lambda *args: None)
-    if sys.platform.startswith("linux"):
-        p_snitch_func = snitch_linux
-    # elif sys.platform.startswith("win"):
-    #     process_monitor = snitch_windows
-    else:
-        q_error.put("Did not detect a supported operating system")
-        return 1
-    p_sha, p_psutil = psutil.Process(p_sha.pid), psutil.Process(p_psutil.pid)
-    q_term_monitor = multiprocessing.Queue()
-    terminate_subprocess = lambda p_snitch_sub: q_term_monitor.put("TERMINATE") or p_snitch_sub.join(3) or (p_snitch_sub.is_alive() and p_snitch_sub.kill()) or p_snitch_sub.close()
-    p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
-    p_snitch_sub.start()
-    time_last_start = time.time()
-    while True:
-        if p_snitch_sub.is_alive():
-            if psutil.Process(p_snitch_sub.pid).memory_info().vms > 512000000:
-                q_error.put("Snitch subprocess memory usage exceeded 512 MB, restarting snitch")
-                terminate_subprocess(p_snitch_sub)
-                p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
-                p_snitch_sub.start()
-                time_last_start = time.time()
-        elif time.time() - time_last_start > 300:
-            q_error.put("Snitch subprocess died, restarting snitch")
-            p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
-            p_snitch_sub.start()
-            time_last_start = time.time()
-        if not (p_sha.is_running() and p_sha.status() != "zombie" and p_psutil.is_running() and p_psutil.status() != "zombie"):
-            # if either of these die, the main process will hang on the next request to either of them
-            # better to just take everything down so the user can see it stopped running and doesn't get the impression that everything is still working
-            # the only way this temporary solution should hang is if:
-            # a) the main process hangs and this monitor is killed before the 10 second timeout
-            # b) this monitor is killed then p_sha or p_psutil is killed causing the main process to hang before it checks if the monitor is still alive
-            # todo: handle this better at some point (basically restructure everything)
-            q_error.put("sha256 or psutil subprocess died, terminating picosnitch")
-            psutil.Process(multiprocessing.parent_process().pid).terminate()
-            break
-        try:
-            if q_term.get(block=True, timeout=10):
-                break
-        except queue.Empty:
-            if not multiprocessing.parent_process().is_alive() or not p_snitch_sub.is_alive():
-                break
-    terminate_subprocess(p_snitch_sub)
-    return 0
-
 
 def init_snitch_subprocess(config: dict, p_sha, p_psutil) -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
     """init snitch subprocesses and monitor with root (before dropping root privileges)"""
@@ -679,6 +612,77 @@ def init_virustotal_subprocess(config: dict) -> typing.Tuple[multiprocessing.Pro
         p_virustotal.start()
         return p_virustotal, q_vt_pending, q_vt_results, q_vt_term
     return None, None, None, None
+
+
+def picosnitch_process_monitor(config, q_snitch, q_error, q_term, p_sha, p_psutil):
+    """monitor the snitch subprocess and parent process, has same privileges as subprocess for clean termination at the command or death of the parent"""
+    signal.signal(signal.SIGINT, lambda *args: None)
+    if sys.platform.startswith("linux"):
+        p_snitch_func = snitch_linux
+    # elif sys.platform.startswith("win"):
+    #     process_monitor = snitch_windows
+    else:
+        q_error.put("Did not detect a supported operating system")
+        return 1
+    p_sha, p_psutil = psutil.Process(p_sha.pid), psutil.Process(p_psutil.pid)
+    q_term_monitor = multiprocessing.Queue()
+    terminate_subprocess = lambda p_snitch_sub: q_term_monitor.put("TERMINATE") or p_snitch_sub.join(3) or (p_snitch_sub.is_alive() and p_snitch_sub.kill()) or p_snitch_sub.close()
+    p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
+    p_snitch_sub.start()
+    time_last_start = time.time()
+    while True:
+        if p_snitch_sub.is_alive():
+            if psutil.Process(p_snitch_sub.pid).memory_info().vms > 512000000:
+                q_error.put("Snitch subprocess memory usage exceeded 512 MB, restarting snitch")
+                terminate_subprocess(p_snitch_sub)
+                p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
+                p_snitch_sub.start()
+                time_last_start = time.time()
+        elif time.time() - time_last_start > 300:
+            q_error.put("Snitch subprocess died, restarting snitch")
+            p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
+            p_snitch_sub.start()
+            time_last_start = time.time()
+        if not (p_sha.is_running() and p_sha.status() != "zombie" and p_psutil.is_running() and p_psutil.status() != "zombie"):
+            # if either of these die, the main process will hang on the next request to either of them
+            # better to just take everything down so the user can see it stopped running and doesn't get the impression that everything is still working
+            # the only way this temporary solution should hang is if:
+            # a) the main process hangs and this monitor is killed before the 10 second timeout
+            # b) this monitor is killed then p_sha or p_psutil is killed causing the main process to hang before it checks if the monitor is still alive
+            # todo: handle this better at some point (basically restructure everything)
+            q_error.put("sha256 or psutil subprocess died, terminating picosnitch")
+            psutil.Process(multiprocessing.parent_process().pid).terminate()
+            break
+        try:
+            if q_term.get(block=True, timeout=10):
+                break
+        except queue.Empty:
+            if not multiprocessing.parent_process().is_alive() or not p_snitch_sub.is_alive():
+                break
+    terminate_subprocess(p_snitch_sub)
+    return 0
+
+
+def main(vt_api_key: str = ""):
+    """main loop"""
+    # acquire lock (since the prior one would be released by starting the daemon)
+    lock = filelock.FileLock(os.path.join(os.path.expanduser("~"), ".picosnitch_lock"), timeout=1)
+    lock.acquire()
+    # read config and set VT API key if entered
+    snitch = read()
+    _ = snitch.pop("Template", 0)
+    if vt_api_key:
+        snitch["Config"]["VT API key"] = vt_api_key
+    # init root subprocesses and do initial poll with root before dropping privileges
+    p_sha, q_sha_pending, q_sha_results, q_sha_term = init_func_subprocess("snitchsha", functools.lru_cache(get_sha256))
+    p_psutil, q_psutil_pending, q_psutil_results, q_psutil_term = init_func_subprocess("snitchpsutil", get_proc_info)
+    p_snitch_mon, q_snitch, q_error, q_term = init_snitch_subprocess(snitch["Config"], p_sha, p_psutil)
+    known_pids = collections.OrderedDict()
+    update_snitch_pending = initial_poll(snitch, known_pids)
+
+
+# init subprocesses without root (just virustotal)
+    p_virustotal, q_vt_pending, q_vt_results, q_vt_term = init_virustotal_subprocess(snitch["Config"])
 
 
 def start_daemon():
