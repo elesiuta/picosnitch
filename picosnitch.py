@@ -99,13 +99,13 @@ def drop_root_privileges() -> None:
         os.setuid(int(os.getenv("SUDO_UID")))
 
 
-def terminate(snitch: dict, p_snitch_mon: multiprocessing.Process,
+def terminate(snitch: dict,
               q_error: multiprocessing.Queue,
               q_term: multiprocessing.Queue,
               q_sha_term: multiprocessing.Queue,
               q_psutil_term: multiprocessing.Queue,
               q_vt_term: multiprocessing.Queue):
-    """write snitch one last time, then terminate picosnitch and subprocesses if running"""
+    """write snitch one last time, then tell monitor and all subprocesses to terminate"""
     while not q_error.empty():
         error = q_error.get()
         snitch["Errors"].append(time.ctime() + " " + error)
@@ -115,8 +115,6 @@ def terminate(snitch: dict, p_snitch_mon: multiprocessing.Process,
     q_psutil_term.put("TERMINATE")
     q_sha_term.put("TERMINATE")
     q_term.put("TERMINATE")
-    p_snitch_mon.join(5)
-    p_snitch_mon.close()
     sys.exit(0)
 
 
@@ -402,18 +400,13 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
 def snitch_updater_subprocess(snitch: dict, known_pids: bytes, update_snitch_pending: list = None,
     p_sha, q_sha_pending, q_sha_results, q_sha_term,
     p_psutil, q_psutil_pending, q_psutil_results, q_psutil_term,
-    p_snitch_mon, q_snitch, q_error, q_term,
+    q_snitch, q_error, q_term,
     p_virustotal, q_vt_pending, q_vt_results, q_vt_term
     ):
     # drop root privileges and init signal handlers
     drop_root_privileges()
-    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, p_snitch_mon, q_error, q_term, q_sha_term, q_psutil_term, q_vt_term))
-    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, p_snitch_mon, q_error, q_term, q_sha_term, q_psutil_term, q_vt_term))
-    # snitch init checks
-    if p_snitch_mon is None:
-        snitch["Errors"].append(time.ctime() + " Snitch subprocess init failed, __name__ != __main__, try: sudo -E python -m picosnitch")
-        toast("Snitch subprocess init failed, try: sudo -E python -m picosnitch", file=sys.stderr)
-        sys.exit(1)
+    signal.signal(signal.SIGTERM, lambda *args: terminate(snitch, q_error, q_term, q_sha_term, q_psutil_term, q_vt_term))
+    signal.signal(signal.SIGINT, lambda *args: terminate(snitch, q_error, q_term, q_sha_term, q_psutil_term, q_vt_term))
     # check if there are pending virtustotal results from last time
     get_vt_results(snitch, q_vt_pending, True)
     # init variables for loop
@@ -432,10 +425,10 @@ def snitch_updater_subprocess(snitch: dict, known_pids: bytes, update_snitch_pen
             snitch["Errors"].append(time.ctime() + " " + error)
             toast(error, file=sys.stderr)
         # log snitch death, exit picosnitch
-        if not p_snitch_mon.is_alive():
+        if not multiprocessing.parent_process().is_alive():
             snitch["Errors"].append(time.ctime() + " snitch subprocess stopped")
             toast("snitch subprocess stopped, exiting picosnitch", file=sys.stderr)
-            terminate(snitch, p_snitch_mon, q_error, q_term, q_sha_term, q_psutil_term, q_vt_term)
+            terminate(snitch, q_error, q_term, q_sha_term, q_psutil_term, q_vt_term)
         # get list of new processes and connections since last update
         time.sleep(5)
         new_processes = []
@@ -464,11 +457,10 @@ def snitch_updater_subprocess(snitch: dict, known_pids: bytes, update_snitch_pen
                 write(snitch)
 
 
-def snitch_linux_subprocess(config, q_snitch, q_error, q_term_monitor):
+def snitch_linux_subprocess(q_snitch, q_error, q_sub_term):
     """runs a bpf program to monitor the system for new processes and connections and puts them in the queue"""
     from bcc import BPF
     if os.getuid() == 0:
-        last_data = {"pid": 0, "ppid": 0}
         b = BPF(text=bpf_text)
         execve_fnname = b.get_syscall_fnname("execve")
         b.attach_kprobe(event=execve_fnname, fn_name="syscall__execve")
@@ -516,7 +508,7 @@ def snitch_linux_subprocess(config, q_snitch, q_error, q_term_monitor):
                 error = "BPF " + type(e).__name__ + str(e.args)
                 q_error.put(error)
             try:
-                if q_term_monitor.get(block=False):
+                if q_sub_term.get(block=False):
                     return 0
             except queue.Empty:
                 if not multiprocessing.parent_process().is_alive():
@@ -524,18 +516,6 @@ def snitch_linux_subprocess(config, q_snitch, q_error, q_term_monitor):
     else:
         q_error.put("Snitch subprocess permission error, requires root")
     return 1
-
-
-def init_snitch_subprocess(config: dict, p_sha, p_psutil) -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
-    """init snitch subprocesses and monitor with root (before dropping root privileges)"""
-
-    if __name__ == "__main__":
-        q_snitch, q_error, q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-        p_snitch_mon = multiprocessing.Process(name="snitchmonitor", target=snitch_monitor, args=(config, q_snitch, q_error, q_term, p_sha, p_psutil))
-        p_snitch_mon.start()
-        return p_snitch_mon, q_snitch, q_error, q_term
-    return None, None, None, None
-
 
 
 def func_subprocess(func: typing.Callable, q_pending, q_results, q_term):
@@ -556,19 +536,10 @@ def func_subprocess(func: typing.Callable, q_pending, q_results, q_term):
                 return 1
             last_error = time.time()
 
-def init_func_subprocess(name: str, func: typing.Callable) -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
-    """init subprocess for function"""
-
-    if __name__ == "__main__":
-        q_pending, q_results, q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-        p_func = multiprocessing.Process(name=name, target=func_subprocess, args=(func, q_pending, q_results, q_term))
-        p_func.start()
-        return p_func, q_pending, q_results, q_term
-    return None, None, None, None
-
 
 def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
     """get virustotal results of process executable"""
+    drop_root_privileges()
     import vt
     last_error = 0
     while True:
@@ -603,44 +574,46 @@ def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
                 return 1
             last_error = time.time()
 
-def init_virustotal_subprocess(config: dict) -> typing.Tuple[multiprocessing.Process, multiprocessing.Queue, multiprocessing.Queue, multiprocessing.Queue]:
-    """init virustotal subprocess"""
 
-    if __name__ == "__main__":
-        q_vt_pending, q_vt_results, q_vt_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-        p_virustotal = multiprocessing.Process(name="snitchvirustotal", target=virustotal_subprocess, args=(config, q_vt_pending, q_vt_results, q_vt_term), daemon=True)
-        p_virustotal.start()
-        return p_virustotal, q_vt_pending, q_vt_results, q_vt_term
-    return None, None, None, None
-
-
-def picosnitch_process_monitor(config, q_snitch, q_error, q_term, p_sha, p_psutil):
-    """monitor the snitch subprocess and parent process, has same privileges as subprocess for clean termination at the command or death of the parent"""
+def picosnitch_process_monitor(config, snitch_updater_pickle):
+    """monitor all picosnitch subprocesses"""
     signal.signal(signal.SIGINT, lambda *args: None)
     if sys.platform.startswith("linux"):
-        p_snitch_func = snitch_linux
+        p_snitch_func = snitch_linux_subprocess
     # elif sys.platform.startswith("win"):
-    #     process_monitor = snitch_windows
+    #     p_snitch_func = snitch_windows_subprocess
     else:
-        q_error.put("Did not detect a supported operating system")
+        print("Did not detect a supported operating system", file=sys.stderr)
         return 1
-    p_sha, p_psutil = psutil.Process(p_sha.pid), psutil.Process(p_psutil.pid)
-    q_term_monitor = multiprocessing.Queue()
-    terminate_subprocess = lambda p_snitch_sub: q_term_monitor.put("TERMINATE") or p_snitch_sub.join(3) or (p_snitch_sub.is_alive() and p_snitch_sub.kill()) or p_snitch_sub.close()
-    p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
+    # start subprocesses
+    q_snitch, q_error, q_sub_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
+    p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(q_snitch, q_error, q_sub_term), daemon=True)
     p_snitch_sub.start()
+    q_sha_pending, q_sha_results, q_sha_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
+    p_sha = multiprocessing.Process(name="snitchsha", target=functools.lru_cache(get_sha256), args=(q_sha_pending, q_sha_results, q_sha_term), daemon=True)
+    p_sha.start()
+    q_psutil_pending, q_psutil_results, q_psutil_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
+    p_psutil = multiprocessing.Process(name="snitchpsutil", target=get_proc_info, args=(q_psutil_pending, q_psutil_results, q_psutil_term))
+    p_psutil.start()
+    q_vt_pending, q_vt_results, q_vt_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
+    p_virustotal = multiprocessing.Process(name="snitchvirustotal", target=virustotal_subprocess, args=(config, q_vt_pending, q_vt_results, q_vt_term), daemon=True)
+    p_virustotal.start()
+    q_restart, q_term = multiprocessing.Queue(), multiprocessing.Queue()
+    # monitor subprocesses
+    p_sha, p_psutil = psutil.Process(p_sha.pid), psutil.Process(p_psutil.pid)
+    terminate_subprocess = lambda p_snitch_sub: q_sub_term.put("TERMINATE") or p_snitch_sub.join(3) or (p_snitch_sub.is_alive() and p_snitch_sub.kill()) or p_snitch_sub.close()
     time_last_start = time.time()
     while True:
         if p_snitch_sub.is_alive():
             if psutil.Process(p_snitch_sub.pid).memory_info().vms > 512000000:
                 q_error.put("Snitch subprocess memory usage exceeded 512 MB, restarting snitch")
                 terminate_subprocess(p_snitch_sub)
-                p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
+                p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_sub_term), daemon=True)
                 p_snitch_sub.start()
                 time_last_start = time.time()
         elif time.time() - time_last_start > 300:
             q_error.put("Snitch subprocess died, restarting snitch")
-            p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_term_monitor), daemon=True)
+            p_snitch_sub = multiprocessing.Process(name="snitchsubprocess", target=p_snitch_func, args=(config, q_snitch, q_error, q_sub_term), daemon=True)
             p_snitch_sub.start()
             time_last_start = time.time()
         if not (p_sha.is_running() and p_sha.status() != "zombie" and p_psutil.is_running() and p_psutil.status() != "zombie"):
@@ -664,7 +637,7 @@ def picosnitch_process_monitor(config, q_snitch, q_error, q_term, p_sha, p_psuti
 
 
 def main(vt_api_key: str = ""):
-    """main loop"""
+    """init picosnitch"""
     # acquire lock (since the prior one would be released by starting the daemon)
     lock = filelock.FileLock(os.path.join(os.path.expanduser("~"), ".picosnitch_lock"), timeout=1)
     lock.acquire()
@@ -673,16 +646,16 @@ def main(vt_api_key: str = ""):
     _ = snitch.pop("Template", 0)
     if vt_api_key:
         snitch["Config"]["VT API key"] = vt_api_key
-    # init root subprocesses and do initial poll with root before dropping privileges
-    p_sha, q_sha_pending, q_sha_results, q_sha_term = init_func_subprocess("snitchsha", functools.lru_cache(get_sha256))
-    p_psutil, q_psutil_pending, q_psutil_results, q_psutil_term = init_func_subprocess("snitchpsutil", get_proc_info)
-    p_snitch_mon, q_snitch, q_error, q_term = init_snitch_subprocess(snitch["Config"], p_sha, p_psutil)
+    # do initial poll of current network connections
+    missed_conns = []
     known_pids = collections.OrderedDict()
     update_snitch_pending = initial_poll(snitch, known_pids)
-
-
-# init subprocesses without root (just virustotal)
-    p_virustotal, q_vt_pending, q_vt_results, q_vt_term = init_virustotal_subprocess(snitch["Config"])
+    snitch_updater_pickle = pickle.dumps((snitch, known_pids, missed_conns, update_snitch_pending))
+    # start picosnitch process monitor
+    if __name__ == "__main__":
+        sys.exit(picosnitch_process_monitor(snitch["Config"], snitch_updater_pickle))
+    print("Snitch subprocess init failed, __name__ != __main__, try: sudo -E python -m picosnitch", file=sys.stderr)
+    sys.exit(1)
 
 
 def start_daemon():
@@ -709,9 +682,12 @@ def start_daemon():
         import daemon
         with daemon.DaemonContext():
             main(tmp_snitch["Config"]["VT API key"])
-    else:
+    # elif ... :
         # not really supported right now (waiting to see what happens with https://github.com/microsoft/ebpf-for-windows)
-        main(tmp_snitch["Config"]["VT API key"])
+        # main(tmp_snitch["Config"]["VT API key"])
+    else:
+        print("Did not detect a supported operating system", file=sys.stderr)
+        return 1
 
 
 bpf_text = """
