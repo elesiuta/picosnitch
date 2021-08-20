@@ -395,7 +395,7 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
     _ = snitch.pop("WRITELOCK")
 
 
-def snitch_updater_subprocess(snitch_updater_pickle, p_virustotal,
+def updater_subprocess(snitch_updater_pickle, p_virustotal,
                               q_updater_pickle, q_updater_restart, q_updater_term,
                               q_snitch, q_error, q_master_term,
                               q_sha_pending, q_sha_results, q_sha_term,
@@ -585,28 +585,31 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     """coordinates all picosnitch subprocesses"""
     signal.signal(signal.SIGINT, lambda *args: None)
     if sys.platform.startswith("linux"):
-        p_monitor_func = linux_monitor_subprocess
+        monitor_subprocess = linux_monitor_subprocess
     # elif sys.platform.startswith("win"):
-    #     p_monitor_func = snitch_windows_subprocess
+    #     monitor_subprocess = snitch_windows_subprocess
     else:
         print("Did not detect a supported operating system", file=sys.stderr)
         return 1
     # start subprocesses
     q_snitch, q_error, q_monitor_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    init_p_monitor_sub = lambda: multiprocessing.Process(name="snitchmonitor", target=p_monitor_func, args=(q_snitch, q_error, q_monitor_term), daemon=True)
-    p_monitor_sub = init_p_monitor_sub()
-    p_monitor_sub.start()
+    init_p_monitor = lambda: multiprocessing.Process(name="snitchmonitor", target=monitor_subprocess, args=(q_snitch, q_error, q_monitor_term), daemon=True)
+    p_monitor = init_p_monitor()
+    p_monitor.start()
     q_sha_pending, q_sha_results, q_sha_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    p_sha = multiprocessing.Process(name="snitchsha", target=func_subprocess, args=(functools.lru_cache(get_sha256), q_sha_pending, q_sha_results, q_sha_term), daemon=True)
+    init_p_sha = lambda: multiprocessing.Process(name="snitchsha", target=func_subprocess, args=(functools.lru_cache(get_sha256), q_sha_pending, q_sha_results, q_sha_term), daemon=True)
+    p_sha = init_p_sha()
     p_sha.start()
     q_psutil_pending, q_psutil_results, q_psutil_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    p_psutil = multiprocessing.Process(name="snitchpsutil", target=func_subprocess, args=(get_proc_info, q_psutil_pending, q_psutil_results, q_psutil_term), daemon=True)
+    init_p_psutil = lambda: multiprocessing.Process(name="snitchpsutil", target=func_subprocess, args=(get_proc_info, q_psutil_pending, q_psutil_results, q_psutil_term), daemon=True)
+    p_psutil = init_p_psutil()
     p_psutil.start()
     q_vt_pending, q_vt_results, q_vt_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    p_virustotal = multiprocessing.Process(name="snitchvirustotal", target=virustotal_subprocess, args=(config, q_vt_pending, q_vt_results, q_vt_term), daemon=True)
+    init_p_virustotal = lambda: multiprocessing.Process(name="snitchvirustotal", target=virustotal_subprocess, args=(config, q_vt_pending, q_vt_results, q_vt_term), daemon=True)
+    p_virustotal = init_p_virustotal()
     p_virustotal.start()
     q_updater_pickle, q_updater_restart, q_updater_term, q_master_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    init_p_updater = lambda pickle, p_vt: multiprocessing.Process(name="snitchupdater", target=snitch_updater_subprocess, daemon=True,
+    init_p_updater = lambda pickle, p_vt: multiprocessing.Process(name="snitchupdater", target=updater_subprocess, daemon=True,
                                                                   args=(pickle, p_vt,
                                                                       q_updater_pickle, q_updater_restart, q_updater_term,
                                                                       q_snitch, q_error, q_master_term,
@@ -617,23 +620,23 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     p_updater = init_p_updater(snitch_updater_pickle, p_virustotal)
     p_updater.start()
     del snitch_updater_pickle
-    # monitor subprocesses
+    # watch subprocesses and try to restart if necessary or terminate picosnitch
     p_sha, p_psutil = psutil.Process(p_sha.pid), psutil.Process(p_psutil.pid)
     terminate_subprocess = lambda p, q, t: q.put("TERMINATE") or p.join(t) or p.terminate() or (p.is_alive() and p.kill()) or p.close()
     time_last_start = time.time()
     while True:
         try:
-            if p_monitor_sub.is_alive():
-                if psutil.Process(p_monitor_sub.pid).memory_info().vms > 512000000:
-                    q_error.put("Snitch subprocess memory usage exceeded 512 MB, restarting snitch")
-                    terminate_subprocess(p_monitor_sub, q_monitor_term, 3)
-                    p_monitor_sub = init_p_monitor_sub()
-                    p_monitor_sub.start()
+            if p_monitor.is_alive():
+                if psutil.Process(p_monitor.pid).memory_info().vms > 512000000:
+                    q_error.put("Snitch monitor memory usage exceeded 512 MB, restarting snitch monitor")
+                    terminate_subprocess(p_monitor, q_monitor_term, 3)
+                    p_monitor = init_p_monitor()
+                    p_monitor.start()
                     time_last_start = time.time()
             elif time.time() - time_last_start > 300:
-                q_error.put("Snitch subprocess died, restarting snitch")
-                p_monitor_sub = init_p_monitor_sub()
-                p_monitor_sub.start()
+                q_error.put("Snitch monitor died, restarting snitch monitor")
+                p_monitor = init_p_monitor()
+                p_monitor.start()
                 time_last_start = time.time()
             else:
                 break
@@ -644,6 +647,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                     try:
                         snitch_updater_pickle = q_updater_pickle.get(block=True, timeout=120)
                         p_updater.join(1)
+                        p_updater.terminate()
                         p_updater.close()
                     except queue.Empty:
                         break
@@ -652,12 +656,11 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                     del snitch_updater_pickle
             else:
                 break
-            if not (p_sha.is_running() and p_sha.status() != "zombie" and p_psutil.is_running() and p_psutil.status() != "zombie"):
+            if not (p_sha.is_running() and p_sha.status() != psutil.STATUS_ZOMBIE and p_psutil.is_running() and p_psutil.status() != psutil.STATUS_ZOMBIE):
                 # if either of these die, the updater process will hang on the next request to either of them
                 # better to just take everything down so the user can see it stopped running and doesn't get the impression that everything is still working
                 # todo: instead of terminating, clear queues and restart p_sha, p_psutil, p_updater
                 q_error.put("sha256 or psutil subprocess died, terminating picosnitch")
-                p_updater.terminate()
                 break
             try:
                 if q_master_term.get(block=True, timeout=10):
@@ -666,7 +669,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                 pass
         except Exception:
             break
-    terminate_subprocess(p_monitor_sub, q_monitor_term, 3)
+    terminate_subprocess(p_monitor, q_monitor_term, 3)
     terminate_subprocess(p_updater, q_updater_term, 10)
     return 0
 
