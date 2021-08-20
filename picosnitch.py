@@ -395,8 +395,6 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
     _ = snitch.pop("WRITELOCK")
 
 
-
-
 def snitch_updater_subprocess(snitch_updater_pickle, p_virustotal,
                               q_updater_pickle, q_updater_restart, q_updater_term,
                               q_snitch, q_error, q_mon_term,
@@ -646,7 +644,6 @@ def picosnitch_process_monitor(config, snitch_updater_pickle):
                     try:
                         snitch_updater_pickle = q_updater_pickle.get(block=True, timeout=120)
                         p_updater.join(1)
-                        p_updater.terminate()
                         p_updater.close()
                     except queue.Empty:
                         break
