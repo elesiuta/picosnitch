@@ -387,7 +387,7 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
 
 
 def updater_subprocess(snitch_updater_pickle, p_virustotal,
-                              q_updater_pickle, q_updater_restart,
+                              q_updater_pickle, q_updater_restart, q_updater_term,
                               q_snitch, q_error,
                               q_sha_pending, q_sha_results,
                               q_psutil_pending, q_psutil_results,
@@ -406,19 +406,23 @@ def updater_subprocess(snitch_updater_pickle, p_virustotal,
         get_vt_results(snitch, q_vt_pending, True)
         update_snitch_wrapper(snitch, update_snitch_pending, q_sha_pending, q_sha_results, q_vt_pending)
         known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
-    # the actual main loop
+    # snitch updater main loop
     while True:
-        # check for subprocess errors
+        # check for errors
         while not q_error.empty():
             error = q_error.get()
             snitch["Errors"].append(time.ctime() + " " + error)
             toast(error, file=sys.stderr)
-        # log snitch death, exit picosnitch
-        if not multiprocessing.parent_process().is_alive():
-            snitch["Errors"].append(time.ctime() + " picosnitch process has stopped")
-            toast("picosnitch process has stopped, exiting picosnitch", file=sys.stderr)
+        # check if terminating
+        try:
+            _ = q_updater_term.get(block=False)
             terminate_snitch_updater(snitch, q_error)
-        # check if this subprocess needs to restart
+        except queue.Empty:
+            if not multiprocessing.parent_process().is_alive():
+                snitch["Errors"].append(time.ctime() + " picosnitch stopped unexpectedly")
+                toast("picosnitch stopped unexpectedly, exiting picosnitch", file=sys.stderr)
+                terminate_snitch_updater(snitch, q_error)
+        # check if updater needs to restart
         try:
             _ = q_updater_restart.get(block=False)
             q_updater_pickle.put(pickle.dumps((snitch, known_pids, missed_conns, update_snitch_pending)))
@@ -505,8 +509,8 @@ def linux_monitor_subprocess(q_snitch, q_error, q_monitor_term):
                 error = "BPF " + type(e).__name__ + str(e.args)
                 q_error.put(error)
             try:
-                if q_monitor_term.get(block=False):
-                    return 0
+                _ = q_monitor_term.get(block=False)
+                return 0
             except queue.Empty:
                 if not multiprocessing.parent_process().is_alive():
                     return 0
@@ -602,7 +606,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     q_updater_pickle, q_updater_restart, q_updater_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
     init_p_updater = lambda pickle, p_vt: multiprocessing.Process(name="snitchupdater", target=updater_subprocess, daemon=True,
                                                                   args=(pickle, p_vt,
-                                                                      q_updater_pickle, q_updater_restart,
+                                                                      q_updater_pickle, q_updater_restart, q_updater_term,
                                                                       q_snitch, q_error,
                                                                       q_sha_pending, q_sha_results,
                                                                       q_psutil_pending, q_psutil_results,
@@ -613,14 +617,17 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     del snitch_updater_pickle
     # watch subprocesses and try to restart if necessary or terminate picosnitch
     pp_sha, pp_psutil = psutil.Process(p_sha.pid), psutil.Process(p_psutil.pid)
-    terminate_subprocess = lambda p, q, t: q.put("TERMINATE") or p.join(t) or p.terminate() or (p.is_alive() and p.kill()) or p.close()
+    terminate_subprocess = lambda p, t: p.join(t) or p.terminate() or (p.is_alive() and p.kill()) or p.close()
+    clear_queue = lambda q: (q.get(False) for i in range(q.qsize()))
     time_last_start = time.time()
     while True:
         try:
             if p_monitor.is_alive():
                 if psutil.Process(p_monitor.pid).memory_info().vms > 512000000:
                     q_error.put("Snitch monitor memory usage exceeded 512 MB, restarting snitch monitor")
-                    terminate_subprocess(p_monitor, q_monitor_term, 3)
+                    q_monitor_term.put("TERMINATE")
+                    terminate_subprocess(p_monitor, 3)
+                    clear_queue(q_monitor_term)
                     p_monitor = init_p_monitor()
                     p_monitor.start()
                     time_last_start = time.time()
@@ -637,9 +644,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                     q_updater_restart.put("RESTART")
                     try:
                         snitch_updater_pickle = q_updater_pickle.get(block=True, timeout=120)
-                        p_updater.join(1)
-                        p_updater.terminate()
-                        p_updater.close()
+                        terminate_subprocess(p_updater, 1)
                     except queue.Empty:
                         break
                     p_updater = init_p_updater(snitch_updater_pickle, None)
@@ -655,8 +660,13 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                 break
         except Exception:
             break
-    terminate_subprocess(p_monitor, q_monitor_term, 3)
-    terminate_subprocess(p_updater, q_updater_term, 10)
+    q_monitor_term.put("TERMINATE")
+    q_updater_term.put("TERMINATE")
+    terminate_subprocess(p_monitor, 3)
+    terminate_subprocess(p_updater, 10)
+    q_sha_term.put("TERMINATE")
+    q_psutil_term.put("TERMINATE")
+    q_vt_term.put("TERMINATE")
     return 0
 
 
