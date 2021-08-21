@@ -1,11 +1,12 @@
 import setuptools
+import picosnitch
 
 with open("README.md", "r") as f:
     long_description = f.read()
 
 setuptools.setup(
     name="picosnitch",
-    version="0.3.9",
+    version=picosnitch.VERSION,
     description="See which processes make remote network connections",
     long_description=long_description,
     long_description_content_type="text/markdown",

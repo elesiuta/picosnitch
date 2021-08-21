@@ -49,6 +49,8 @@ try:
 except Exception:
     system_notification = lambda title, message, app_name: print(message)
 
+VERSION = "0.3.9"
+
 
 class Daemon:
 	"""A generic daemon class from http://www.jejik.com/files/examples/daemon3x.py
@@ -869,12 +871,15 @@ def start_daemon():
                 daemon.stop()
             elif sys.argv[1] == "restart":
                 daemon.restart()
+            elif sys.argv[1] == "version":
+                print(VERSION)
+                return 0
             else:
-                print("usage: picosnitch start|stop|restart")
+                print("usage: picosnitch start|stop|restart|version")
                 return 0
             return 0
         else:
-            print("usage: picosnitch start|stop|restart")
+            print("usage: picosnitch start|stop|restart|version")
             return 0
     # elif ... :
         # not really supported right now (waiting to see what happens with https://github.com/microsoft/ebpf-for-windows)
