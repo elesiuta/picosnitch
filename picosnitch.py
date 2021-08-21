@@ -637,7 +637,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     while True:
         time.sleep(5)
         try:
-            if p_monitor.is_alive():
+            if p_monitor.is_alive() and pp_monitor.is_running() and pp_monitor.status() != psutil.STATUS_ZOMBIE:
                 if pp_monitor.memory_info().rss > 256000000:
                     q_error.put("Snitch monitor memory usage exceeded 256 MB, restarting snitch monitor")
                     q_monitor_term.put("TERMINATE")
@@ -649,13 +649,14 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                     time_last_start = time.time()
             elif time.time() - time_last_start > 300:
                 q_error.put("Snitch monitor died, restarting snitch monitor")
+                terminate_subprocess(p_monitor, 5)
                 p_monitor = init_p_monitor()
                 p_monitor.start()
                 pp_monitor = psutil.Process(p_monitor.pid)
                 time_last_start = time.time()
             else:
                 break
-            if p_updater.is_alive():
+            if p_updater.is_alive() and pp_updater.is_running() and pp_updater.status() != psutil.STATUS_ZOMBIE:
                 if pp_updater.memory_info().rss > 128000000:
                     q_error.put("Snitch updater memory usage exceeded 128 MB, restarting snitch updater")
                     q_updater_restart.put("RESTART")
@@ -665,18 +666,15 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                     p_updater.start()
                     pp_updater = psutil.Process(p_updater.pid)
                     del snitch_updater_pickle
-                    time.sleep(5)
             else:
                 break
             if not (p_sha.is_alive() and p_psutil.is_alive() and p_virustotal.is_alive()):
-                break
-            if not (pp_sha.is_running() and pp_sha.status() != psutil.STATUS_ZOMBIE and pp_psutil.is_running() and pp_psutil.status() != psutil.STATUS_ZOMBIE):
-                # if p_sha or p_psutil become zombies, the updater process will hang on the next request to either of them
-                # better to just take everything down so the user can see it stopped running and doesn't get the impression that everything is still working
-                # todo: instead of terminating, clear queues and restart p_sha, p_psutil, p_updater
                 q_error.put("picosnitch subprocess died, terminating picosnitch")
                 break
-            if not (pp_virustotal.is_running() and pp_virustotal.status() != psutil.STATUS_ZOMBIE and pp_updater.is_running() and pp_updater.status() != psutil.STATUS_ZOMBIE):
+            if not (pp_sha.is_running() and pp_sha.status() != psutil.STATUS_ZOMBIE and pp_psutil.is_running() and pp_psutil.status() != psutil.STATUS_ZOMBIE and pp_virustotal.is_running() and pp_virustotal.status() != psutil.STATUS_ZOMBIE):
+                # if p_sha or p_psutil die, the updater process will hang on the next request to either of them
+                # todo: instead of terminating, clear queues and restart p_sha, p_psutil, p_updater (make ProcessManager class)
+                q_error.put("picosnitch subprocess died, terminating picosnitch")
                 break
         except Exception:
             break
