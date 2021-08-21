@@ -24,6 +24,7 @@ import functools
 import ipaddress
 import json
 import hashlib
+import importlib
 import multiprocessing
 import os
 import pickle
@@ -118,7 +119,7 @@ class Daemon:
 
 		if pid:
 			message = "pidfile {0} already exist. " + \
-					"Daemon already running?\n"
+					"picosnitch already running?\n"
 			sys.stderr.write(message.format(self.pidfile))
 			sys.exit(1)
 
@@ -551,8 +552,8 @@ def updater_subprocess(snitch_updater_pickle, p_virustotal,
             terminate_snitch_updater(snitch, q_error)
         except queue.Empty:
             if not multiprocessing.parent_process().is_alive():
-                snitch["Errors"].append(time.ctime() + " picosnitch stopped unexpectedly")
-                toast("picosnitch stopped unexpectedly, exiting picosnitch", file=sys.stderr)
+                snitch["Errors"].append(time.ctime() + " picosnitch has stopped")
+                toast("picosnitch has stopped", file=sys.stderr)
                 terminate_snitch_updater(snitch, q_error)
         # check if updater needs to restart
         try:
@@ -679,7 +680,7 @@ def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
             if not q_vt_term.empty() or not multiprocessing.parent_process().is_alive():
                 return 0
             time.sleep(config["VT limit request"])
-            proc, sha256 = pickle.loads(q_vt_pending.get(block=True, timeout=None))
+            proc, sha256 = pickle.loads(q_vt_pending.get(block=True, timeout=15))
             suspicious = False
             if config["VT API key"]:
                 client = vt.Client(config["VT API key"])
@@ -701,6 +702,10 @@ def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
                 q_vt_results.put(pickle.dumps((proc, sha256, str(analysis.last_analysis_stats), suspicious)))
             else:
                 q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (no api key)", suspicious)))
+        except queue.Empty:
+            # have to timeout here to check whether to terminate otherwise this could stay hanging
+            # daemon=True flag for multiprocessing.Process does not work after root privileges are dropped for parent
+            pass
         except Exception:
             if time.time() - last_error < 30:
                 return 1
@@ -845,7 +850,26 @@ def start_daemon():
             def run(self):
                 main(tmp_snitch["Config"]["VT API key"])
         daemon = PicoDaemon("/tmp/daemon-picosnitch.pid")
-        daemon.start()
+        if len(sys.argv) == 2:
+            if os.getuid() != 0:
+                if importlib.util.find_spec("picosnitch"):
+                    args = ["sudo", "-E", "python3", "-m", "picosnitch", sys.argv[1]]
+                else:
+                    args = ["sudo", "-E", sys.executable] + sys.argv
+                os.execvp("sudo", args)
+            if sys.argv[1] == "start":
+                daemon.start()
+            elif sys.argv[1] == "stop":
+                daemon.stop()
+            elif sys.argv[1] == "restart":
+                daemon.restart()
+            else:
+                print("usage: picosnitch start|stop|restart")
+                return 0
+            return 0
+        else:
+            print("usage: picosnitch start|stop|restart")
+            return 0
     # elif ... :
         # not really supported right now (waiting to see what happens with https://github.com/microsoft/ebpf-for-windows)
         # main(tmp_snitch["Config"]["VT API key"])
