@@ -38,11 +38,16 @@ import typing
 
 try:
     import filelock
-    import plyer
     import psutil
 except Exception as e:
     print(type(e).__name__ + str(e.args))
     print("Make sure dependency is installed, or environment is preserved if running with sudo")
+
+try:
+    import plyer
+    system_notification = plyer.notification.notify
+except Exception:
+    system_notification = lambda title, message, app_name: print(message)
 
 
 def read() -> dict:
@@ -110,9 +115,9 @@ def terminate_snitch_updater(snitch: dict, q_error: multiprocessing.Queue):
 
 
 def toast(msg: str, file=sys.stdout) -> None:
-    """create a system tray notification, tries printing as a last resort, requires -E if running with sudo"""
+    """create a system tray notification, tries printing as a fallback, requires -E if running with sudo"""
     try:
-        plyer.notification.notify(title="picosnitch", message=msg, app_name="picosnitch")
+        system_notification(title="picosnitch", message=msg, app_name="picosnitch")
     except Exception:
         print("picosnitch (toast failed): " + msg, file=file)
 
@@ -617,10 +622,11 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     del snitch_updater_pickle
     # watch subprocesses and try to restart if necessary or terminate picosnitch
     pp_sha, pp_psutil = psutil.Process(p_sha.pid), psutil.Process(p_psutil.pid)
-    terminate_subprocess = lambda p, t: p.join(t) or p.terminate() or (p.is_alive() and p.kill()) or p.close()
-    clear_queue = lambda q: (q.get(False) for i in range(q.qsize()))
+    terminate_subprocess = lambda p, t: p.join(t) or (p.is_alive() and p.terminate()) or p.join(1) or (p.is_alive() and p.kill()) or p.join(1) or p.close()
+    clear_queue = lambda q: (q.get() for i in range(q.qsize()))
     time_last_start = time.time()
     while True:
+        time.sleep(1)
         try:
             if p_monitor.is_alive():
                 if psutil.Process(p_monitor.pid).memory_info().vms > 512000000:
@@ -639,17 +645,15 @@ def picosnitch_master_process(config, snitch_updater_pickle):
             else:
                 break
             if p_updater.is_alive():
-                if psutil.Process(p_updater.pid).memory_info().vms > 350000000:
-                    q_error.put("Snitch updater memory usage exceeded 350 MB, restarting snitch updater")
+                if psutil.Process(p_updater.pid).memory_info().vms > 512000000:
+                    q_error.put("Snitch updater memory usage exceeded 512 MB, restarting snitch updater")
                     q_updater_restart.put("RESTART")
-                    try:
-                        snitch_updater_pickle = q_updater_pickle.get(block=True, timeout=120)
-                        terminate_subprocess(p_updater, 1)
-                    except queue.Empty:
-                        break
+                    snitch_updater_pickle = q_updater_pickle.get(block=True, timeout=600)
+                    terminate_subprocess(p_updater, 5)
                     p_updater = init_p_updater(snitch_updater_pickle, None)
                     p_updater.start()
                     del snitch_updater_pickle
+                    time.sleep(1)
             else:
                 break
             if not (pp_sha.is_running() and pp_sha.status() != psutil.STATUS_ZOMBIE and pp_psutil.is_running() and pp_psutil.status() != psutil.STATUS_ZOMBIE):

@@ -12,7 +12,8 @@ setuptools.setup(
     url="https://github.com/elesiuta/picosnitch",
     py_modules=["picosnitch"],
     entry_points={"console_scripts": ["picosnitch = picosnitch:start_daemon"]},
-    install_requires=["filelock", "plyer", "psutil", "python-daemon", "vt-py"],
+    install_requires=["filelock", "psutil", "python-daemon", "vt-py"],
+    extras_require={"enable_notifications":  ["plyer"]},
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",

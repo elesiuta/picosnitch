@@ -13,7 +13,7 @@
 # getting started
 ## linux
 - install from PyPI with  
-`pip3 install picosnitch --upgrade --user`
+`pip3 install picosnitch[enable_notifications] --upgrade --user`
 - depends on the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md)  
 `sudo apt install python3-bpfcc`
 - run daemon with  
@@ -49,7 +49,7 @@
   "Latest Entries": [], # Log of entries by time
   "Names": {}, # Log of processes by name containing respective executable(s)
   "Processes": {}, # Log of processes by executable containing:
-  # cmdlines, days seen, first seen, last seen, name, ports, remote addresses
+  # cmdlines, days seen, first seen, last seen, name, ports, remote addresses, results
   # some cmdlines are consolidated using * as a wildcard
   "Remote Addresses": {} # Log of remote addresses containing respective executable(s)
 }
