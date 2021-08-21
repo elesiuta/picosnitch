@@ -673,7 +673,11 @@ def func_subprocess(func: typing.Callable, q_pending, q_results, q_term):
 def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
     """get virustotal results of process executable"""
     drop_root_privileges()
-    import vt
+    try:
+        import vt
+        vt_enabled = True
+    except ImportError:
+        vt_enabled = False
     last_error = 0
     while True:
         try:
@@ -682,7 +686,7 @@ def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
             time.sleep(config["VT limit request"])
             proc, sha256 = pickle.loads(q_vt_pending.get(block=True, timeout=15))
             suspicious = False
-            if config["VT API key"]:
+            if config["VT API key"] and vt_enabled:
                 client = vt.Client(config["VT API key"])
                 try:
                     analysis = client.get_object("/files/" + sha256)
@@ -700,8 +704,10 @@ def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
                 if analysis.last_analysis_stats["malicious"] != 0 or analysis.last_analysis_stats["suspicious"] != 0:
                     suspicious = True
                 q_vt_results.put(pickle.dumps((proc, sha256, str(analysis.last_analysis_stats), suspicious)))
-            else:
+            elif vt_enabled:
                 q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (no api key)", suspicious)))
+            else:
+                q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (virustotal not enabled)", suspicious)))
         except queue.Empty:
             # have to timeout here to check whether to terminate otherwise this could stay hanging
             # daemon=True flag for multiprocessing.Process does not work after root privileges are dropped for parent
