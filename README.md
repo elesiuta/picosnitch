@@ -13,11 +13,11 @@
 # getting started
 ## linux
 - install from PyPI with  
-`pip3 install picosnitch[enable_notifications] --upgrade --user`
+`pip3 install picosnitch[full] --upgrade --user`
 - depends on the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md)  
 `sudo apt install python3-bpfcc`
 - run daemon with  
-`sudo -E python3 -m picosnitch`
+`picosnitch start`
 ## windows
 - no longer supported for now, use a version <= v0.2.5
 ## building from source
