@@ -76,6 +76,7 @@ def read() -> dict:
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             data = json.load(json_file)
+        data["Errors"] = []
         assert all(key in data and type(data[key]) == type(template[key]) for key in template), "Invalid snitch.json"
         assert all(key in data["Config"] for key in template["Config"]), "Invalid config"
         return data
@@ -86,14 +87,21 @@ def read() -> dict:
 def write(snitch: dict) -> None:
     """write snitch to correct location (root privileges should be dropped first)"""
     file_path = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "snitch.json")
+    error_log = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "error.log")
     if snitch.pop("WRITELOCK", False):
         file_path += "~"
     if not os.path.isdir(os.path.dirname(file_path)):
         os.makedirs(os.path.dirname(file_path))
     try:
+        if snitch["Errors"]:
+            with open(error_log, "a", encoding="utf-8", errors="surrogateescape") as text_file:
+                text_file.write("\n".join(snitch["Errors"]) + "\n")
+        del snitch["Errors"]
         with open(file_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
             json.dump(snitch, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
+        snitch["Errors"] = []
     except Exception:
+        snitch["Errors"] = []
         toast("picosnitch write error", file=sys.stderr)
 
 
@@ -300,6 +308,7 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
         else:
             conn = {"ip": "", "port": -1}
         update_snitch_pending.append((proc, conn, ctime))
+    del missed_conns
     return pending_conns, update_snitch_pending
 
 
@@ -450,8 +459,8 @@ def updater_subprocess(snitch_updater_pickle, p_virustotal,
         # free some memory
         while len(known_pids) > 9000:
             _ = known_pids.popitem(last=False)
-        del(new_processes)
-        del(update_snitch_pending)
+        del new_processes
+        del update_snitch_pending
         update_snitch_pending = []
         gc.collect()
         # write snitch
@@ -487,7 +496,7 @@ def linux_monitor_subprocess(q_snitch, q_error, q_monitor_term):
                 argv_text = b' '.join(argv[event.pid]).replace(b'\n', b'\\n')
                 q_snitch.put(pickle.dumps({"type": "exec", "pid": event.pid, "name": event.comm.decode(), "cmdline": argv_text.decode()}))
                 try:
-                    del(argv[event.pid])
+                    del argv[event.pid]
                 except Exception:
                     pass
         def queue_ipv4_event(cpu, data, size):
@@ -621,46 +630,53 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     p_updater.start()
     del snitch_updater_pickle
     # watch subprocesses and try to restart if necessary or terminate picosnitch
-    pp_sha, pp_psutil = psutil.Process(p_sha.pid), psutil.Process(p_psutil.pid)
+    pp_monitor, pp_sha, pp_psutil, pp_virustotal, pp_updater = psutil.Process(p_monitor.pid), psutil.Process(p_sha.pid), psutil.Process(p_psutil.pid), psutil.Process(p_virustotal.pid), psutil.Process(p_updater.pid)
     terminate_subprocess = lambda p, t: p.join(t) or (p.is_alive() and p.terminate()) or p.join(1) or (p.is_alive() and p.kill()) or p.join(1) or p.close()
     clear_queue = lambda q: (q.get() for i in range(q.qsize()))
     time_last_start = time.time()
     while True:
-        time.sleep(1)
+        time.sleep(5)
         try:
             if p_monitor.is_alive():
-                if psutil.Process(p_monitor.pid).memory_info().vms > 512000000:
-                    q_error.put("Snitch monitor memory usage exceeded 512 MB, restarting snitch monitor")
+                if pp_monitor.memory_info().rss > 256000000:
+                    q_error.put("Snitch monitor memory usage exceeded 256 MB, restarting snitch monitor")
                     q_monitor_term.put("TERMINATE")
-                    terminate_subprocess(p_monitor, 3)
+                    terminate_subprocess(p_monitor, 5)
                     clear_queue(q_monitor_term)
                     p_monitor = init_p_monitor()
                     p_monitor.start()
+                    pp_monitor = psutil.Process(p_monitor.pid)
                     time_last_start = time.time()
             elif time.time() - time_last_start > 300:
                 q_error.put("Snitch monitor died, restarting snitch monitor")
                 p_monitor = init_p_monitor()
                 p_monitor.start()
+                pp_monitor = psutil.Process(p_monitor.pid)
                 time_last_start = time.time()
             else:
                 break
             if p_updater.is_alive():
-                if psutil.Process(p_updater.pid).memory_info().vms > 512000000:
-                    q_error.put("Snitch updater memory usage exceeded 512 MB, restarting snitch updater")
+                if pp_updater.memory_info().rss > 128000000:
+                    q_error.put("Snitch updater memory usage exceeded 128 MB, restarting snitch updater")
                     q_updater_restart.put("RESTART")
                     snitch_updater_pickle = q_updater_pickle.get(block=True, timeout=600)
                     terminate_subprocess(p_updater, 5)
                     p_updater = init_p_updater(snitch_updater_pickle, None)
                     p_updater.start()
+                    pp_updater = psutil.Process(p_updater.pid)
                     del snitch_updater_pickle
-                    time.sleep(1)
+                    time.sleep(5)
             else:
                 break
+            if not (p_sha.is_alive() and p_psutil.is_alive() and p_virustotal.is_alive()):
+                break
             if not (pp_sha.is_running() and pp_sha.status() != psutil.STATUS_ZOMBIE and pp_psutil.is_running() and pp_psutil.status() != psutil.STATUS_ZOMBIE):
-                # if either of these die, the updater process will hang on the next request to either of them
+                # if p_sha or p_psutil become zombies, the updater process will hang on the next request to either of them
                 # better to just take everything down so the user can see it stopped running and doesn't get the impression that everything is still working
                 # todo: instead of terminating, clear queues and restart p_sha, p_psutil, p_updater
-                q_error.put("sha256 or psutil subprocess died, terminating picosnitch")
+                q_error.put("picosnitch subprocess died, terminating picosnitch")
+                break
+            if not (pp_virustotal.is_running() and pp_virustotal.status() != psutil.STATUS_ZOMBIE and pp_updater.is_running() and pp_updater.status() != psutil.STATUS_ZOMBIE):
                 break
         except Exception:
             break

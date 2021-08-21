@@ -45,7 +45,6 @@
     "VT file upload": False, # Only hashes are uploaded by default
     "VT limit request": 15 # Number of seconds between requests
   },
-  "Errors": [], # Log of errors by time
   "Latest Entries": [], # Log of entries by time
   "Names": {}, # Log of processes by name containing respective executable(s)
   "Processes": {}, # Log of processes by executable containing:
