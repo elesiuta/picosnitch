@@ -21,6 +21,7 @@ import atexit
 import collections
 import difflib
 import functools
+import gc
 import ipaddress
 import json
 import hashlib
@@ -583,6 +584,7 @@ def updater_subprocess(snitch_updater_pickle, p_virustotal, init_scan,
             _ = known_pids.popitem(last=False)
         del new_processes
         del update_snitch_pending
+        gc.collect()
         update_snitch_pending = []
         # write snitch
         if time.time() - last_write > 30:
@@ -791,15 +793,19 @@ def picosnitch_master_process(config, snitch_updater_pickle):
             else:
                 break
             if p_updater.is_alive() and pp_updater.is_running() and pp_updater.status() != psutil.STATUS_ZOMBIE:
-                if pp_updater.memory_info().rss > 28000000:
+                if pp_updater.memory_info().rss > 21000000:
                     q_error.put("Snitch updater memory usage exceeded 128 MB, restarting snitch updater")
                     q_updater_restart.put("RESTART")
                     snitch_updater_pickle = q_updater_pickle.get(block=True, timeout=300)
                     terminate_subprocess(p_updater, 5)
+                    time.sleep(5)
+                    gc.collect()
+                    time.sleep(5)
                     p_updater = init_p_updater(snitch_updater_pickle, p_virustotal, False)
                     p_updater.start()
                     pp_updater = psutil.Process(p_updater.pid)
                     del snitch_updater_pickle
+                    gc.collect()
             else:
                 break
             if not (p_sha.is_alive() and p_psutil.is_alive() and p_virustotal.is_alive()):
