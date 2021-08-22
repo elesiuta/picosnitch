@@ -521,7 +521,7 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
     _ = snitch.pop("WRITELOCK")
 
 
-def updater_subprocess(snitch_updater_pickle, p_virustotal,
+def updater_subprocess(snitch_updater_pickle, p_virustotal, init_scan,
                               q_updater_pickle, q_updater_restart, q_updater_term,
                               q_snitch, q_error,
                               q_sha_pending, q_sha_results,
@@ -537,10 +537,11 @@ def updater_subprocess(snitch_updater_pickle, p_virustotal,
     signal.signal(signal.SIGTERM, lambda *args: terminate_snitch_updater(snitch, q_error))
     signal.signal(signal.SIGINT, lambda *args: terminate_snitch_updater(snitch, q_error))
     # update snitch with initial running processes and connections
-    if p_virustotal is not None:
+    if init_scan:
         get_vt_results(snitch, q_vt_pending, True)
         update_snitch_wrapper(snitch, update_snitch_pending, q_sha_pending, q_sha_results, q_vt_pending)
-        known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
+    known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
+    known_pids[os.getpid()] = {"name": "snitchupdater", "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": os.getpid()}
     # snitch updater main loop
     while True:
         # check for errors
@@ -749,15 +750,15 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     p_virustotal = init_p_virustotal()
     p_virustotal.start()
     q_updater_pickle, q_updater_restart, q_updater_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    init_p_updater = lambda pickle, p_vt: multiprocessing.Process(name="snitchupdater", target=updater_subprocess, daemon=True,
-                                                                  args=(pickle, p_vt,
-                                                                      q_updater_pickle, q_updater_restart, q_updater_term,
-                                                                      q_snitch, q_error,
-                                                                      q_sha_pending, q_sha_results,
-                                                                      q_psutil_pending, q_psutil_results,
-                                                                      q_vt_pending, q_vt_results)
-                                                                  )
-    p_updater = init_p_updater(snitch_updater_pickle, p_virustotal)
+    init_p_updater = lambda pickle, p_vt, init_scan: multiprocessing.Process(name="snitchupdater", target=updater_subprocess, daemon=True,
+                                                                             args=(pickle, p_vt, init_scan,
+                                                                                 q_updater_pickle, q_updater_restart, q_updater_term,
+                                                                                 q_snitch, q_error,
+                                                                                 q_sha_pending, q_sha_results,
+                                                                                 q_psutil_pending, q_psutil_results,
+                                                                                 q_vt_pending, q_vt_results)
+                                                                            )
+    p_updater = init_p_updater(snitch_updater_pickle, p_virustotal, True)
     p_updater.start()
     del snitch_updater_pickle
     # watch subprocesses and try to restart if necessary or terminate picosnitch
@@ -795,7 +796,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                     q_updater_restart.put("RESTART")
                     snitch_updater_pickle = q_updater_pickle.get(block=True, timeout=300)
                     terminate_subprocess(p_updater, 5)
-                    p_updater = init_p_updater(snitch_updater_pickle, None)
+                    p_updater = init_p_updater(snitch_updater_pickle, p_virustotal, False)
                     p_updater.start()
                     pp_updater = psutil.Process(p_updater.pid)
                     del snitch_updater_pickle
