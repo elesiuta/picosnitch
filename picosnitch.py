@@ -522,19 +522,24 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
     _ = snitch.pop("WRITELOCK")
 
 
-def updater_subprocess(snitch_updater_pickle, p_virustotal, init_scan,
-                              q_updater_pickle, q_updater_restart, q_updater_term,
-                              q_snitch, q_error,
-                              q_sha_pending, q_sha_results,
-                              q_psutil_pending, q_psutil_results,
-                              q_vt_pending, q_vt_results,
-                              ):
-    # init variables for loop
-    snitch, known_pids, missed_conns, update_snitch_pending = pickle.loads(snitch_updater_pickle)
+def updater_subprocess(p_virustotal, init_scan, init_pickle,
+                       q_updater_restart, q_updater_ready, q_updater_term,
+                       q_snitch, q_error,
+                       q_sha_pending, q_sha_results,
+                       q_psutil_pending, q_psutil_results,
+                       q_vt_pending, q_vt_results,
+                      ):
+    # drop root privileges and init variables for loop
+    drop_root_privileges()
+    pickle_path = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "pickle.tmp")
+    if init_pickle is None:
+        with open(pickle_path, "rb") as pickle_file:
+            snitch, known_pids, missed_conns, update_snitch_pending = pickle.load(pickle_file)
+    else:
+        snitch, known_pids, missed_conns, update_snitch_pending = pickle.loads(init_pickle)
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
-    # drop root privileges and init signal handlers
-    drop_root_privileges()
+    # init signal handlers
     signal.signal(signal.SIGTERM, lambda *args: terminate_snitch_updater(snitch, q_error))
     signal.signal(signal.SIGINT, lambda *args: terminate_snitch_updater(snitch, q_error))
     # update snitch with initial running processes and connections
@@ -562,7 +567,9 @@ def updater_subprocess(snitch_updater_pickle, p_virustotal, init_scan,
         # check if updater needs to restart
         try:
             _ = q_updater_restart.get(block=False)
-            q_updater_pickle.put(pickle.dumps((snitch, known_pids, missed_conns, update_snitch_pending)))
+            with open(pickle_path, "wb") as pickle_file:
+                pickle.dump((snitch, known_pids, missed_conns, update_snitch_pending), pickle_file)
+            q_updater_ready.put("READY")
             return
         except queue.Empty:
             pass
@@ -751,16 +758,16 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     init_p_virustotal = lambda: multiprocessing.Process(name="snitchvirustotal", target=virustotal_subprocess, args=(config, q_vt_pending, q_vt_results, q_vt_term), daemon=True)
     p_virustotal = init_p_virustotal()
     p_virustotal.start()
-    q_updater_pickle, q_updater_restart, q_updater_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    init_p_updater = lambda pickle, p_vt, init_scan: multiprocessing.Process(name="snitchupdater", target=updater_subprocess, daemon=True,
-                                                                             args=(pickle, p_vt, init_scan,
-                                                                                 q_updater_pickle, q_updater_restart, q_updater_term,
-                                                                                 q_snitch, q_error,
-                                                                                 q_sha_pending, q_sha_results,
-                                                                                 q_psutil_pending, q_psutil_results,
-                                                                                 q_vt_pending, q_vt_results)
-                                                                            )
-    p_updater = init_p_updater(snitch_updater_pickle, p_virustotal, True)
+    q_updater_restart, q_updater_ready, q_updater_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
+    init_p_updater = lambda p_vt, init_scan, init_pickle: multiprocessing.Process(name="snitchupdater", target=updater_subprocess, daemon=True,
+                                                                                  args=(p_vt, init_scan, init_pickle,
+                                                                                      q_updater_restart, q_updater_ready, q_updater_term,
+                                                                                      q_snitch, q_error,
+                                                                                      q_sha_pending, q_sha_results,
+                                                                                      q_psutil_pending, q_psutil_results,
+                                                                                      q_vt_pending, q_vt_results)
+                                                                                 )
+    p_updater = init_p_updater(p_virustotal, True, snitch_updater_pickle)
     p_updater.start()
     del snitch_updater_pickle
     # watch subprocesses and try to restart if necessary or terminate picosnitch
@@ -796,15 +803,14 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                 if pp_updater.memory_info().rss > 21000000:
                     q_error.put("Snitch updater memory usage exceeded 128 MB, restarting snitch updater")
                     q_updater_restart.put("RESTART")
-                    snitch_updater_pickle = q_updater_pickle.get(block=True, timeout=300)
+                    _ = q_updater_ready.get(block=True, timeout=300)
                     terminate_subprocess(p_updater, 5)
                     time.sleep(5)
                     gc.collect()
                     time.sleep(5)
-                    p_updater = init_p_updater(snitch_updater_pickle, p_virustotal, False)
+                    p_updater = init_p_updater(p_virustotal, False, None)
                     p_updater.start()
                     pp_updater = psutil.Process(p_updater.pid)
-                    del snitch_updater_pickle
                     gc.collect()
             else:
                 break
