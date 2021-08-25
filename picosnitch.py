@@ -38,8 +38,6 @@ import sys
 import time
 import typing
 
-from psutil import Process
-
 try:
     import psutil
 except Exception as e:
@@ -193,7 +191,7 @@ class ProcessManager:
         self.p.start()
         self.pp = psutil.Process(self.p.pid)
 
-    def terminate(self, t: float, use_q_term: bool = False) -> None:
+    def terminate(self, t: float, use_q_term: bool = False, close_queues: bool = False) -> None:
         if use_q_term:
             self.q_term.put("TERMINATE")
         # terminate_subprocess = lambda p, t: p.join(t) or (p.is_alive() and p.terminate()) or p.join(1) or (p.is_alive() and p.kill()) or p.join(1) or p.close()
@@ -204,11 +202,16 @@ class ProcessManager:
         if self.p.is_alive():
             self.p.kill()
         self.p.join(1)
+        if close_queues:
+            self.q_in.close()
+            self.q_out.close()
         self.p.close()
         # clear_queue = lambda q: (q.get() for i in range(q.qsize()))
         if use_q_term:
             for i in range(self.q_term.qsize()):
                 _ = self.q_term.get()
+        if close_queues:
+            self.q_term.close()
 
     def is_alive(self) -> bool:
         return self.p.is_alive()
@@ -367,6 +370,19 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, check_pending: boo
                 toast("Suspicious results for " + proc["name"])
 
 
+def safe_q_get(q: multiprocessing.Queue, q_term: multiprocessing.Queue):
+    """prevent the updater process from hanging on the next request/result check if p_sha or p_psutil die"""
+    while True:
+        try:
+            if not q_term.empty() or not multiprocessing.parent_process().is_alive():
+                raise Exception("Process terminated")
+                # sys.exit(1)
+            return q.get(block=True, timeout=15)
+        except queue.Empty:
+            # have to timeout here to check whether to terminate otherwise this could stay hanging
+            pass
+
+
 def initial_poll(snitch: dict, known_pids: dict) -> list:
     """poll initial processes and connections using psutil and queue for update_snitch()"""
     ctime = time.ctime()
@@ -404,6 +420,7 @@ def initial_poll(snitch: dict, known_pids: dict) -> list:
 
 
 def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_processes: list,
+                  q_updater_term: multiprocessing.Queue,
                   q_psutil_pending: multiprocessing.Queue,
                   q_psutil_results: multiprocessing.Queue
                   ) -> tuple:
@@ -434,7 +451,7 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
                 else:
                     try:
                         q_psutil_pending.put(pickle.dumps(proc["pid"]))
-                        proc_psutil = pickle.loads(q_psutil_results.get())
+                        proc_psutil = pickle.loads(safe_q_get(q_psutil_results, q_updater_term))
                         if proc_psutil["exe"]:
                             proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
                             known_pids[proc_psutil["pid"]] = proc_psutil
@@ -442,7 +459,7 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
                         if proc["ppid"] not in known_pids:
                             try:
                                 q_psutil_pending.put(pickle.dumps(proc["ppid"]))
-                                proc_psutil = pickle.loads(q_psutil_results.get())
+                                proc_psutil = pickle.loads(safe_q_get(q_psutil_results, q_updater_term))
                                 if proc_psutil["exe"]:
                                     proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
                                     known_pids[proc_psutil["pid"]] = proc_psutil
@@ -483,6 +500,7 @@ def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_proces
 
 
 def update_snitch_wrapper(snitch: dict, update_snitch_pending: list,
+                          q_updater_term: multiprocessing.Queue,
                           q_sha_pending: multiprocessing.Queue,
                           q_sha_results: multiprocessing.Queue,
                           q_vt_pending: multiprocessing.Queue):
@@ -490,7 +508,7 @@ def update_snitch_wrapper(snitch: dict, update_snitch_pending: list,
     for proc, conn, ctime in update_snitch_pending:
         try:
             q_sha_pending.put(pickle.dumps(proc["exe"]))
-            sha256 = pickle.loads(q_sha_results.get())
+            sha256 = pickle.loads(safe_q_get(q_sha_results, q_updater_term))
             update_snitch(snitch, proc, conn, sha256, ctime, q_vt_pending)
         except Exception as e:
             error = "Update snitch " + type(e).__name__ + str(e.args) + str(proc)
@@ -593,7 +611,7 @@ def updater_subprocess(p_virustotal, init_scan, init_pickle,
     # update snitch with initial running processes and connections
     if init_scan:
         get_vt_results(snitch, q_vt_pending, True)
-        update_snitch_wrapper(snitch, update_snitch_pending, q_sha_pending, q_sha_results, q_vt_pending)
+        update_snitch_wrapper(snitch, update_snitch_pending, q_updater_term, q_sha_pending, q_sha_results, q_vt_pending)
     known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
     known_pids[os.getpid()] = {"name": "snitchupdater", "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": os.getpid()}
     # snitch updater main loop
@@ -631,8 +649,8 @@ def updater_subprocess(p_virustotal, init_scan, init_pickle,
             pass
         # process the list and update snitch
         new_processes = [pickle.loads(proc) for proc in new_processes]
-        missed_conns, update_snitch_pending = process_queue(snitch, known_pids, missed_conns, new_processes, q_psutil_pending, q_psutil_results)
-        update_snitch_wrapper(snitch, update_snitch_pending, q_sha_pending, q_sha_results, q_vt_pending)
+        missed_conns, update_snitch_pending = process_queue(snitch, known_pids, missed_conns, new_processes, q_updater_term, q_psutil_pending, q_psutil_results)
+        update_snitch_wrapper(snitch, update_snitch_pending, q_updater_term, q_sha_pending, q_sha_results, q_vt_pending)
         get_vt_results(snitch, q_vt_results, False)
         # free some memory
         while len(known_pids) > 9000:
@@ -841,17 +859,16 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                 q_error.put("picosnitch subprocess died, terminating picosnitch")
                 break
             if any(p.is_zombie() for p in subprocesses):
-                # if p_sha or p_psutil die, the updater process will hang on the next request to either of them
                 # todo: instead of terminating, clear queues and restart p_sha, p_psutil, p_updater
                 q_error.put("picosnitch subprocess died, terminating picosnitch")
                 break
     except Exception as e:
         q_error.put(str(e))
     for p in subprocesses:
-        p.q_term.put("TERMINATE")
-    p_monitor.terminate(3)
-    p_updater.terminate(10)
-    return 0
+        try:
+            p.terminate(5, True, True)
+        except Exception:
+            pass
 
 
 def main(vt_api_key: str = ""):
