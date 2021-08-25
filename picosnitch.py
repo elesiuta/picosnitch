@@ -373,7 +373,7 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, check_pending: boo
 
 
 def safe_q_get(q: multiprocessing.Queue, q_term: multiprocessing.Queue):
-    """prevent the updater process from hanging on the next request/result check if p_sha or p_psutil die"""
+    """prevent the updater subprocess from hanging on the next request/result check if p_sha or p_psutil die"""
     while True:
         try:
             if not q_term.empty() or not multiprocessing.parent_process().is_alive():
@@ -597,6 +597,7 @@ def updater_subprocess(p_virustotal, init_scan, init_pickle,
                        q_vt_pending, q_vt_results,
                        q_updater_restart, q_updater_ready, q_updater_term
                       ):
+    """main subprocess where snitch.json is updated with new connections and the user is notified"""
     # drop root privileges and init variables for loop
     drop_root_privileges()
     pickle_path = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "pickle.tmp")
