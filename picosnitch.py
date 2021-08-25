@@ -208,9 +208,11 @@ class ProcessManager:
         self.p.close()
         # clear_queue = lambda q: (q.get() for i in range(q.qsize()))
         if use_q_term:
+            # can clear q_term if p successfully closed
             for i in range(self.q_term.qsize()):
                 _ = self.q_term.get()
         if close_queues:
+            # can close q_term if p successfully closed
             self.q_term.close()
 
     def is_alive(self) -> bool:
@@ -821,8 +823,8 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                                           p_virustotal.q_in, p_virustotal.q_out)
                               )
     del snitch_updater_pickle
-    subprocesses = [p_monitor, p_sha, p_psutil, p_virustotal, p_updater]
     # watch subprocesses and try to restart if necessary or terminate picosnitch
+    subprocesses = [p_monitor, p_sha, p_psutil, p_virustotal, p_updater]
     time_last_start = time.time()
     try:
         while True:
@@ -855,13 +857,18 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                     gc.collect()
             else:
                 break
-            if not (p_sha.is_alive() and p_psutil.is_alive() and p_virustotal.is_alive()):
-                q_error.put("picosnitch subprocess died, terminating picosnitch")
+            if not all(p.is_alive() for p in subprocesses):
+                # a subprocess was probably terminated, terminate them all
                 break
             if any(p.is_zombie() for p in subprocesses):
-                # todo: instead of terminating, clear queues and restart p_sha, p_psutil, p_updater
-                q_error.put("picosnitch subprocess died, terminating picosnitch")
-                break
+                # a subprocess became a zombie, try terminating everything and restarting
+                q_error.put("picosnitch subprocess became a zombie, attempting restart")
+                for p in subprocesses:
+                    try:
+                        p.terminate(5, True, True)
+                    except Exception:
+                        pass
+                sys.exit(main())
     except Exception as e:
         q_error.put(str(e))
     for p in subprocesses:
@@ -869,7 +876,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
             p.terminate(5, True, True)
         except Exception:
             pass
-
+    return 0
 
 def main(vt_api_key: str = ""):
     """init picosnitch"""
