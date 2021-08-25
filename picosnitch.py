@@ -900,29 +900,30 @@ def main(vt_api_key: str = ""):
 
 def start_daemon():
     """startup picosnitch as a daemon on posix systems, regular process otherwise, and ensure only one instance is running"""
-    try:
-        tmp_snitch = read()
-        if not tmp_snitch["Config"]["VT API key"] and "Template" in tmp_snitch:
-            tmp_snitch["Config"]["VT API key"] = input("Enter your VirusTotal API key (optional)\n>>> ")
-    except Exception as e:
-        print(type(e).__name__ + str(e.args))
-        sys.exit(1)
     if sys.prefix != sys.base_prefix:
             print("Warning: picosnitch is running in a virtual environment, notifications may not function", file=sys.stderr)
     if os.name == "posix":
         if os.path.expanduser("~") == "/root":
             print("Warning: picosnitch was run as root without preserving environment", file=sys.stderr)
-        class PicoDaemon(Daemon):
-            def run(self):
-                main(tmp_snitch["Config"]["VT API key"])
-        daemon = PicoDaemon("/tmp/daemon-picosnitch.pid")
         if len(sys.argv) == 2:
             if os.getuid() != 0:
+                print("Warning: picosnitch was run without root privileges, requesting root privileges", file=sys.stderr)
                 if importlib.util.find_spec("picosnitch"):
                     args = ["sudo", "-E", "python3", "-m", "picosnitch", sys.argv[1]]
                 else:
                     args = ["sudo", "-E", sys.executable] + sys.argv
                 os.execvp("sudo", args)
+            try:
+                tmp_snitch = read()
+                if not tmp_snitch["Config"]["VT API key"] and "Template" in tmp_snitch:
+                    tmp_snitch["Config"]["VT API key"] = input("Enter your VirusTotal API key (optional)\n>>> ")
+            except Exception as e:
+                print(type(e).__name__ + str(e.args))
+                sys.exit(1)
+            class PicoDaemon(Daemon):
+                def run(self):
+                    main(tmp_snitch["Config"]["VT API key"])
+            daemon = PicoDaemon("/tmp/daemon-picosnitch.pid")
             if sys.argv[1] == "start":
                 daemon.start()
             elif sys.argv[1] == "stop":
