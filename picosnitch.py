@@ -832,15 +832,21 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     try:
         while True:
             time.sleep(5)
+            if not all(p.is_alive() for p in subprocesses):
+                q_error.put("picosnitch subprocess died, attempting restart")
+                break
+            if any(p.is_zombie() for p in subprocesses):
+                q_error.put("picosnitch subprocess became a zombie, attempting restart")
+                break
             if p_monitor.memory() > 256000000:
                 q_error.put("Snitch monitor memory usage exceeded 256 MB, restarting snitch monitor")
-                if time.time() - p_monitor.time_last_start < 600:
+                if time.time() - p_monitor.time_last_start < 900:
                     break
                 p_monitor.terminate(5, True)
                 p_monitor.start()
-            if p_updater.memory() > 128000000:
-                q_error.put("Snitch updater memory usage exceeded 128 MB, restarting snitch updater")
-                if time.time() - p_updater.time_last_start < 600:
+            if p_updater.memory() > 256000000:
+                q_error.put("Snitch updater memory usage exceeded 256 MB, restarting snitch updater")
+                if time.time() - p_updater.time_last_start < 900:
                     break
                 p_updater.q_in.put("RESTART")
                 _ = p_updater.q_out.get(block=True, timeout=300)
@@ -850,14 +856,9 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                 time.sleep(5)
                 p_updater.start(p_virustotal.p, False, None)
                 gc.collect()
-            if not all(p.is_alive() for p in subprocesses):
-                q_error.put("picosnitch subprocess died, attempting restart")
-                break
-            if any(p.is_zombie() for p in subprocesses):
-                q_error.put("picosnitch subprocess became a zombie, attempting restart")
-                break
+                time.sleep(10)
     except Exception as e:
-        q_error.put(str(e))
+        q_error.put("picosnitch subprocess exception: " + str(e))
     # something went wrong, attempt to restart picosnitch (terminate by running `picosnitch stop`)
     for p in subprocesses:
         try:
