@@ -50,7 +50,7 @@ try:
 except Exception:
     system_notification = lambda title, message, app_name: print(message)
 
-VERSION = "0.3.9"
+VERSION = "0.4.0"
 
 
 class Daemon:
