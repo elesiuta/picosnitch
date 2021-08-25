@@ -179,7 +179,7 @@ class ProcessManager:
         self.q_in, self.q_out, self.q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
         self.start(*extra_args)
 
-    def _init_process(self, extra_args: tuple = ()) -> multiprocessing.Process:
+    def _init_process(self, *extra_args) -> multiprocessing.Process:
         return multiprocessing.Process(name=self.name, target=self.target, daemon=True,
                                        args=(*extra_args,
                                              *self.init_args,
@@ -187,7 +187,7 @@ class ProcessManager:
                                       )
 
     def start(self, *extra_args) -> None:
-        self.p = self._init_process(extra_args)
+        self.p = self._init_process(*extra_args)
         self.p.start()
         self.pp = psutil.Process(self.p.pid)
 
@@ -854,7 +854,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                     time.sleep(5)
                     gc.collect()
                     time.sleep(5)
-                    p_updater.start(p_virustotal, False, None)
+                    p_updater.start(p_virustotal.p, False, None)
                     gc.collect()
             else:
                 break
