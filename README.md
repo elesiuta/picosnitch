@@ -18,6 +18,8 @@
 `sudo apt install python3-bpfcc`
 - run daemon with  
 `picosnitch start`
+- stop daemon with  
+`picosnitch stop`
 ## windows
 - no longer supported for now, use a version <= v0.2.5
 ## building from source
