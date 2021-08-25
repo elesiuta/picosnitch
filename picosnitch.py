@@ -421,7 +421,7 @@ def initial_poll(snitch: dict, known_pids: dict) -> list:
     return update_snitch_pending
 
 
-def process_queue(snitch: dict, known_pids: dict, missed_conns: list, new_processes: list,
+def update_snitch_processor(snitch: dict, known_pids: dict, missed_conns: list, new_processes: list,
                   q_updater_term: multiprocessing.Queue,
                   q_psutil_pending: multiprocessing.Queue,
                   q_psutil_results: multiprocessing.Queue
@@ -651,7 +651,7 @@ def updater_subprocess(p_virustotal, init_scan, init_pickle,
             pass
         # process the list and update snitch
         new_processes = [pickle.loads(proc) for proc in new_processes]
-        missed_conns, update_snitch_pending = process_queue(snitch, known_pids, missed_conns, new_processes, q_updater_term, q_psutil_pending, q_psutil_results)
+        missed_conns, update_snitch_pending = update_snitch_processor(snitch, known_pids, missed_conns, new_processes, q_updater_term, q_psutil_pending, q_psutil_results)
         update_snitch_wrapper(snitch, update_snitch_pending, q_updater_term, q_sha_pending, q_sha_results, q_vt_pending)
         get_vt_results(snitch, q_vt_results, False)
         # free some memory
