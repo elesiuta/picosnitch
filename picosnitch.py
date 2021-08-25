@@ -34,6 +34,7 @@ import shlex
 import signal
 import socket
 import struct
+import subprocess
 import sys
 import time
 import typing
@@ -50,7 +51,7 @@ try:
 except Exception:
     system_notification = lambda title, message, app_name: print(message)
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 
 
 class Daemon:
@@ -190,6 +191,7 @@ class ProcessManager:
         self.p = self._init_process(*extra_args)
         self.p.start()
         self.pp = psutil.Process(self.p.pid)
+        self.time_last_start = time.time()
 
     def terminate(self, t: float, use_q_term: bool = False, close_queues: bool = False) -> None:
         if use_q_term:
@@ -377,7 +379,8 @@ def safe_q_get(q: multiprocessing.Queue, q_term: multiprocessing.Queue):
     while True:
         try:
             if not q_term.empty() or not multiprocessing.parent_process().is_alive():
-                raise Exception("Process terminated")
+                os.kill(os.getpid(), signal.SIGTERM)
+                # raise Exception("Process terminated")
                 # sys.exit(1)
             return q.get(block=True, timeout=15)
         except queue.Empty:
@@ -826,58 +829,43 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     del snitch_updater_pickle
     # watch subprocesses and try to restart if necessary or terminate picosnitch
     subprocesses = [p_monitor, p_sha, p_psutil, p_virustotal, p_updater]
-    time_last_start = time.time()
     try:
         while True:
             time.sleep(5)
-            if p_monitor.is_alive():
-                if p_monitor.memory() > 256000000:
-                    if time.time() - time_last_start < 300:
-                        break
-                    q_error.put("Snitch monitor memory usage exceeded 256 MB, restarting snitch monitor")
-                    p_monitor.terminate(5, True)
-                    p_monitor.start()
-                    time_last_start = time.time()
-            elif time.time() - time_last_start > 300:
-                q_error.put("Snitch monitor died, restarting snitch monitor")
-                p_monitor.terminate(5)
+            if p_monitor.memory() > 256000000:
+                q_error.put("Snitch monitor memory usage exceeded 256 MB, restarting snitch monitor")
+                if time.time() - p_monitor.time_last_start < 600:
+                    break
+                p_monitor.terminate(5, True)
                 p_monitor.start()
-                time_last_start = time.time()
-            else:
-                break
-            if p_updater.is_alive():
-                if p_updater.memory() > 128000000:
-                    q_error.put("Snitch updater memory usage exceeded 128 MB, restarting snitch updater")
-                    p_updater.q_in.put("RESTART")
-                    _ = p_updater.q_out.get(block=True, timeout=300)
-                    p_updater.terminate(5)
-                    time.sleep(5)
-                    gc.collect()
-                    time.sleep(5)
-                    p_updater.start(p_virustotal.p, False, None)
-                    gc.collect()
-            else:
-                break
+            if p_updater.memory() > 128000000:
+                q_error.put("Snitch updater memory usage exceeded 128 MB, restarting snitch updater")
+                if time.time() - p_updater.time_last_start < 600:
+                    break
+                p_updater.q_in.put("RESTART")
+                _ = p_updater.q_out.get(block=True, timeout=300)
+                p_updater.terminate(5)
+                time.sleep(5)
+                gc.collect()
+                time.sleep(5)
+                p_updater.start(p_virustotal.p, False, None)
+                gc.collect()
             if not all(p.is_alive() for p in subprocesses):
-                # a subprocess was probably terminated, terminate them all
+                q_error.put("picosnitch subprocess died, attempting restart")
                 break
             if any(p.is_zombie() for p in subprocesses):
-                # a subprocess became a zombie, try terminating everything and restarting
                 q_error.put("picosnitch subprocess became a zombie, attempting restart")
-                for p in subprocesses:
-                    try:
-                        p.terminate(5, True, True)
-                    except Exception:
-                        pass
-                sys.exit(main())
+                break
     except Exception as e:
         q_error.put(str(e))
+    # something went wrong, attempt to restart picosnitch (terminate by running `picosnitch stop`)
     for p in subprocesses:
         try:
             p.terminate(5, True, True)
         except Exception:
             pass
-    return 0
+    subprocess.Popen(sys.argv[:-1] + ["restart"])
+
 
 def main(vt_api_key: str = ""):
     """init picosnitch"""
