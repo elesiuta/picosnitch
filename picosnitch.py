@@ -38,6 +38,8 @@ import sys
 import time
 import typing
 
+from psutil import Process
+
 try:
     import psutil
 except Exception as e:
@@ -170,6 +172,52 @@ class Daemon:
 
 		It will be called after the process has been daemonized by
 		start() or restart()."""
+
+
+class ProcessManager:
+    """A class for managing a subprocess"""
+    def __init__(self, name: str, target: typing.Callable, init_args: tuple = (), extra_args: tuple = ()) -> None:
+        self.name, self.target, self.init_args = name, target, init_args
+        self.q_in, self.q_out, self.q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
+        self.start(*extra_args)
+
+    def _init_process(self, extra_args: tuple = ()) -> multiprocessing.Process:
+        return multiprocessing.Process(name=self.name, target=self.target, daemon=True,
+                                       args=(*extra_args,
+                                             *self.init_args,
+                                             self.q_in, self.q_out, self.q_term)
+                                      )
+
+    def start(self, *extra_args) -> None:
+        self.p = self._init_process(extra_args)
+        self.p.start()
+        self.pp = psutil.Process(self.p.pid)
+
+    def terminate(self, t: float, use_q_term: bool = False) -> None:
+        if use_q_term:
+            self.q_term.put("TERMINATE")
+        # terminate_subprocess = lambda p, t: p.join(t) or (p.is_alive() and p.terminate()) or p.join(1) or (p.is_alive() and p.kill()) or p.join(1) or p.close()
+        self.p.join(t)
+        if self.p.is_alive():
+            self.p.terminate()
+        self.p.join(1)
+        if self.p.is_alive():
+            self.p.kill()
+        self.p.join(1)
+        self.p.close()
+        # clear_queue = lambda q: (q.get() for i in range(q.qsize()))
+        if use_q_term:
+            for i in range(self.q_term.qsize()):
+                _ = self.q_term.get()
+
+    def is_alive(self) -> bool:
+        return self.p.is_alive()
+
+    def is_zombie(self) -> bool:
+        return self.pp.is_running() and self.pp.status() == psutil.STATUS_ZOMBIE
+
+    def memory(self) -> int:
+        return self.pp.memory_info().rss
 
 
 def read() -> dict:
@@ -523,11 +571,11 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
 
 
 def updater_subprocess(p_virustotal, init_scan, init_pickle,
-                       q_updater_restart, q_updater_ready, q_updater_term,
                        q_snitch, q_error,
                        q_sha_pending, q_sha_results,
                        q_psutil_pending, q_psutil_results,
                        q_vt_pending, q_vt_results,
+                       q_updater_restart, q_updater_ready, q_updater_term
                       ):
     # drop root privileges and init variables for loop
     drop_root_privileges()
@@ -742,95 +790,67 @@ def picosnitch_master_process(config, snitch_updater_pickle):
         print("Did not detect a supported operating system", file=sys.stderr)
         return 1
     # start subprocesses
-    q_snitch, q_error, q_monitor_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    init_p_monitor = lambda: multiprocessing.Process(name="snitchmonitor", target=monitor_subprocess, args=(q_snitch, q_error, q_monitor_term), daemon=True)
-    p_monitor = init_p_monitor()
-    p_monitor.start()
-    q_sha_pending, q_sha_results, q_sha_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    init_p_sha = lambda: multiprocessing.Process(name="snitchsha", target=func_subprocess, args=(functools.lru_cache(get_sha256), q_sha_pending, q_sha_results, q_sha_term), daemon=True)
-    p_sha = init_p_sha()
-    p_sha.start()
-    q_psutil_pending, q_psutil_results, q_psutil_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    init_p_psutil = lambda: multiprocessing.Process(name="snitchpsutil", target=func_subprocess, args=(get_proc_info, q_psutil_pending, q_psutil_results, q_psutil_term), daemon=True)
-    p_psutil = init_p_psutil()
-    p_psutil.start()
-    q_vt_pending, q_vt_results, q_vt_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    init_p_virustotal = lambda: multiprocessing.Process(name="snitchvirustotal", target=virustotal_subprocess, args=(config, q_vt_pending, q_vt_results, q_vt_term), daemon=True)
-    p_virustotal = init_p_virustotal()
-    p_virustotal.start()
-    q_updater_restart, q_updater_ready, q_updater_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
-    init_p_updater = lambda p_vt, init_scan, init_pickle: multiprocessing.Process(name="snitchupdater", target=updater_subprocess, daemon=True,
-                                                                                  args=(p_vt, init_scan, init_pickle,
-                                                                                      q_updater_restart, q_updater_ready, q_updater_term,
-                                                                                      q_snitch, q_error,
-                                                                                      q_sha_pending, q_sha_results,
-                                                                                      q_psutil_pending, q_psutil_results,
-                                                                                      q_vt_pending, q_vt_results)
-                                                                                 )
-    p_updater = init_p_updater(p_virustotal, True, snitch_updater_pickle)
-    p_updater.start()
+    p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess)
+    q_snitch, q_error = p_monitor.q_in, p_monitor.q_out
+    p_sha = ProcessManager(name="snitchsha", target=func_subprocess, init_args=(functools.lru_cache(get_sha256),))
+    p_psutil = ProcessManager(name="snitchpsutil", target=func_subprocess, init_args=(get_proc_info,))
+    p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess, init_args=(config,))
+    p_updater = ProcessManager(name="snitchupdater", target=updater_subprocess,
+                               extra_args=(p_virustotal.p, True, snitch_updater_pickle),
+                               init_args=(q_snitch, q_error,
+                                          p_sha.q_in, p_sha.q_out,
+                                          p_psutil.q_in, p_psutil.q_out,
+                                          p_virustotal.q_in, p_virustotal.q_out)
+                              )
     del snitch_updater_pickle
+    subprocesses = [p_monitor, p_sha, p_psutil, p_virustotal, p_updater]
     # watch subprocesses and try to restart if necessary or terminate picosnitch
-    pp_monitor, pp_sha, pp_psutil, pp_virustotal, pp_updater = psutil.Process(p_monitor.pid), psutil.Process(p_sha.pid), psutil.Process(p_psutil.pid), psutil.Process(p_virustotal.pid), psutil.Process(p_updater.pid)
-    terminate_subprocess = lambda p, t: p.join(t) or (p.is_alive() and p.terminate()) or p.join(1) or (p.is_alive() and p.kill()) or p.join(1) or p.close()
-    clear_queue = lambda q: (q.get() for i in range(q.qsize()))
     time_last_start = time.time()
     try:
         while True:
             time.sleep(5)
-            if p_monitor.is_alive() and pp_monitor.is_running() and pp_monitor.status() != psutil.STATUS_ZOMBIE:
-                if pp_monitor.memory_info().rss > 256000000:
+            if p_monitor.is_alive():
+                if p_monitor.memory() > 256000000:
                     if time.time() - time_last_start < 300:
                         break
                     q_error.put("Snitch monitor memory usage exceeded 256 MB, restarting snitch monitor")
-                    q_monitor_term.put("TERMINATE")
-                    terminate_subprocess(p_monitor, 5)
-                    clear_queue(q_monitor_term)
-                    p_monitor = init_p_monitor()
+                    p_monitor.terminate(5, True)
                     p_monitor.start()
-                    pp_monitor = psutil.Process(p_monitor.pid)
                     time_last_start = time.time()
             elif time.time() - time_last_start > 300:
                 q_error.put("Snitch monitor died, restarting snitch monitor")
-                terminate_subprocess(p_monitor, 5)
-                p_monitor = init_p_monitor()
+                p_monitor.terminate(5)
                 p_monitor.start()
-                pp_monitor = psutil.Process(p_monitor.pid)
                 time_last_start = time.time()
             else:
                 break
-            if p_updater.is_alive() and pp_updater.is_running() and pp_updater.status() != psutil.STATUS_ZOMBIE:
-                if pp_updater.memory_info().rss > 21000000:
+            if p_updater.is_alive():
+                if p_updater.memory() > 21000000:
                     q_error.put("Snitch updater memory usage exceeded 128 MB, restarting snitch updater")
-                    q_updater_restart.put("RESTART")
-                    _ = q_updater_ready.get(block=True, timeout=300)
-                    terminate_subprocess(p_updater, 5)
+                    p_updater.q_in.put("RESTART")
+                    _ = p_updater.q_out.get(block=True, timeout=300)
+                    p_updater.terminate(5)
                     time.sleep(5)
                     gc.collect()
                     time.sleep(5)
-                    p_updater = init_p_updater(p_virustotal, False, None)
-                    p_updater.start()
-                    pp_updater = psutil.Process(p_updater.pid)
+                    p_updater.start(p_virustotal, False, None)
                     gc.collect()
             else:
                 break
             if not (p_sha.is_alive() and p_psutil.is_alive() and p_virustotal.is_alive()):
                 q_error.put("picosnitch subprocess died, terminating picosnitch")
                 break
-            if not (pp_sha.is_running() and pp_sha.status() != psutil.STATUS_ZOMBIE and pp_psutil.is_running() and pp_psutil.status() != psutil.STATUS_ZOMBIE and pp_virustotal.is_running() and pp_virustotal.status() != psutil.STATUS_ZOMBIE):
+            if any(p.is_zombie() for p in subprocesses):
                 # if p_sha or p_psutil die, the updater process will hang on the next request to either of them
-                # todo: instead of terminating, clear queues and restart p_sha, p_psutil, p_updater (make ProcessManager class)
+                # todo: instead of terminating, clear queues and restart p_sha, p_psutil, p_updater
                 q_error.put("picosnitch subprocess died, terminating picosnitch")
                 break
     except Exception as e:
         q_error.put(str(e))
-    q_monitor_term.put("TERMINATE")
-    q_updater_term.put("TERMINATE")
-    terminate_subprocess(p_monitor, 3)
-    terminate_subprocess(p_updater, 10)
-    q_sha_term.put("TERMINATE")
-    q_psutil_term.put("TERMINATE")
-    q_vt_term.put("TERMINATE")
+    for p in subprocesses:
+        p.q_term.put("TERMINATE")
+    p_monitor.terminate(3)
+    p_updater.terminate(10)
     return 0
 
 
