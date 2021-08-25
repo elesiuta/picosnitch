@@ -846,7 +846,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
             else:
                 break
             if p_updater.is_alive():
-                if p_updater.memory() > 21000000:
+                if p_updater.memory() > 128000000:
                     q_error.put("Snitch updater memory usage exceeded 128 MB, restarting snitch updater")
                     p_updater.q_in.put("RESTART")
                     _ = p_updater.q_out.get(block=True, timeout=300)
