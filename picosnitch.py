@@ -200,10 +200,10 @@ class ProcessManager:
         self.p.join(t)
         if self.p.is_alive():
             self.p.terminate()
-        self.p.join(1)
+        self.p.join(10)
         if self.p.is_alive():
             self.p.kill()
-        self.p.join(1)
+        self.p.join(10)
         if close_queues:
             self.q_in.close()
             self.q_out.close()
@@ -719,17 +719,13 @@ def linux_monitor_subprocess(q_snitch, q_error, q_monitor_term):
         b["other_socket_events"].open_perf_buffer(queue_other_event)
         b["dns_events"].open_perf_buffer(queue_dns_event)
         while True:
+            if not q_monitor_term.empty() or not multiprocessing.parent_process().is_alive():
+                return 0
             try:
-                b.perf_buffer_poll()
+                b.perf_buffer_poll(timeout=15)
             except Exception as e:
                 error = "BPF " + type(e).__name__ + str(e.args)
                 q_error.put(error)
-            try:
-                _ = q_monitor_term.get(block=False)
-                return 0
-            except queue.Empty:
-                if not multiprocessing.parent_process().is_alive():
-                    return 0
     else:
         q_error.put("Snitch subprocess permission error, requires root")
     return 1
@@ -827,7 +823,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                                           p_virustotal.q_in, p_virustotal.q_out)
                               )
     del snitch_updater_pickle
-    # watch subprocesses and try to restart if necessary or terminate picosnitch
+    # watch subprocesses
     subprocesses = [p_monitor, p_sha, p_psutil, p_virustotal, p_updater]
     try:
         while True:
@@ -841,34 +837,18 @@ def picosnitch_master_process(config, snitch_updater_pickle):
             if p_monitor.memory() > 256000000:
                 q_error.put("Snitch monitor memory usage exceeded 256 MB, attempting restart")
                 break
-                # if time.time() - p_monitor.time_last_start < 900:
-                #     break
-                # p_monitor.terminate(5, True)
-                # p_monitor.start()
             if p_updater.memory() > 256000000:
                 q_error.put("Snitch updater memory usage exceeded 256 MB, attempting restart")
                 break
-                # if time.time() - p_updater.time_last_start < 900:
-                #     break
-                # p_updater.q_in.put("RESTART")
-                # _ = p_updater.q_out.get(block=True, timeout=300)
-                # p_updater.terminate(5)
-                # time.sleep(5)
-                # gc.collect()
-                # time.sleep(5)
-                # p_updater.start(p_virustotal.p, False, None)
-                # gc.collect()
-                # time.sleep(10)
     except Exception as e:
         q_error.put("picosnitch subprocess exception: " + str(e))
     # something went wrong, attempt to restart picosnitch (terminate by running `picosnitch stop`)
-    # for p in subprocesses:
-    #     try:
-    #         p.terminate(5, True, True)
-    #     except Exception:
-    #         pass
-    p_updater.terminate(5)
+    try:
+        p_updater.terminate(600, True)
+    except Exception:
+        pass
     subprocess.Popen(sys.argv[:-1] + ["restart"])
+    return 0
 
 
 def main(vt_api_key: str = ""):
