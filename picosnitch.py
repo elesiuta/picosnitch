@@ -51,7 +51,7 @@ try:
 except Exception:
     system_notification = lambda title, message, app_name: print(message)
 
-VERSION = "0.4.2"
+VERSION = "0.4.3"
 
 
 class Daemon:
@@ -839,32 +839,35 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                 q_error.put("picosnitch subprocess became a zombie, attempting restart")
                 break
             if p_monitor.memory() > 256000000:
-                q_error.put("Snitch monitor memory usage exceeded 256 MB, restarting snitch monitor")
-                if time.time() - p_monitor.time_last_start < 900:
-                    break
-                p_monitor.terminate(5, True)
-                p_monitor.start()
+                q_error.put("Snitch monitor memory usage exceeded 256 MB, attempting restart")
+                break
+                # if time.time() - p_monitor.time_last_start < 900:
+                #     break
+                # p_monitor.terminate(5, True)
+                # p_monitor.start()
             if p_updater.memory() > 256000000:
-                q_error.put("Snitch updater memory usage exceeded 256 MB, restarting snitch updater")
-                if time.time() - p_updater.time_last_start < 900:
-                    break
-                p_updater.q_in.put("RESTART")
-                _ = p_updater.q_out.get(block=True, timeout=300)
-                p_updater.terminate(5)
-                time.sleep(5)
-                gc.collect()
-                time.sleep(5)
-                p_updater.start(p_virustotal.p, False, None)
-                gc.collect()
-                time.sleep(10)
+                q_error.put("Snitch updater memory usage exceeded 256 MB, attempting restart")
+                break
+                # if time.time() - p_updater.time_last_start < 900:
+                #     break
+                # p_updater.q_in.put("RESTART")
+                # _ = p_updater.q_out.get(block=True, timeout=300)
+                # p_updater.terminate(5)
+                # time.sleep(5)
+                # gc.collect()
+                # time.sleep(5)
+                # p_updater.start(p_virustotal.p, False, None)
+                # gc.collect()
+                # time.sleep(10)
     except Exception as e:
         q_error.put("picosnitch subprocess exception: " + str(e))
     # something went wrong, attempt to restart picosnitch (terminate by running `picosnitch stop`)
-    for p in subprocesses:
-        try:
-            p.terminate(5, True, True)
-        except Exception:
-            pass
+    # for p in subprocesses:
+    #     try:
+    #         p.terminate(5, True, True)
+    #     except Exception:
+    #         pass
+    p_updater.terminate(5)
     subprocess.Popen(sys.argv[:-1] + ["restart"])
 
 
