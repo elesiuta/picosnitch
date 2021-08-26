@@ -51,7 +51,7 @@ try:
 except Exception:
     system_notification = lambda title, message, app_name: print(message)
 
-VERSION = "0.4.4"
+VERSION = "0.4.5"
 
 
 class Daemon:
@@ -448,7 +448,7 @@ def update_snitch_processor(snitch: dict, known_pids: dict, missed_conns: list, 
                 if not snitch["Config"]["Only log connections"]:
                     pending_list.append(proc)
             elif proc["type"] == "conn":
-                if proc["pid"] in known_pids:
+                if proc["pid"] in known_pids and known_pids[proc["pid"]]["exe"] != "/proc/self/exe":
                     proc["name"] = known_pids[proc["pid"]]["name"]
                     proc["exe"] = known_pids[proc["pid"]]["exe"]
                     proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
@@ -457,6 +457,8 @@ def update_snitch_processor(snitch: dict, known_pids: dict, missed_conns: list, 
                     try:
                         q_psutil_pending.put(pickle.dumps(proc["pid"]))
                         proc_psutil = pickle.loads(safe_q_get(q_psutil_results, q_updater_term))
+                        if proc_psutil["exe"] == "/proc/self/exe":
+                            raise Exception("try checking parent")
                         if proc_psutil["exe"]:
                             proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
                             known_pids[proc_psutil["pid"]] = proc_psutil
