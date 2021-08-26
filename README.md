@@ -1,8 +1,8 @@
-
 # picosnitch
 - Monitors your system to notify you whenever a program makes its first remote network connection (while picosnitch has been running)
 - Or when the sha256 changes for one of these programs
-- Logs and config are stored in ~/.config/picosnitch/snitch.json
+- Connection logs and config are stored in ~/.config/picosnitch/snitch.json
+- Error log is stored in ~/.config/picosnitch/error.log
 - Inspired by programs such as:
   - GlassWire
   - Little Snitch
@@ -26,10 +26,9 @@
 - install from source using python 3 with  
 `python setup.py install --user`
 - required dependencies (installed automatically from PyPI on setup if not already present)  
-`filelock plyer psutil python-daemon vt-py`
+`plyer psutil vt-py`
 - additional dependency (requires manual installation)  
 `bcc`
-- picosnitch.py can also be run directly
 # configuration
 - stored in ~/.config/picosnitch/snitch.json
 - terminate picosnitch if it is currently running before making any edits otherwise your changes will be lost
@@ -43,7 +42,7 @@
     "Remote address unlog": [80, "chrome", "firefox"], # List of process names (str) or ports (int)
     # will omit connections that match any of these from the log of remote addresses to avoid clutter
     # the process and executable will still be logged if it has not been already
-    "VT API key": "", # API key for VirusTotal, leave blank otherwise
+    "VT API key": "", # API key for VirusTotal, leave blank to disable
     "VT file upload": False, # Only hashes are uploaded by default
     "VT limit request": 15 # Number of seconds between requests
   },
@@ -51,7 +50,7 @@
   "Names": {}, # Log of processes by name containing respective executable(s)
   "Processes": {}, # Log of processes by executable containing:
   # cmdlines, days seen, first seen, last seen, name, ports, remote addresses, results
-  # some cmdlines are consolidated using * as a wildcard
+  # some cmdlines are consolidated using * as a wildcard, results are obtained from VirusTotal
   "Remote Addresses": {} # Log of remote addresses containing respective executable(s)
 }
 ```
