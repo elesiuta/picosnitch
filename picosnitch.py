@@ -51,7 +51,7 @@ try:
 except Exception:
     system_notification = lambda title, message, app_name: print(message)
 
-VERSION = "0.4.3"
+VERSION = "0.4.4"
 
 
 class Daemon:
@@ -143,7 +143,7 @@ class Daemon:
 
 		if not pid:
 			message = "pidfile {0} does not exist. " + \
-					"Daemon not running?\n"
+					"picosnitch not running?\n"
 			sys.stderr.write(message.format(self.pidfile))
 			return # not an error in a restart
 
