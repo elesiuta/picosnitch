@@ -197,13 +197,13 @@ class ProcessManager:
         if use_q_term:
             self.q_term.put("TERMINATE")
         # terminate_subprocess = lambda p, t: p.join(t) or (p.is_alive() and p.terminate()) or p.join(1) or (p.is_alive() and p.kill()) or p.join(1) or p.close()
-        self.p.join(t)
+        self.p.join(timeout=t)
         if self.p.is_alive():
             self.p.terminate()
-        self.p.join(10)
+        self.p.join(timeout=20)
         if self.p.is_alive():
             self.p.kill()
-        self.p.join(10)
+        self.p.join(timeout=10)
         if close_queues:
             self.q_in.close()
             self.q_out.close()
@@ -637,14 +637,14 @@ def updater_subprocess(p_virustotal, init_scan, init_pickle,
                 toast("picosnitch has stopped", file=sys.stderr)
                 terminate_snitch_updater(snitch, q_error)
         # check if updater needs to restart
-        try:
-            _ = q_updater_restart.get(block=False)
-            with open(pickle_path, "wb") as pickle_file:
-                pickle.dump((snitch, known_pids, missed_conns, update_snitch_pending), pickle_file)
-            q_updater_ready.put("READY")
-            return
-        except queue.Empty:
-            pass
+        # try:
+        #     _ = q_updater_restart.get(block=False)
+        #     with open(pickle_path, "wb") as pickle_file:
+        #         pickle.dump((snitch, known_pids, missed_conns, update_snitch_pending), pickle_file)
+        #     q_updater_ready.put("READY")
+        #     return
+        # except queue.Empty:
+        #     pass
         # get list of new processes and connections since last update
         time.sleep(5)
         new_processes = []
@@ -829,7 +829,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
         while True:
             time.sleep(5)
             if not all(p.is_alive() for p in subprocesses):
-                q_error.put("picosnitch subprocess died, attempting restart")
+                q_error.put("picosnitch subprocess died, attempting restart, terminate by running `picosnitch stop`")
                 break
             if any(p.is_zombie() for p in subprocesses):
                 q_error.put("picosnitch subprocess became a zombie, attempting restart")
@@ -844,9 +844,12 @@ def picosnitch_master_process(config, snitch_updater_pickle):
         q_error.put("picosnitch subprocess exception: " + str(e))
     # something went wrong, attempt to restart picosnitch (terminate by running `picosnitch stop`)
     try:
-        p_updater.terminate(600, True)
+        p_updater.terminate(60, True)
     except Exception:
-        pass
+        try:
+            p_updater.terminate(10)
+        except Exception:
+            pass
     subprocess.Popen(sys.argv[:-1] + ["restart"])
     return 0
 
