@@ -51,7 +51,7 @@ try:
 except Exception:
     system_notification = lambda title, message, app_name: print(message)
 
-VERSION = "0.4.8"
+VERSION = "0.4.8dev"
 
 
 class Daemon:
@@ -461,11 +461,14 @@ def update_snitch_processor(snitch: dict, known_pids: dict, missed_conns: list, 
                     try:
                         q_psutil_pending.put(pickle.dumps(proc["pid"]))
                         proc_psutil = pickle.loads(safe_q_get(q_psutil_results, q_updater_term))
-                        if proc_psutil["exe"] == "/proc/self/exe":
+                        if not proc["exe"] and proc_psutil["exe"] == "/proc/self/exe":
                             raise Exception("try checking parent")
                         if proc_psutil["exe"]:
                             proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
                             known_pids[proc_psutil["pid"]] = proc_psutil
+                        elif proc["exe"]:
+                            proc["cmdline"] = ""
+                            known_pids[proc["pid"]] = proc
                     except Exception:
                         if proc["ppid"] not in known_pids:
                             try:
@@ -682,6 +685,11 @@ def linux_monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
     """runs a bpf program to monitor the system for new processes and connections and puts them in the queue"""
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
+    def get_exe(pid: int) -> str:
+        try:
+            return os.readlink("/proc/%d/exe" % pid)
+        except Exception:
+            return ""
     if os.getuid() == 0:
         b = BPF(text=bpf_text)
         execve_fnname = b.get_syscall_fnname("execve")
@@ -715,27 +723,30 @@ def linux_monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
                     pass
         def queue_ipv4_event(cpu, data, size):
             event = b["ipv4_events"].event(data)
-            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.task.decode(), "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+            exe = get_exe(event.pid)
+            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.task.decode(), "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr)), "exe": exe}))
         def queue_ipv6_event(cpu, data, size):
             event = b["ipv6_events"].event(data)
-            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.task.decode(), "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
+            exe = get_exe(event.pid)
+            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.task.decode(), "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr), "exe": exe}))
         def queue_other_event(cpu, data, size):
             event = b["other_socket_events"].event(data)
-            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.task.decode(), "port": 0, "ip": ""}))
+            exe = get_exe(event.pid)
+            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.task.decode(), "port": 0, "ip": "", "exe": exe}))
         def queue_dns_event(cpu, data, size):
             event = b["dns_events"].event(data)
-            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.comm.decode(), "port": 0, "ip": "", "host": event.host.decode()}))
+            exe = get_exe(event.pid)
+            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.comm.decode(), "port": 0, "ip": "", "host": event.host.decode(), "exe": exe}))
         b["exec_events"].open_perf_buffer(queue_exec_event)
         b["ipv4_events"].open_perf_buffer(queue_ipv4_event)
         b["ipv6_events"].open_perf_buffer(queue_ipv6_event)
         b["other_socket_events"].open_perf_buffer(queue_other_event)
         b["dns_events"].open_perf_buffer(queue_dns_event)
         while True:
-            time.sleep(5)
             if not q_monitor_term.empty() or not parent_process.is_alive():
                 return 0
             try:
-                b.perf_buffer_poll(timeout=0)
+                b.perf_buffer_poll(timeout=-1)
             except Exception as e:
                 error = "BPF " + type(e).__name__ + str(e.args)
                 q_error.put(error)
