@@ -51,7 +51,7 @@ try:
 except Exception:
     system_notification = lambda title, message, app_name: print(message)
 
-VERSION = "0.4.7"
+VERSION = "0.4.8"
 
 
 class Daemon:
@@ -440,13 +440,14 @@ def update_snitch_processor(snitch: dict, known_pids: dict, missed_conns: list, 
     for proc in new_processes:
         try:
             if proc["type"] == "exec":
-                try:
-                    cmdline = shlex.split(proc["cmdline"])
-                except Exception:
-                    cmdline = proc["cmdline"].strip().split()
-                proc["exe"] = cmdline[0]
-                if proc["exe"] == "exec":
-                    proc["exe"] = cmdline[1]
+                if not proc["exe"]:
+                    try:
+                        cmdline = shlex.split(proc["cmdline"])
+                    except Exception:
+                        cmdline = proc["cmdline"].strip().split()
+                    proc["exe"] = cmdline[0]
+                    if proc["exe"] == "exec":
+                        proc["exe"] = cmdline[1]
                 known_pids[proc["pid"]] = proc
                 if not snitch["Config"]["Only log connections"]:
                     pending_list.append(proc)
@@ -694,15 +695,22 @@ def linux_monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
         b.attach_uretprobe(name="c", sym="gethostbyname", fn_name="do_return", pid=-1)
         b.attach_uretprobe(name="c", sym="gethostbyname2", fn_name="do_return", pid=-1)
         argv = collections.defaultdict(list)
+        exe_path = collections.defaultdict(str)
         def queue_exec_event(cpu, data, size):
             event = b["exec_events"].event(data)
+            if not exe_path[event.pid]:
+                try:
+                    exe_path[event.pid] = os.readlink("/proc/%d/exe" % event.pid)
+                except Exception:
+                    pass
             if event.type == 0:  # EVENT_ARG
                 argv[event.pid].append(event.argv)
             elif event.type == 1:  # EVENT_RET
                 argv_text = b' '.join(argv[event.pid]).replace(b'\n', b'\\n')
-                snitch_pipe.send_bytes(pickle.dumps({"type": "exec", "pid": event.pid, "name": event.comm.decode(), "cmdline": argv_text.decode()}))
+                snitch_pipe.send_bytes(pickle.dumps({"type": "exec", "pid": event.pid, "name": event.comm.decode(), "cmdline": argv_text.decode(), "exe": exe_path[event.pid]}))
                 try:
                     del argv[event.pid]
+                    del exe_path[event.pid]
                 except Exception:
                     pass
         def queue_ipv4_event(cpu, data, size):
