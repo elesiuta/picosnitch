@@ -692,35 +692,7 @@ def linux_monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
             return ""
     if os.getuid() == 0:
         b = BPF(text=bpf_text)
-        execve_fnname = b.get_syscall_fnname("execve")
-        b.attach_kprobe(event=execve_fnname, fn_name="syscall__execve")
-        b.attach_kretprobe(event=execve_fnname, fn_name="do_ret_sys_execve")
         b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
-        b.attach_uprobe(name="c", sym="getaddrinfo", fn_name="do_entry", pid=-1)
-        b.attach_uprobe(name="c", sym="gethostbyname", fn_name="do_entry", pid=-1)
-        b.attach_uprobe(name="c", sym="gethostbyname2", fn_name="do_entry", pid=-1)
-        b.attach_uretprobe(name="c", sym="getaddrinfo", fn_name="do_return", pid=-1)
-        b.attach_uretprobe(name="c", sym="gethostbyname", fn_name="do_return", pid=-1)
-        b.attach_uretprobe(name="c", sym="gethostbyname2", fn_name="do_return", pid=-1)
-        argv = collections.defaultdict(list)
-        exe_path = collections.defaultdict(str)
-        def queue_exec_event(cpu, data, size):
-            event = b["exec_events"].event(data)
-            if not exe_path[event.pid]:
-                try:
-                    exe_path[event.pid] = os.readlink("/proc/%d/exe" % event.pid)
-                except Exception:
-                    pass
-            if event.type == 0:  # EVENT_ARG
-                argv[event.pid].append(event.argv)
-            elif event.type == 1:  # EVENT_RET
-                argv_text = b' '.join(argv[event.pid]).replace(b'\n', b'\\n')
-                snitch_pipe.send_bytes(pickle.dumps({"type": "exec", "pid": event.pid, "name": event.comm.decode(), "cmdline": argv_text.decode(), "exe": exe_path[event.pid]}))
-                try:
-                    del argv[event.pid]
-                    del exe_path[event.pid]
-                except Exception:
-                    pass
         def queue_ipv4_event(cpu, data, size):
             event = b["ipv4_events"].event(data)
             exe = get_exe(event.pid)
@@ -733,15 +705,9 @@ def linux_monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
             event = b["other_socket_events"].event(data)
             exe = get_exe(event.pid)
             snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.task.decode(), "port": 0, "ip": "", "exe": exe}))
-        def queue_dns_event(cpu, data, size):
-            event = b["dns_events"].event(data)
-            exe = get_exe(event.pid)
-            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.comm.decode(), "port": 0, "ip": "", "host": event.host.decode(), "exe": exe}))
-        b["exec_events"].open_perf_buffer(queue_exec_event)
         b["ipv4_events"].open_perf_buffer(queue_ipv4_event)
         b["ipv6_events"].open_perf_buffer(queue_ipv6_event)
         b["other_socket_events"].open_perf_buffer(queue_other_event)
-        b["dns_events"].open_perf_buffer(queue_dns_event)
         while True:
             if not q_monitor_term.empty() or not parent_process.is_alive():
                 return 0
@@ -951,12 +917,8 @@ def start_daemon():
 
 
 bpf_text = """
-// This BPF program was adapted from the following sources, both licensed under the Apache License, Version 2.0
-// https://github.com/iovisor/bcc/blob/023154c7708087ddf6c2031cef5d25c2445b70c4/tools/execsnoop.py
-// https://github.com/iovisor/bcc/blob/ab14fafec3fc13f89bd4678b7fc94829dcacaa7b/tools/gethostlatency.py
+// This BPF program comes from the following source, licensed under the Apache License, Version 2.0
 // https://github.com/p-/socket-connect-bpf/blob/7f386e368759e53868a078570254348e73e73e22/securitySocketConnectSrc.bpf
-// https://github.com/p-/socket-connect-bpf/blob/7f386e368759e53868a078570254348e73e73e22/dnsLookupSrc.bpf
-// Copyright 2016 Netflix, Inc.
 // Copyright 2019 Peter Stöckli
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -973,33 +935,9 @@ bpf_text = """
 
 #include <uapi/linux/ptrace.h>
 #include <linux/socket.h>
-#include <linux/sched.h>
-#include <linux/fs.h>
 #include <linux/in.h>
 #include <linux/in6.h>
 #include <linux/ip.h>
-
-// execsnoop structs
-
-#define ARGSIZE  128
-
-enum event_type {
-    EVENT_ARG,
-    EVENT_RET,
-};
-
-struct data_t {
-    u32 pid;  // PID as in the userspace term (i.e. task->tgid in kernel)
-    u32 ppid; // Parent PID as in the userspace term (i.e task->real_parent->tgid in kernel)
-    u32 uid;
-    char comm[TASK_COMM_LEN];
-    enum event_type type;
-    char argv[ARGSIZE];
-    int retval;
-};
-BPF_PERF_OUTPUT(exec_events);
-
-// securitySocketConnect structs
 
 struct ipv4_event_t {
     u64 ts_us;
@@ -1034,108 +972,6 @@ struct other_socket_event_t {
     char task[TASK_COMM_LEN];
 } __attribute__((packed));
 BPF_PERF_OUTPUT(other_socket_events);
-
-// gethostlatency structs
-
-struct val_t {
-    u32 pid;
-    char comm[TASK_COMM_LEN];
-    char host[80];
-};
-
-struct data_dns_t {
-    u32 pid;
-    u32 ppid;
-    char comm[TASK_COMM_LEN];
-    char host[80];
-};
-
-BPF_HASH(start, u32, struct val_t);
-BPF_PERF_OUTPUT(dns_events);
-
-// execsnoop functions
-
-static int __submit_arg(struct pt_regs *ctx, void *ptr, struct data_t *data)
-{
-    bpf_probe_read_user(data->argv, sizeof(data->argv), ptr);
-    exec_events.perf_submit(ctx, data, sizeof(struct data_t));
-    return 1;
-}
-
-static int submit_arg(struct pt_regs *ctx, void *ptr, struct data_t *data)
-{
-    const char *argp = NULL;
-    bpf_probe_read_user(&argp, sizeof(argp), ptr);
-    if (argp) {
-        return __submit_arg(ctx, (void *)(argp), data);
-    }
-    return 0;
-}
-
-int syscall__execve(struct pt_regs *ctx,
-    const char __user *filename,
-    const char __user *const __user *__argv,
-    const char __user *const __user *__envp)
-{
-
-    u32 uid = bpf_get_current_uid_gid() & 0xffffffff;
-
-    // create data here and pass to submit_arg to save stack space (#555)
-    struct data_t data = {};
-    struct task_struct *task;
-
-    data.pid = bpf_get_current_pid_tgid() >> 32;
-
-    task = (struct task_struct *)bpf_get_current_task();
-    // Some kernels, like Ubuntu 4.13.0-generic, return 0
-    // as the real_parent->tgid.
-    // We use the get_ppid function as a fallback in those cases. (#1883)
-    data.ppid = task->real_parent->tgid;
-
-    bpf_get_current_comm(&data.comm, sizeof(data.comm));
-    data.type = EVENT_ARG;
-
-    __submit_arg(ctx, (void *)filename, &data);
-
-    // skip first arg, as we submitted filename
-    #pragma unroll
-    for (int i = 1; i < 20; i++) {
-        if (submit_arg(ctx, (void *)&__argv[i], &data) == 0)
-             goto out;
-    }
-
-    // handle truncated argument list
-    char ellipsis[] = "...";
-    __submit_arg(ctx, (void *)ellipsis, &data);
-out:
-    return 0;
-}
-
-int do_ret_sys_execve(struct pt_regs *ctx)
-{
-    struct data_t data = {};
-    struct task_struct *task;
-
-    u32 uid = bpf_get_current_uid_gid() & 0xffffffff;
-
-    data.pid = bpf_get_current_pid_tgid() >> 32;
-    data.uid = uid;
-
-    task = (struct task_struct *)bpf_get_current_task();
-    // Some kernels, like Ubuntu 4.13.0-generic, return 0
-    // as the real_parent->tgid.
-    // We use the get_ppid function as a fallback in those cases. (#1883)
-    data.ppid = task->real_parent->tgid;
-
-    bpf_get_current_comm(&data.comm, sizeof(data.comm));
-    data.type = EVENT_RET;
-    data.retval = PT_REGS_RC(ctx);
-    exec_events.perf_submit(ctx, &data, sizeof(data));
-
-    return 0;
-}
-
-// securitySocketConnect functions
 
 int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, struct sockaddr *address, int addrlen)
 {
@@ -1198,40 +1034,6 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
         other_socket_events.perf_submit(ctx, &socket_event, sizeof(socket_event));
     }
 
-    return 0;
-}
-
-// gethostlatency functions
-
-int do_entry(struct pt_regs *ctx) {
-    if (!PT_REGS_PARM1(ctx))
-        return 0;
-    struct val_t val = {};
-    u32 pid = bpf_get_current_pid_tgid();
-    if (bpf_get_current_comm(&val.comm, sizeof(val.comm)) == 0) {
-        bpf_probe_read_user(&val.host, sizeof(val.host),
-                       (void *)PT_REGS_PARM1(ctx));
-        val.pid = pid;
-        start.update(&pid, &val);
-    }
-    return 0;
-}
-
-int do_return(struct pt_regs *ctx) {
-    struct val_t *valp;
-    struct data_dns_t data = {};
-    struct task_struct *task;
-    u32 pid = bpf_get_current_pid_tgid();
-    valp = start.lookup(&pid);
-    if (valp == 0)
-        return 0;       // missed start
-    bpf_probe_read_kernel(&data.comm, sizeof(data.comm), valp->comm);
-    bpf_probe_read_kernel(&data.host, sizeof(data.host), (void *)valp->host);
-    data.pid = valp->pid;
-    task = (struct task_struct *)bpf_get_current_task();
-    data.ppid = task->real_parent->tgid;
-    dns_events.perf_submit(ctx, &data, sizeof(data));
-    start.delete(&pid);
     return 0;
 }
 """
