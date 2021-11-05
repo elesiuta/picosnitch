@@ -612,15 +612,15 @@ def monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
         def queue_ipv4_event(cpu, data, size):
             event = b["ipv4_events"].event(data)
             exe, cmd = get_exe(event.pid), get_cmd(event.pid)
-            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+            snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
         def queue_ipv6_event(cpu, data, size):
             event = b["ipv6_events"].event(data)
             exe, cmd = get_exe(event.pid), get_cmd(event.pid)
-            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
+            snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
         def queue_other_event(cpu, data, size):
             event = b["other_socket_events"].event(data)
             exe, cmd = get_exe(event.pid), get_cmd(event.pid)
-            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
+            snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
         b["ipv4_events"].open_perf_buffer(queue_ipv4_event)
         b["ipv6_events"].open_perf_buffer(queue_ipv6_event)
         b["other_socket_events"].open_perf_buffer(queue_other_event)
