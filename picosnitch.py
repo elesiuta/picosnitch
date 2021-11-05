@@ -690,21 +690,27 @@ def linux_monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
             return os.readlink("/proc/%d/exe" % pid)
         except Exception:
             return ""
+    def get_cmd(pid: int) -> str:
+        try:
+            with open("/proc/%d/cmdline" % pid, "r") as f:
+                return f.read().strip()
+        except Exception:
+            return ""
     if os.getuid() == 0:
         b = BPF(text=bpf_text)
         b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
         def queue_ipv4_event(cpu, data, size):
             event = b["ipv4_events"].event(data)
-            exe = get_exe(event.pid)
-            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.task.decode(), "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr)), "exe": exe}))
+            exe, cmd = get_exe(event.pid), get_cmd(event.pid)
+            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
         def queue_ipv6_event(cpu, data, size):
             event = b["ipv6_events"].event(data)
-            exe = get_exe(event.pid)
-            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.task.decode(), "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr), "exe": exe}))
+            exe, cmd = get_exe(event.pid), get_cmd(event.pid)
+            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
         def queue_other_event(cpu, data, size):
             event = b["other_socket_events"].event(data)
-            exe = get_exe(event.pid)
-            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "name": event.task.decode(), "port": 0, "ip": "", "exe": exe}))
+            exe, cmd = get_exe(event.pid), get_cmd(event.pid)
+            snitch_pipe.send_bytes(pickle.dumps({"type": "conn", "pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
         b["ipv4_events"].open_perf_buffer(queue_ipv4_event)
         b["ipv6_events"].open_perf_buffer(queue_ipv6_event)
         b["other_socket_events"].open_perf_buffer(queue_other_event)
