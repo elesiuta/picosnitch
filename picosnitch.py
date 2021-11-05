@@ -409,9 +409,10 @@ def initial_poll(snitch: dict, known_pids: dict) -> list:
             if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
                 proc["cmdline"] = shlex.join(proc["cmdline"])
-                conn_dict = {"ip": conn.raddr.ip, "port": conn.raddr.port}
+                proc["ip"] = conn.raddr.ip
+                proc["port"] = conn.raddr.port
                 _ = current_processes.pop(proc["exe"], 0)
-                update_snitch_pending.append((proc, conn_dict, ctime))
+                update_snitch_pending.append(proc)
         except Exception as e:
             # too late to grab process info (most likely) or some other error
             error = "Init " + type(e).__name__ + str(e.args) + str(conn)
@@ -420,97 +421,11 @@ def initial_poll(snitch: dict, known_pids: dict) -> list:
             else:
                 error += "{process no longer exists}"
             snitch["Errors"].append(ctime + " " + error)
-    if not snitch["Config"]["Only log connections"]:
-        conn = {"ip": "", "port": -1}
-        for proc in current_processes.values():
-            update_snitch_pending.append((proc, conn, ctime))
+    # if not snitch["Config"]["Only log connections"]:
+    #     conn = {"ip": "", "port": -1}
+    #     for proc in current_processes.values():
+    #         update_snitch_pending.append((proc, conn, ctime))
     return update_snitch_pending
-
-
-def update_snitch_processor(snitch: dict, known_pids: dict, missed_conns: list, new_processes: list,
-                  q_updater_term: multiprocessing.Queue,
-                  q_psutil_pending: multiprocessing.Queue,
-                  q_psutil_results: multiprocessing.Queue
-                  ) -> tuple:
-    """process list of new processes and queue for update_snitch()"""
-    ctime = time.ctime()
-    update_snitch_pending = []
-    pending_list = []
-    pending_conns = []
-    for proc in new_processes:
-        try:
-            if proc["type"] == "exec":
-                if not proc["exe"]:
-                    try:
-                        cmdline = shlex.split(proc["cmdline"])
-                    except Exception:
-                        cmdline = proc["cmdline"].strip().split()
-                    proc["exe"] = cmdline[0]
-                    if proc["exe"] == "exec":
-                        proc["exe"] = cmdline[1]
-                known_pids[proc["pid"]] = proc
-                if not snitch["Config"]["Only log connections"]:
-                    pending_list.append(proc)
-            elif proc["type"] == "conn":
-                if proc["pid"] in known_pids and known_pids[proc["pid"]]["exe"] != "/proc/self/exe":
-                    proc["name"] = known_pids[proc["pid"]]["name"]
-                    proc["exe"] = known_pids[proc["pid"]]["exe"]
-                    proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
-                    pending_list.append(proc)
-                else:
-                    try:
-                        q_psutil_pending.put(pickle.dumps(proc["pid"]))
-                        proc_psutil = pickle.loads(safe_q_get(q_psutil_results, q_updater_term))
-                        if not proc["exe"] and proc_psutil["exe"] == "/proc/self/exe":
-                            raise Exception("try checking parent")
-                        if proc_psutil["exe"]:
-                            proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
-                            known_pids[proc_psutil["pid"]] = proc_psutil
-                        elif proc["exe"]:
-                            proc["cmdline"] = ""
-                            known_pids[proc["pid"]] = proc
-                    except Exception:
-                        if proc["ppid"] not in known_pids:
-                            try:
-                                q_psutil_pending.put(pickle.dumps(proc["ppid"]))
-                                proc_psutil = pickle.loads(safe_q_get(q_psutil_results, q_updater_term))
-                                if proc_psutil["exe"]:
-                                    proc_psutil["cmdline"] = shlex.join(proc_psutil["cmdline"])
-                                    known_pids[proc_psutil["pid"]] = proc_psutil
-                                    # use this as best guess for child too since it probably forked and was short lived
-                                    # if not, exec should have caught it on the next round
-                                    # this is why pending conns is now postponed till the next iteration
-                                    known_pids[proc["pid"]] = proc_psutil
-                            except Exception:
-                                pass
-                    proc["missed"] = 1
-                    pending_conns.append(proc)
-        except Exception as e:
-            error = "Process queue " + type(e).__name__ + str(e.args) + str(proc)
-            snitch["Errors"].append(ctime + " " + error)
-    for proc in missed_conns:
-        if proc["pid"] in known_pids:
-            proc["name"] = known_pids[proc["pid"]]["name"]
-            proc["exe"] = known_pids[proc["pid"]]["exe"]
-            proc["cmdline"] = known_pids[proc["pid"]]["cmdline"]
-            pending_list.append(proc)
-        elif proc["missed"] < 5:
-            # give it 5 rounds to find the pid in exec (2 should be enough)
-            # don't waste cpu checking psutil anymore since it would be short lived
-            # therefore ppid is also unlikely to appear (less harm in checking this maybe once more)
-            proc["missed"] += 1
-            pending_conns.append(proc)
-        else:
-            _ = proc.pop("missed")
-            snitch["Errors"].append(ctime + " no known process for conn: " + str(proc))
-    for proc in pending_list:
-        if proc["type"] == "conn":
-            conn = {"ip": proc["ip"], "port": proc["port"]}
-        else:
-            conn = {"ip": "", "port": -1}
-        update_snitch_pending.append((proc, conn, ctime))
-    del missed_conns
-    return pending_conns, update_snitch_pending
 
 
 def update_snitch_wrapper(snitch: dict, update_snitch_pending: list,
@@ -519,10 +434,12 @@ def update_snitch_wrapper(snitch: dict, update_snitch_pending: list,
                           q_sha_results: multiprocessing.Queue,
                           q_vt_pending: multiprocessing.Queue):
     """loop over update_snitch() with pending update list"""
-    for proc, conn, ctime in update_snitch_pending:
+    ctime = time.ctime()
+    for proc in update_snitch_pending:
         try:
             q_sha_pending.put(pickle.dumps(proc["exe"]))
             sha256 = pickle.loads(safe_q_get(q_sha_results, q_updater_term))
+            conn = {"ip": proc["ip"], "port": proc["port"]}
             update_snitch(snitch, proc, conn, sha256, ctime, q_vt_pending)
         except Exception as e:
             error = "Update snitch " + type(e).__name__ + str(e.args) + str(proc)
@@ -605,7 +522,6 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
 def updater_subprocess(p_virustotal, init_scan, init_pickle,
                        q_snitch, q_error, snitch_pipe, q_monitor_term,
                        q_sha_pending, q_sha_results,
-                       q_psutil_pending, q_psutil_results,
                        q_vt_pending, q_vt_results,
                        q_updater_restart, q_updater_ready, q_updater_term
                       ):
@@ -662,8 +578,7 @@ def updater_subprocess(p_virustotal, init_scan, init_pickle,
         # process the list and update snitch
         new_processes = [pickle.loads(proc) for proc in new_processes_q]
         del new_processes_q
-        missed_conns, update_snitch_pending = update_snitch_processor(snitch, known_pids, missed_conns, new_processes, q_updater_term, q_psutil_pending, q_psutil_results)
-        update_snitch_wrapper(snitch, update_snitch_pending, q_updater_term, q_sha_pending, q_sha_results, q_vt_pending)
+        update_snitch_wrapper(snitch, new_processes, q_updater_term, q_sha_pending, q_sha_results, q_vt_pending)
         get_vt_results(snitch, q_vt_results, False)
         # free some memory
         while len(known_pids) > 9000:
@@ -803,18 +718,16 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess, init_args=(snitch_monitor_pipe,))
     q_snitch, q_error = p_monitor.q_in, p_monitor.q_out
     p_sha = ProcessManager(name="snitchsha", target=func_subprocess, init_args=(functools.lru_cache(get_sha256),))
-    p_psutil = ProcessManager(name="snitchpsutil", target=func_subprocess, init_args=(get_proc_info,))
     p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess, init_args=(config,))
     p_updater = ProcessManager(name="snitchupdater", target=updater_subprocess,
                                extra_args=(p_virustotal.p, True, snitch_updater_pickle),
                                init_args=(q_snitch, q_error, snitch_updater_pipe, p_monitor.q_term,
                                           p_sha.q_in, p_sha.q_out,
-                                          p_psutil.q_in, p_psutil.q_out,
                                           p_virustotal.q_in, p_virustotal.q_out)
                               )
     del snitch_updater_pickle
     # set signals
-    subprocesses = [p_monitor, p_sha, p_psutil, p_virustotal, p_updater]
+    subprocesses = [p_monitor, p_sha, p_virustotal, p_updater]
     signal.signal(signal.SIGINT, lambda *args: [p.terminate(0, True, True) for p in subprocesses])
     signal.signal(signal.SIGTERM, lambda *args: [p.terminate(0, True, True) for p in subprocesses])
     # watch subprocesses
