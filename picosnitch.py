@@ -21,7 +21,6 @@ import atexit
 import collections
 import difflib
 import functools
-import gc
 import ipaddress
 import json
 import hashlib
@@ -577,16 +576,10 @@ def updater_subprocess(p_virustotal, init_scan, init_pickle,
             new_processes_q.append(snitch_pipe.recv_bytes())
         # process the list and update snitch
         new_processes = [pickle.loads(proc) for proc in new_processes_q]
-        del new_processes_q
         update_snitch_wrapper(snitch, new_processes, q_updater_term, q_sha_pending, q_sha_results, q_vt_pending)
         get_vt_results(snitch, q_vt_results, False)
-        # free some memory
-        while len(known_pids) > 9000:
-            _ = known_pids.popitem(last=False)
+        del new_processes_q
         del new_processes
-        del update_snitch_pending
-        gc.collect()
-        update_snitch_pending = []
         # write snitch
         if time.time() - last_write > 30:
             new_size = sys.getsizeof(pickle.dumps(snitch))
@@ -600,11 +593,13 @@ def monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe"""
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
+    @functools.lru_cache(maxsize=256)
     def get_exe(pid: int) -> str:
         try:
             return os.readlink("/proc/%d/exe" % pid)
         except Exception:
             return ""
+    @functools.lru_cache(maxsize=256)
     def get_cmd(pid: int) -> str:
         try:
             with open("/proc/%d/cmdline" % pid, "r") as f:
