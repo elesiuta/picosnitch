@@ -19,7 +19,6 @@
 
 import atexit
 import collections
-import difflib
 import functools
 import ipaddress
 import json
@@ -325,19 +324,39 @@ def reverse_domain_name(dns: str) -> str:
         return ".".join(reversed(dns.split(".")))
 
 
-def get_common_pattern(a: str, l: list, cutoff: float) -> None:
-    """if there is a close match to a in l, replace it with a common pattern, otherwise append a to l"""
-    b = difflib.get_close_matches(a, l, n=1, cutoff=cutoff)
-    if b:
-        common_pattern = ""
-        for match in difflib.SequenceMatcher(None, a.lower(), b[0].lower(), False).get_matching_blocks():
-            common_pattern += "*" * (match.a - len(common_pattern))
-            common_pattern += a[match.a:match.a+match.size]
-        l[l.index(b[0])] = common_pattern
-        while l.count(common_pattern) > 1:
-            l.remove(common_pattern)
-    else:
-        l.append(a)
+# def get_common_pattern(a: str, l: list, cutoff: float) -> None:
+#     """if there is a close match to a in l, replace it with a common pattern, otherwise append a to l"""
+#     b = difflib.get_close_matches(a, l, n=1, cutoff=cutoff)
+#     if b:
+#         common_pattern = ""
+#         for match in difflib.SequenceMatcher(None, a.lower(), b[0].lower(), False).get_matching_blocks():
+#             common_pattern += "*" * (match.a - len(common_pattern))
+#             common_pattern += a[match.a:match.a+match.size]
+#         l[l.index(b[0])] = common_pattern
+#         while l.count(common_pattern) > 1:
+#             l.remove(common_pattern)
+#     else:
+#         l.append(a)
+
+
+def merge_commands(cmd: str, cmd_list: list) -> None:
+    """if there is a close match to cmd in cmd_list, replace it with a common pattern, otherwise append cmd to cmd_list"""
+    args = shlex.split(cmd)
+    for i in range(len(cmd_list)):  # cmds
+        i_args = shlex.split(cmd_list[i])
+        if len(args) == len(i_args) and all(len(args[a]) == len(i_args[a]) for a in range(len(args))):
+            new_args = []
+            for a in range(len(args)):  # args
+                new_arg = ""
+                for c in range(len(args[a])):  # chars
+                    if args[a][c] == i_args[a][c]:
+                        new_arg += args[a][c]
+                    else:
+                        new_arg += "*"
+                new_args.append(new_arg)
+            cmd_list[i] = shlex.join(new_args)
+            return
+    cmd_list.append(cmd)
 
 
 def get_sha256(exe: str) -> str:
@@ -350,13 +369,13 @@ def get_sha256(exe: str) -> str:
         return "0000000000000000000000000000000000000000000000000000000000000000"
 
 
-def get_proc_info(pid: int) -> typing.Union[dict, None]:
-    """use psutil to get proc info from pid"""
-    try:
-        proc = psutil.Process(pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
-    except Exception:
-        proc = None
-    return proc
+# def get_proc_info(pid: int) -> typing.Union[dict, None]:
+#     """use psutil to get proc info from pid"""
+#     try:
+#         proc = psutil.Process(pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
+#     except Exception:
+#         proc = None
+#     return proc
 
 
 def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, check_pending: bool = False):
@@ -490,7 +509,7 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
         if proc["name"] not in entry["name"]:
             entry["name"] += " alternative=" + proc["name"]
         if proc["cmdline"] not in entry["cmdlines"]:
-            get_common_pattern(proc["cmdline"], entry["cmdlines"], 0.8)
+            merge_commands(proc["cmdline"], entry["cmdlines"])
             entry["cmdlines"].sort()
         if conn["port"] not in entry["ports"]:
             entry["ports"].append(conn["port"])
@@ -603,7 +622,7 @@ def monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
     def get_cmd(pid: int) -> str:
         try:
             with open("/proc/%d/cmdline" % pid, "r") as f:
-                return f.read().strip()
+                return f.read().encode("ascii", "ignore").decode("ascii", "ignore").strip()
         except Exception:
             return ""
     if os.getuid() == 0:
