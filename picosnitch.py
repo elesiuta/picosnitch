@@ -682,7 +682,7 @@ def updater_subprocess(p_virustotal, init_scan, init_pickle,
 
 
 def monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
-    """runs a bpf program to monitor the system for new connections and puts info in a pipe"""
+    """runs a bpf program to monitor the system for new connections and puts info into a pipe"""
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
     def get_exe(pid: int) -> str:
@@ -867,7 +867,7 @@ def main(vt_api_key: str = ""):
 
 
 def start_daemon():
-    """startup picosnitch as a daemon on posix systems, regular process otherwise, and ensure only one instance is running"""
+    """startup picosnitch as a daemon and ensure only one instance is running"""
     if sys.prefix != sys.base_prefix:
             print("Warning: picosnitch is running in a virtual environment, notifications may not function", file=sys.stderr)
     if os.name == "posix":
