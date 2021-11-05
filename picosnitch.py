@@ -798,7 +798,6 @@ def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
 
 def picosnitch_master_process(config, snitch_updater_pickle):
     """coordinates all picosnitch subprocesses"""
-    signal.signal(signal.SIGINT, lambda *args: None)
     # start subprocesses
     snitch_updater_pipe, snitch_monitor_pipe = multiprocessing.Pipe(duplex=False)
     p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess, init_args=(snitch_monitor_pipe,))
@@ -814,8 +813,11 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                                           p_virustotal.q_in, p_virustotal.q_out)
                               )
     del snitch_updater_pickle
-    # watch subprocesses
+    # set signals
     subprocesses = [p_monitor, p_sha, p_psutil, p_virustotal, p_updater]
+    signal.signal(signal.SIGINT, lambda *args: [p.terminate(0, True, True) for p in subprocesses])
+    signal.signal(signal.SIGTERM, lambda *args: [p.terminate(0, True, True) for p in subprocesses])
+    # watch subprocesses
     try:
         while True:
             time.sleep(5)
