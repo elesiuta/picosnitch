@@ -681,8 +681,8 @@ def updater_subprocess(p_virustotal, init_scan, init_pickle,
                 write(snitch)
 
 
-def linux_monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
-    """runs a bpf program to monitor the system for new processes and connections and puts them in the queue"""
+def monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
+    """runs a bpf program to monitor the system for new connections and puts info in a pipe"""
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
     def get_exe(pid: int) -> str:
@@ -799,14 +799,6 @@ def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
 def picosnitch_master_process(config, snitch_updater_pickle):
     """coordinates all picosnitch subprocesses"""
     signal.signal(signal.SIGINT, lambda *args: None)
-    if sys.platform.startswith("linux"):
-        multiprocessing.set_start_method("fork")
-        monitor_subprocess = linux_monitor_subprocess
-    # elif sys.platform.startswith("win"):
-    #     monitor_subprocess = snitch_windows_subprocess
-    else:
-        print("Did not detect a supported operating system", file=sys.stderr)
-        return 1
     # start subprocesses
     snitch_updater_pipe, snitch_monitor_pipe = multiprocessing.Pipe(duplex=False)
     p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess, init_args=(snitch_monitor_pipe,))
@@ -914,9 +906,6 @@ def start_daemon():
         else:
             print("usage: picosnitch start|stop|restart|version")
             return 0
-    # elif ... :
-        # not really supported right now (waiting to see what happens with https://github.com/microsoft/ebpf-for-windows)
-        # main(tmp_snitch["Config"]["VT API key"])
     else:
         print("Did not detect a supported operating system", file=sys.stderr)
         return 1
