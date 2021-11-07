@@ -490,8 +490,12 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
     # elif not snitch["Config"]["Only log connections"]:
     #     snitch["Names"][proc["name"]] = [proc["exe"]]
     # Update Processes
-    if proc["exe"] not in snitch["Processes"]:
-        snitch["Processes"][proc["exe"]] = proc["name"]
+    if proc["exe"] in snitch["Processes"]:
+        if proc["name"] not in snitch["Processes"][proc["exe"]]:
+            snitch["Processes"][proc["exe"]].append(proc["name"])
+            toast("New name detected for " + proc["exe"] + ": " + proc["name"])
+    else:
+        snitch["Processes"][proc["exe"]] = [proc["name"]]
         # snitch["Processes"][proc["exe"]] = {
         #     "name": proc["name"],
         #     "cmdlines": [proc["cmdline"]],
@@ -618,6 +622,7 @@ def monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe"""
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
+    # backup_queue = multiprocessing.Queue() # could hold stuff if pipe error then try sending later?
     @functools.lru_cache(maxsize=1024)
     def get_exe(pid: int) -> str:
         try:
