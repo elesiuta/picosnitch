@@ -229,10 +229,10 @@ def read() -> dict:
     """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
         "Config": {
+            "Keep logs (days)": 365,
             "Log command lines": True,
             "Log remote address": True,
-            "Only log connections": True,
-            "Remote address unlog": [80, "chrome", "firefox"],
+            "Remote address log ignore": [80, "chrome", "firefox"],
             "VT API key": "",
             "VT file upload": False,
             "VT limit request": 15
@@ -241,7 +241,7 @@ def read() -> dict:
         "Latest Entries": [],
         "Names": {},
         "Processes": {},
-        "Remote Addresses": {}
+        "SHA256": {}
     }
     if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
         home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
@@ -496,6 +496,7 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
             toast("New name detected for " + proc["exe"] + ": " + proc["name"])
     else:
         snitch["Processes"][proc["exe"]] = [proc["name"]]
+        snitch["SHA256"][proc["exe"]] = []
         # snitch["Processes"][proc["exe"]] = {
         #     "name": proc["name"],
         #     "cmdlines": [proc["cmdline"]],
