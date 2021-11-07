@@ -470,12 +470,12 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
     # Prevent overwriting the snitch before this function completes in the event of a termination signal
     snitch["WRITELOCK"] = True
     # Get DNS reverse name and reverse the name for sorting
-    reversed_dns = reverse_domain_name(reverse_dns_lookup(conn["ip"]))
+    # reversed_dns = reverse_domain_name(reverse_dns_lookup(conn["ip"]))
     # Omit fields from log
-    if True or not snitch["Config"]["Log command lines"]:
-        proc["cmdline"] = ""
-    if True or not snitch["Config"]["Log remote address"]:
-        reversed_dns = ""
+    # if True or not snitch["Config"]["Log command lines"]:
+    #     proc["cmdline"] = ""
+    # if True or not snitch["Config"]["Log remote address"]:
+    #     reversed_dns = ""
     # Update Latest Entries
     if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
         snitch["Latest Entries"].append(ctime + " " + proc["name"] + " - " + proc["exe"])
@@ -484,60 +484,61 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
         if proc["exe"] not in snitch["Names"][proc["name"]]:
             snitch["Names"][proc["name"]].append(proc["exe"])
             toast("New executable detected for " + proc["name"] + ": " + proc["exe"])
-    elif conn["ip"] or conn["port"] >= 0:  # port 0 is a conn where port wasn't detected, -1 is proc without conn detected
+    else: # elif conn["ip"] or conn["port"] >= 0:  # port 0 is a conn where port wasn't detected, -1 is proc without conn detected
         snitch["Names"][proc["name"]] = [proc["exe"]]
         toast("First network connection detected for " + proc["name"])
-    elif not snitch["Config"]["Only log connections"]:
-        snitch["Names"][proc["name"]] = [proc["exe"]]
+    # elif not snitch["Config"]["Only log connections"]:
+    #     snitch["Names"][proc["name"]] = [proc["exe"]]
     # Update Processes
     if proc["exe"] not in snitch["Processes"]:
-        snitch["Processes"][proc["exe"]] = {
-            "name": proc["name"],
-            "cmdlines": [proc["cmdline"]],
-            "first seen": ctime,
-            "last seen": ctime,
-            "days seen": 1,
-            "ports": [conn["port"]],
-            "remote addresses": [],
-            "results": {sha256: "Pending"}
-        }
-        q_vt_pending.put(pickle.dumps((proc, sha256)))
-        if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
-            snitch["Processes"][proc["exe"]]["remote addresses"].append(reversed_dns)
-    else:
-        entry = snitch["Processes"][proc["exe"]]
-        if proc["name"] not in entry["name"]:
-            entry["name"] += " alternative=" + proc["name"]
-        if proc["cmdline"] not in entry["cmdlines"]:
-            merge_commands(proc["cmdline"], entry["cmdlines"])
-            entry["cmdlines"].sort()
-        if conn["port"] not in entry["ports"]:
-            entry["ports"].append(conn["port"])
-            entry["ports"].sort()
-        if reversed_dns not in entry["remote addresses"]:
-            if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
-                entry["remote addresses"].append(reversed_dns)
-        if sha256 not in entry["results"]:
-            entry["results"][sha256] = "Pending"
-            q_vt_pending.put(pickle.dumps((proc, sha256)))
-            toast("New sha256 detected for " + proc["name"] + ": " + proc["exe"])
-        if ctime.split()[:3] != entry["last seen"].split()[:3]:
-            entry["days seen"] += 1
-        entry["last seen"] = ctime
-    # Update Remote Addresses
-    if reversed_dns in snitch["Remote Addresses"]:
-        if proc["exe"] not in snitch["Remote Addresses"][reversed_dns]:
-            snitch["Remote Addresses"][reversed_dns].insert(1, proc["exe"])
-            if "No processes found during polling" in snitch["Remote Addresses"][reversed_dns]:
-                snitch["Remote Addresses"][reversed_dns].remove("No processes found during polling")
-    else:
-        if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
-            snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, proc["exe"]]
+        snitch["Processes"][proc["exe"]] = proc["name"]
+        # snitch["Processes"][proc["exe"]] = {
+        #     "name": proc["name"],
+        #     "cmdlines": [proc["cmdline"]],
+        #     "first seen": ctime,
+        #     "last seen": ctime,
+        #     "days seen": 1,
+        #     "ports": [conn["port"]],
+        #     "remote addresses": [],
+        #     "results": {sha256: "Pending"}
+        # }
+        # q_vt_pending.put(pickle.dumps((proc, sha256)))
+        # if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
+        #     snitch["Processes"][proc["exe"]]["remote addresses"].append(reversed_dns)
+    # else:
+    #     entry = snitch["Processes"][proc["exe"]]
+    #     if proc["name"] not in entry["name"]:
+    #         entry["name"] += " alternative=" + proc["name"]
+    #     if proc["cmdline"] not in entry["cmdlines"]:
+    #         merge_commands(proc["cmdline"], entry["cmdlines"])
+    #         entry["cmdlines"].sort()
+    #     if conn["port"] not in entry["ports"]:
+    #         entry["ports"].append(conn["port"])
+    #         entry["ports"].sort()
+    #     if reversed_dns not in entry["remote addresses"]:
+    #         if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
+    #             entry["remote addresses"].append(reversed_dns)
+    #     if sha256 not in entry["results"]:
+    #         entry["results"][sha256] = "Pending"
+    #         q_vt_pending.put(pickle.dumps((proc, sha256)))
+    #         toast("New sha256 detected for " + proc["name"] + ": " + proc["exe"])
+    #     if ctime.split()[:3] != entry["last seen"].split()[:3]:
+    #         entry["days seen"] += 1
+    #     entry["last seen"] = ctime
+    # # Update Remote Addresses
+    # if reversed_dns in snitch["Remote Addresses"]:
+    #     if proc["exe"] not in snitch["Remote Addresses"][reversed_dns]:
+    #         snitch["Remote Addresses"][reversed_dns].insert(1, proc["exe"])
+    #         if "No processes found during polling" in snitch["Remote Addresses"][reversed_dns]:
+    #             snitch["Remote Addresses"][reversed_dns].remove("No processes found during polling")
+    # else:
+    #     if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
+    #         snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, proc["exe"]]
     # Unlock the snitch for writing
     _ = snitch.pop("WRITELOCK")
 
 
-def updater_subprocess(p_virustotal, init_scan, init_pickle,
+def notifier_subprocess(p_virustotal, init_scan, init_pickle,
                        q_snitch, q_error, snitch_pipe, q_monitor_term,
                        q_sha_pending, q_sha_results,
                        q_vt_pending, q_vt_results,
@@ -608,17 +609,22 @@ def updater_subprocess(p_virustotal, init_scan, init_pickle,
                 write(snitch)
 
 
+def sql_subprocess():
+    """updates sqlite db with new connections and reports back to notifier_subprocess if needed"""
+    pass
+
+
 def monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe"""
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
-    @functools.lru_cache(maxsize=256)
+    @functools.lru_cache(maxsize=1024)
     def get_exe(pid: int) -> str:
         try:
             return os.readlink("/proc/%d/exe" % pid)
         except Exception:
             return ""
-    @functools.lru_cache(maxsize=256)
+    @functools.lru_cache(maxsize=1024)
     def get_cmd(pid: int) -> str:
         try:
             with open("/proc/%d/cmdline" % pid, "r") as f:
@@ -733,7 +739,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     q_snitch, q_error = p_monitor.q_in, p_monitor.q_out
     p_sha = ProcessManager(name="snitchsha", target=func_subprocess, init_args=(functools.lru_cache(get_sha256),))
     p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess, init_args=(config,))
-    p_updater = ProcessManager(name="snitchupdater", target=updater_subprocess,
+    p_updater = ProcessManager(name="snitchupdater", target=notifier_subprocess,
                                extra_args=(p_virustotal.p, True, snitch_updater_pickle),
                                init_args=(q_snitch, q_error, snitch_updater_pipe, p_monitor.q_term,
                                           p_sha.q_in, p_sha.q_out,
@@ -791,6 +797,11 @@ def main(vt_api_key: str = ""):
         sys.exit(picosnitch_master_process(snitch["Config"], snitch_updater_pickle))
     print("Snitch subprocess init failed, __name__ != __main__, try: sudo -E python -m picosnitch", file=sys.stderr)
     sys.exit(1)
+
+
+def start_ui():
+    """start a curses ui"""
+    pass
 
 
 def start_daemon():
@@ -864,7 +875,6 @@ bpf_text = """
 #include <linux/ip.h>
 
 struct ipv4_event_t {
-    u64 ts_us;
     u32 pid;
     u32 ppid;
     u32 uid;
@@ -876,7 +886,6 @@ struct ipv4_event_t {
 BPF_PERF_OUTPUT(ipv4_events);
 
 struct ipv6_event_t {
-    u64 ts_us;
     u32 pid;
     u32 ppid;
     u32 uid;
@@ -888,7 +897,6 @@ struct ipv6_event_t {
 BPF_PERF_OUTPUT(ipv6_events);
 
 struct other_socket_event_t {
-    u64 ts_us;
     u32 pid;
     u32 ppid;
     u32 uid;
@@ -917,7 +925,6 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
     u32 address_family = address->sa_family;
     if (address_family == AF_INET) {
         struct ipv4_event_t data4 = {.pid = pid, .ppid = ppid, .uid = uid, .af = address_family};
-        data4.ts_us = bpf_ktime_get_ns() / 1000;
 
         struct sockaddr_in *daddr = (struct sockaddr_in *)address;
 
@@ -935,7 +942,6 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
     }
     else if (address_family == AF_INET6) {
         struct ipv6_event_t data6 = {.pid = pid, .ppid = ppid, .uid = uid, .af = address_family};
-        data6.ts_us = bpf_ktime_get_ns() / 1000;
 
         struct sockaddr_in6 *daddr6 = (struct sockaddr_in6 *)address;
 
@@ -953,7 +959,6 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
     }
     else if (address_family != AF_UNIX && address_family != AF_UNSPEC) { // other sockets, except UNIX and UNSPEC sockets
         struct other_socket_event_t socket_event = {.pid = pid, .ppid = ppid, .uid = uid, .af = address_family};
-        socket_event.ts_us = bpf_ktime_get_ns() / 1000;
         bpf_get_current_comm(&socket_event.task, sizeof(socket_event.task));
         other_socket_events.perf_submit(ctx, &socket_event, sizeof(socket_event));
     }
