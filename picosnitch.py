@@ -413,14 +413,14 @@ def initial_poll(snitch: dict, known_pids: dict) -> list:
     """poll initial processes and connections using psutil and queue for update_snitch()"""
     ctime = time.ctime()
     update_snitch_pending = []
-    current_processes = {}
-    for proc in psutil.process_iter(attrs=["name", "exe", "cmdline", "pid"], ad_value=""):
-        proc = proc.info
-        if os.path.isfile(proc["exe"]):
-            proc["cmdline"] = shlex.join(proc["cmdline"])
-            current_processes[proc["exe"]] = proc
-            known_pids[proc["pid"]] = proc
-    proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
+    # current_processes = {}
+    # for proc in psutil.process_iter(attrs=["name", "exe", "cmdline", "pid"], ad_value=""):
+    #     proc = proc.info
+    #     if os.path.isfile(proc["exe"]):
+    #         proc["cmdline"] = shlex.join(proc["cmdline"])
+    #         current_processes[proc["exe"]] = proc
+    #         known_pids[proc["pid"]] = proc
+    # proc = {"name": "", "exe": "", "cmdline": "", "pid": ""}
     current_connections = set(psutil.net_connections(kind="all"))
     for conn in current_connections:
         try:
@@ -429,7 +429,7 @@ def initial_poll(snitch: dict, known_pids: dict) -> list:
                 proc["cmdline"] = shlex.join(proc["cmdline"])
                 proc["ip"] = conn.raddr.ip
                 proc["port"] = conn.raddr.port
-                _ = current_processes.pop(proc["exe"], 0)
+                # _ = current_processes.pop(proc["exe"], 0)
                 update_snitch_pending.append(proc)
         except Exception as e:
             # too late to grab process info (most likely) or some other error
@@ -455,10 +455,10 @@ def update_snitch_wrapper(snitch: dict, update_snitch_pending: list,
     ctime = time.ctime()
     for proc in update_snitch_pending:
         try:
-            q_sha_pending.put(pickle.dumps(proc["exe"]))
-            sha256 = pickle.loads(safe_q_get(q_sha_results, q_updater_term))
+            # q_sha_pending.put(pickle.dumps(proc["exe"]))
+            # sha256 = pickle.loads(safe_q_get(q_sha_results, q_updater_term))
             conn = {"ip": proc["ip"], "port": proc["port"]}
-            update_snitch(snitch, proc, conn, sha256, ctime, q_vt_pending)
+            update_snitch(snitch, proc, conn, "0", ctime, q_vt_pending)
         except Exception as e:
             error = "Update snitch " + type(e).__name__ + str(e.args) + str(proc)
             snitch["Errors"].append(ctime + " " + error)
@@ -472,9 +472,9 @@ def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str,
     # Get DNS reverse name and reverse the name for sorting
     reversed_dns = reverse_domain_name(reverse_dns_lookup(conn["ip"]))
     # Omit fields from log
-    if not snitch["Config"]["Log command lines"]:
+    if True or not snitch["Config"]["Log command lines"]:
         proc["cmdline"] = ""
-    if not snitch["Config"]["Log remote address"]:
+    if True or not snitch["Config"]["Log remote address"]:
         reversed_dns = ""
     # Update Latest Entries
     if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
@@ -622,7 +622,7 @@ def monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
     def get_cmd(pid: int) -> str:
         try:
             with open("/proc/%d/cmdline" % pid, "r") as f:
-                return f.read().encode("ascii", "ignore").decode("ascii", "ignore").strip()
+                return f.read()
         except Exception:
             return ""
     if os.getuid() == 0:
