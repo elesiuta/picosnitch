@@ -409,7 +409,7 @@ def safe_q_get(q: multiprocessing.Queue, q_term: multiprocessing.Queue):
             pass
 
 
-def initial_poll(snitch: dict, known_pids: dict) -> list:
+def initial_poll(snitch: dict) -> list:
     """poll initial processes and connections using psutil and queue for update_snitch()"""
     ctime = time.ctime()
     update_snitch_pending = []
@@ -551,9 +551,9 @@ def notifier_subprocess(p_virustotal, init_scan, init_pickle,
     pickle_path = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "pickle.tmp")
     if init_pickle is None:
         with open(pickle_path, "rb") as pickle_file:
-            snitch, known_pids, missed_conns, update_snitch_pending = pickle.load(pickle_file)
+            snitch, update_snitch_pending = pickle.load(pickle_file)
     else:
-        snitch, known_pids, missed_conns, update_snitch_pending = pickle.loads(init_pickle)
+        snitch, update_snitch_pending = pickle.loads(init_pickle)
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
     # init signal handlers
@@ -561,10 +561,10 @@ def notifier_subprocess(p_virustotal, init_scan, init_pickle,
     signal.signal(signal.SIGINT, lambda *args: terminate_snitch_updater(snitch, q_error, q_monitor_term, snitch_pipe))
     # update snitch with initial running processes and connections
     if init_scan:
-        get_vt_results(snitch, q_vt_pending, True)
+        # get_vt_results(snitch, q_vt_pending, True)
         update_snitch_wrapper(snitch, update_snitch_pending)
-    known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
-    known_pids[os.getpid()] = {"name": "snitchupdater", "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": os.getpid()}
+    # known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
+    # known_pids[os.getpid()] = {"name": "snitchupdater", "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": os.getpid()}
     # snitch updater main loop
     while True:
         # check for errors
@@ -609,9 +609,14 @@ def notifier_subprocess(p_virustotal, init_scan, init_pickle,
                 write(snitch)
 
 
-def sql_subprocess():
+def sql_subprocess(init_pickle,
+                   q_sha_pending, q_sha_results,
+                   q_vt_pending, q_vt_results,
+                   q_sql_ready, q_sql_results, q_sql_term):
     """updates sqlite db with new connections and reports back to notifier_subprocess if needed"""
-    pass
+    import sqlite3
+    parent_process = multiprocessing.parent_process()
+    
 
 
 def monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
@@ -789,10 +794,8 @@ def main(vt_api_key: str = ""):
     if vt_api_key:
         snitch["Config"]["VT API key"] = vt_api_key
     # do initial poll of current network connections
-    missed_conns = []
-    known_pids = collections.OrderedDict()
-    update_snitch_pending = initial_poll(snitch, known_pids)
-    snitch_updater_pickle = pickle.dumps((snitch, known_pids, missed_conns, update_snitch_pending))
+    update_snitch_pending = initial_poll(snitch)
+    snitch_updater_pickle = pickle.dumps((snitch, update_snitch_pending))
     # start picosnitch process monitor
     if __name__ == "__main__":
         sys.exit(picosnitch_master_process(snitch["Config"], snitch_updater_pickle))
