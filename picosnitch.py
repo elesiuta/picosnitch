@@ -232,7 +232,7 @@ def read() -> dict:
             "Keep logs (days)": 365,
             "Log command lines": True,
             "Log remote address": True,
-            "Remote address log ignore": [80, "chrome", "firefox"],
+            "Log ignore": [80, "chrome", "firefox"],
             "VT API key": "",
             "VT file upload": False,
             "VT limit request": 15
@@ -446,26 +446,21 @@ def initial_poll(snitch: dict, known_pids: dict) -> list:
     return update_snitch_pending
 
 
-def update_snitch_wrapper(snitch: dict, update_snitch_pending: list,
-                          q_updater_term: multiprocessing.Queue,
-                          q_sha_pending: multiprocessing.Queue,
-                          q_sha_results: multiprocessing.Queue,
-                          q_vt_pending: multiprocessing.Queue):
+def update_snitch_wrapper(snitch: dict, update_snitch_pending: list):
     """loop over update_snitch() with pending update list"""
     ctime = time.ctime()
     for proc in update_snitch_pending:
         try:
             # q_sha_pending.put(pickle.dumps(proc["exe"]))
             # sha256 = pickle.loads(safe_q_get(q_sha_results, q_updater_term))
-            conn = {"ip": proc["ip"], "port": proc["port"]}
-            update_snitch(snitch, proc, conn, "0", ctime, q_vt_pending)
+            update_snitch(snitch, proc, ctime)
         except Exception as e:
             error = "Update snitch " + type(e).__name__ + str(e.args) + str(proc)
             snitch["Errors"].append(ctime + " " + error)
             toast("Update snitch error: " + error, file=sys.stderr)
 
 
-def update_snitch(snitch: dict, proc: dict, conn: dict, sha256: str, ctime: str, q_vt_pending: multiprocessing.Queue) -> None:
+def update_snitch(snitch: dict, proc: dict, ctime: str) -> None:
     """update the snitch with data from queues and create a notification if new entry"""
     # Prevent overwriting the snitch before this function completes in the event of a termination signal
     snitch["WRITELOCK"] = True
@@ -567,7 +562,7 @@ def notifier_subprocess(p_virustotal, init_scan, init_pickle,
     # update snitch with initial running processes and connections
     if init_scan:
         get_vt_results(snitch, q_vt_pending, True)
-        update_snitch_wrapper(snitch, update_snitch_pending, q_updater_term, q_sha_pending, q_sha_results, q_vt_pending)
+        update_snitch_wrapper(snitch, update_snitch_pending)
     known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
     known_pids[os.getpid()] = {"name": "snitchupdater", "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": os.getpid()}
     # snitch updater main loop
@@ -601,7 +596,7 @@ def notifier_subprocess(p_virustotal, init_scan, init_pickle,
             new_processes_q.append(snitch_pipe.recv_bytes())
         # process the list and update snitch
         new_processes = [pickle.loads(proc) for proc in new_processes_q]
-        update_snitch_wrapper(snitch, new_processes, q_updater_term, q_sha_pending, q_sha_results, q_vt_pending)
+        update_snitch_wrapper(snitch, new_processes)
         get_vt_results(snitch, q_vt_results, False)
         del new_processes_q
         del new_processes
