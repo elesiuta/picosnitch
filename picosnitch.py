@@ -173,20 +173,12 @@ class Daemon:
 
 class ProcessManager:
     """A class for managing a subprocess"""
-    def __init__(self, name: str, target: typing.Callable, init_args: tuple = (), extra_args: tuple = ()) -> None:
+    def __init__(self, name: str, target: typing.Callable, init_args: tuple = ()) -> None:
         self.name, self.target, self.init_args = name, target, init_args
         self.q_in, self.q_out = multiprocessing.Queue(), multiprocessing.Queue()
-        self.start(*extra_args)
-
-    def _init_process(self, *extra_args) -> multiprocessing.Process:
-        return multiprocessing.Process(name=self.name, target=self.target, daemon=True,
-                                       args=(*extra_args,
-                                             *self.init_args,
-                                             self.q_in, self.q_out)
-                                      )
-
-    def start(self, *extra_args) -> None:
-        self.p = self._init_process(*extra_args)
+        self.p = multiprocessing.Process(name=self.name, target=self.target, daemon=True,
+                                         args=(*self.init_args, self.q_in, self.q_out)
+                                        )
         self.p.start()
         self.pp = psutil.Process(self.p.pid)
         self.time_last_start = time.time()
@@ -523,10 +515,7 @@ def update_snitch(snitch: dict, proc: dict, ctime: str) -> None:
     _ = snitch.pop("WRITELOCK")
 
 
-def updater_subprocess(init_pickle,
-                       q_snitch, q_error, snitch_pipe,
-                       q_updater_restart, q_updater_ready
-                      ):
+def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_ready, _q_out):
     """main subprocess where snitch.json is updated with new connections and the user is notified"""
     # drop root privileges and init variables for loop
     parent_process = multiprocessing.parent_process()
@@ -590,17 +579,16 @@ def updater_subprocess(init_pickle,
                 write(snitch)
 
 
-def sql_subprocess(init_pickle,
-                   q_sha_pending, q_sha_results,
-                   q_vt_pending, q_vt_results,
-                   q_sql_ready, q_sql_results):
+def sql_subprocess(init_pickle, p_sha, p_virustotal, sql_recv_pipe, q_error, _q_in, _q_out):
     """updates sqlite db with new connections and reports back to updater_subprocess if needed"""
     import sqlite3
     parent_process = multiprocessing.parent_process()
+    while True:
+        time.sleep(5)
     
 
 
-def monitor_subprocess(snitch_pipe, _, q_error):
+def monitor_subprocess(snitch_pipe, q_error, _q_in, _q_out):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe"""
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
@@ -722,17 +710,20 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     """coordinates all picosnitch subprocesses"""
     # start subprocesses
     snitch_updater_pipe, snitch_monitor_pipe = multiprocessing.Pipe(duplex=False)
-    p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess, init_args=(snitch_monitor_pipe,))
-    q_snitch, q_error = p_monitor.q_in, p_monitor.q_out
+    sql_recv_pipe, sql_send_pipe = multiprocessing.Pipe(duplex=False)
+    q_error = multiprocessing.Queue()
+    p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess, init_args=(snitch_monitor_pipe, q_error,))
     p_sha = ProcessManager(name="snitchsha", target=func_subprocess, init_args=(functools.lru_cache(get_sha256),))
     p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess, init_args=(config,))
     p_updater = ProcessManager(name="snitchupdater", target=updater_subprocess,
-                               extra_args=(snitch_updater_pickle,),
-                               init_args=(q_snitch, q_error, snitch_updater_pipe)
+                               init_args=(snitch_updater_pickle, snitch_updater_pipe, sql_send_pipe, q_error,)
                               )
+    p_sql = ProcessManager(name="snitchsql", target=sql_subprocess,
+                           init_args=(snitch_updater_pickle, p_sha, p_virustotal, sql_recv_pipe, q_error,)
+                          )
     del snitch_updater_pickle
     # set signals
-    subprocesses = [p_monitor, p_sha, p_virustotal, p_updater]
+    subprocesses = [p_monitor, p_sha, p_virustotal, p_updater, p_sql]
     signal.signal(signal.SIGINT, lambda *args: [p.terminate() for p in subprocesses])
     signal.signal(signal.SIGTERM, lambda *args: [p.terminate() for p in subprocesses])
     # watch subprocesses
@@ -745,11 +736,8 @@ def picosnitch_master_process(config, snitch_updater_pickle):
             if any(p.is_zombie() for p in subprocesses):
                 q_error.put("picosnitch subprocess became a zombie, attempting restart")
                 break
-            if p_monitor.memory() > 256000000:
-                q_error.put("Snitch monitor memory usage exceeded 256 MB, attempting restart")
-                break
-            if p_updater.memory() > 256000000:
-                q_error.put("Snitch updater memory usage exceeded 256 MB, attempting restart")
+            if sum(p.memory() for p in subprocesses) > 512000000:
+                q_error.put("picosnitch memory usage exceeded 512 MB, attempting restart")
                 break
     except Exception as e:
         q_error.put("picosnitch subprocess exception: " + str(e))
