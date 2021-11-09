@@ -535,6 +535,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     # if init_scan:
         # get_vt_results(snitch, q_vt_pending, True)
     update_snitch_wrapper(snitch, update_snitch_pending)
+    new_processes_q = []
     # known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
     # known_pids[os.getpid()] = {"name": "snitchupdater", "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": os.getpid()}
     # snitch updater main loop
@@ -560,7 +561,6 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
         #     pass
         # get list of new processes and connections since last update
         # time.sleep(5)
-        new_processes_q = []
         snitch_pipe.poll(timeout=5)
         while snitch_pipe.poll():
             new_processes_q.append(snitch_pipe.recv_bytes())
@@ -568,8 +568,21 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
         new_processes = [pickle.loads(proc) for proc in new_processes_q]
         update_snitch_wrapper(snitch, new_processes)
         # get_vt_results(snitch, q_vt_results, False)
-        del new_processes_q
         del new_processes
+        while not q_in.empty():
+            msg: str = q_in.get()
+            if msg == "ready":
+                for proc in new_processes_q:
+                    sql_pipe.send_bytes(proc)
+                del new_processes_q
+                new_processes_q = []
+            elif msg.startswith("sha256"):
+                pass # either split on \0, or just use index and put exe path last
+            elif msg.startswith("vt"):
+                pass
+            else:
+                # error
+                pass
         # write snitch
         if time.time() - last_write > 30:
             new_size = sys.getsizeof(pickle.dumps(snitch))
