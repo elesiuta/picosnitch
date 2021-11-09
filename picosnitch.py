@@ -175,14 +175,14 @@ class ProcessManager:
     """A class for managing a subprocess"""
     def __init__(self, name: str, target: typing.Callable, init_args: tuple = (), extra_args: tuple = ()) -> None:
         self.name, self.target, self.init_args = name, target, init_args
-        self.q_in, self.q_out, self.q_term = multiprocessing.Queue(), multiprocessing.Queue(), multiprocessing.Queue()
+        self.q_in, self.q_out = multiprocessing.Queue(), multiprocessing.Queue()
         self.start(*extra_args)
 
     def _init_process(self, *extra_args) -> multiprocessing.Process:
         return multiprocessing.Process(name=self.name, target=self.target, daemon=True,
                                        args=(*extra_args,
                                              *self.init_args,
-                                             self.q_in, self.q_out, self.q_term)
+                                             self.q_in, self.q_out)
                                       )
 
     def start(self, *extra_args) -> None:
@@ -191,29 +191,16 @@ class ProcessManager:
         self.pp = psutil.Process(self.p.pid)
         self.time_last_start = time.time()
 
-    def terminate(self, t: float, use_q_term: bool = False, close_queues: bool = False) -> None:
-        if use_q_term:
-            self.q_term.put("TERMINATE")
-        # terminate_subprocess = lambda p, t: p.join(t) or (p.is_alive() and p.terminate()) or p.join(1) or (p.is_alive() and p.kill()) or p.join(1) or p.close()
-        self.p.join(timeout=t)
+    def terminate(self) -> None:
         if self.p.is_alive():
             self.p.terminate()
         self.p.join(timeout=20)
         if self.p.is_alive():
             self.p.kill()
         self.p.join(timeout=10)
-        if close_queues:
-            self.q_in.close()
-            self.q_out.close()
+        self.q_in.close()
+        self.q_out.close()
         self.p.close()
-        # clear_queue = lambda q: (q.get() for i in range(q.qsize()))
-        if use_q_term:
-            # can clear q_term if p successfully closed
-            for i in range(self.q_term.qsize()):
-                _ = self.q_term.get()
-        if close_queues:
-            # can close q_term if p successfully closed
-            self.q_term.close()
 
     def is_alive(self) -> bool:
         return self.p.is_alive()
@@ -287,14 +274,13 @@ def drop_root_privileges() -> None:
         os.setuid(int(os.getenv("SUDO_UID")))
 
 
-def terminate_snitch_updater(snitch: dict, q_error: multiprocessing.Queue, q_monitor_term, snitch_pipe):
+def write_snitch_and_exit(snitch: dict, q_error: multiprocessing.Queue, snitch_pipe):
     """write snitch one last time"""
     while not q_error.empty():
         error = q_error.get()
         snitch["Errors"].append(time.ctime() + " " + error)
         toast(error, file=sys.stderr)
     write(snitch)
-    q_monitor_term.put("TERMINATE")
     snitch_pipe.close()
     sys.exit(0)
 
@@ -394,18 +380,17 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, check_pending: boo
                 toast("Suspicious results for " + proc["name"])
 
 
-def safe_q_get(q: multiprocessing.Queue, q_term: multiprocessing.Queue):
-    """prevent the updater subprocess from hanging on the next request/result check if p_sha or p_psutil die"""
+def safe_q_get(p: multiprocessing.Process, q: multiprocessing.Queue):
+    """prevent the asking subprocess from hanging on the next request/result check if func_subprocess dies"""
     parent_process = multiprocessing.parent_process()
     while True:
         try:
-            if not q_term.empty() or not parent_process.is_alive():
+            if not parent_process.is_alive() or p.is_alive():
+                # send signal so handler is called if registered for asking subprocess
                 os.kill(os.getpid(), signal.SIGTERM)
-                # raise Exception("Process terminated")
-                # sys.exit(1)
             return q.get(block=True, timeout=15)
         except queue.Empty:
-            # have to timeout here to check whether to terminate otherwise this could stay hanging
+            # try again until something dies or gets results
             pass
 
 
@@ -491,7 +476,7 @@ def update_snitch(snitch: dict, proc: dict, ctime: str) -> None:
             toast("New name detected for " + proc["exe"] + ": " + proc["name"])
     else:
         snitch["Processes"][proc["exe"]] = [proc["name"]]
-        snitch["SHA256"][proc["exe"]] = []
+        snitch["SHA256"][proc["exe"]] = {}
         # snitch["Processes"][proc["exe"]] = {
         #     "name": proc["name"],
         #     "cmdlines": [proc["cmdline"]],
@@ -538,31 +523,29 @@ def update_snitch(snitch: dict, proc: dict, ctime: str) -> None:
     _ = snitch.pop("WRITELOCK")
 
 
-def notifier_subprocess(p_virustotal, init_scan, init_pickle,
-                       q_snitch, q_error, snitch_pipe, q_monitor_term,
-                       q_sha_pending, q_sha_results,
-                       q_vt_pending, q_vt_results,
-                       q_updater_restart, q_updater_ready, q_updater_term
+def updater_subprocess(init_pickle,
+                       q_snitch, q_error, snitch_pipe,
+                       q_updater_restart, q_updater_ready
                       ):
     """main subprocess where snitch.json is updated with new connections and the user is notified"""
     # drop root privileges and init variables for loop
     parent_process = multiprocessing.parent_process()
     drop_root_privileges()
-    pickle_path = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "pickle.tmp")
-    if init_pickle is None:
-        with open(pickle_path, "rb") as pickle_file:
-            snitch, update_snitch_pending = pickle.load(pickle_file)
-    else:
-        snitch, update_snitch_pending = pickle.loads(init_pickle)
+    # pickle_path = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "pickle.tmp")
+    # if init_pickle is None:
+    #     with open(pickle_path, "rb") as pickle_file:
+    #         snitch, update_snitch_pending = pickle.load(pickle_file)
+    # else:
+    snitch, update_snitch_pending = pickle.loads(init_pickle)
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
     # init signal handlers
-    signal.signal(signal.SIGTERM, lambda *args: terminate_snitch_updater(snitch, q_error, q_monitor_term, snitch_pipe))
-    signal.signal(signal.SIGINT, lambda *args: terminate_snitch_updater(snitch, q_error, q_monitor_term, snitch_pipe))
+    signal.signal(signal.SIGTERM, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
+    signal.signal(signal.SIGINT, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
     # update snitch with initial running processes and connections
-    if init_scan:
+    # if init_scan:
         # get_vt_results(snitch, q_vt_pending, True)
-        update_snitch_wrapper(snitch, update_snitch_pending)
+    update_snitch_wrapper(snitch, update_snitch_pending)
     # known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
     # known_pids[os.getpid()] = {"name": "snitchupdater", "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": os.getpid()}
     # snitch updater main loop
@@ -573,12 +556,10 @@ def notifier_subprocess(p_virustotal, init_scan, init_pickle,
             snitch["Errors"].append(time.ctime() + " " + error)
             toast(error, file=sys.stderr)
         # check if terminating
-        if not q_updater_term.empty():
-            terminate_snitch_updater(snitch, q_error, q_monitor_term, snitch_pipe)
         if not parent_process.is_alive():
             snitch["Errors"].append(time.ctime() + " picosnitch has stopped")
             toast("picosnitch has stopped", file=sys.stderr)
-            terminate_snitch_updater(snitch, q_error, q_monitor_term, snitch_pipe)
+            write_snitch_and_exit(snitch, q_error, snitch_pipe)
         # check if updater needs to restart
         # try:
         #     _ = q_updater_restart.get(block=False)
@@ -597,7 +578,7 @@ def notifier_subprocess(p_virustotal, init_scan, init_pickle,
         # process the list and update snitch
         new_processes = [pickle.loads(proc) for proc in new_processes_q]
         update_snitch_wrapper(snitch, new_processes)
-        get_vt_results(snitch, q_vt_results, False)
+        # get_vt_results(snitch, q_vt_results, False)
         del new_processes_q
         del new_processes
         # write snitch
@@ -612,14 +593,14 @@ def notifier_subprocess(p_virustotal, init_scan, init_pickle,
 def sql_subprocess(init_pickle,
                    q_sha_pending, q_sha_results,
                    q_vt_pending, q_vt_results,
-                   q_sql_ready, q_sql_results, q_sql_term):
-    """updates sqlite db with new connections and reports back to notifier_subprocess if needed"""
+                   q_sql_ready, q_sql_results):
+    """updates sqlite db with new connections and reports back to updater_subprocess if needed"""
     import sqlite3
     parent_process = multiprocessing.parent_process()
     
 
 
-def monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
+def monitor_subprocess(snitch_pipe, _, q_error):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe"""
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
@@ -656,7 +637,7 @@ def monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
         b["ipv6_events"].open_perf_buffer(queue_ipv6_event)
         b["other_socket_events"].open_perf_buffer(queue_other_event)
         while True:
-            if not q_monitor_term.empty() or not parent_process.is_alive():
+            if not parent_process.is_alive():
                 return 0
             try:
                 b.perf_buffer_poll(timeout=-1)
@@ -668,13 +649,13 @@ def monitor_subprocess(snitch_pipe, q_snitch, q_error, q_monitor_term):
     return 1
 
 
-def func_subprocess(func: typing.Callable, q_pending, q_results, q_term):
+def func_subprocess(func: typing.Callable, q_pending, q_results):
     """wrapper function for subprocess"""
     parent_process = multiprocessing.parent_process()
     last_error = 0
     while True:
         try:
-            if not q_term.empty() or not parent_process.is_alive():
+            if not parent_process.is_alive():
                 return 0
             arg = pickle.loads(q_pending.get(block=True, timeout=15))
             q_results.put(pickle.dumps(func(arg)))
@@ -688,7 +669,7 @@ def func_subprocess(func: typing.Callable, q_pending, q_results, q_term):
             last_error = time.time()
 
 
-def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
+def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results):
     """get virustotal results of process executable"""
     parent_process = multiprocessing.parent_process()
     drop_root_privileges()
@@ -700,7 +681,7 @@ def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results, q_vt_term):
     last_error = 0
     while True:
         try:
-            if not q_vt_term.empty() or not parent_process.is_alive():
+            if not parent_process.is_alive():
                 return 0
             time.sleep(config["VT limit request"])
             proc, sha256 = pickle.loads(q_vt_pending.get(block=True, timeout=15))
@@ -745,17 +726,15 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     q_snitch, q_error = p_monitor.q_in, p_monitor.q_out
     p_sha = ProcessManager(name="snitchsha", target=func_subprocess, init_args=(functools.lru_cache(get_sha256),))
     p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess, init_args=(config,))
-    p_updater = ProcessManager(name="snitchupdater", target=notifier_subprocess,
-                               extra_args=(p_virustotal.p, True, snitch_updater_pickle),
-                               init_args=(q_snitch, q_error, snitch_updater_pipe, p_monitor.q_term,
-                                          p_sha.q_in, p_sha.q_out,
-                                          p_virustotal.q_in, p_virustotal.q_out)
+    p_updater = ProcessManager(name="snitchupdater", target=updater_subprocess,
+                               extra_args=(snitch_updater_pickle,),
+                               init_args=(q_snitch, q_error, snitch_updater_pipe)
                               )
     del snitch_updater_pickle
     # set signals
     subprocesses = [p_monitor, p_sha, p_virustotal, p_updater]
-    signal.signal(signal.SIGINT, lambda *args: [p.terminate(0, True, True) for p in subprocesses])
-    signal.signal(signal.SIGTERM, lambda *args: [p.terminate(0, True, True) for p in subprocesses])
+    signal.signal(signal.SIGINT, lambda *args: [p.terminate() for p in subprocesses])
+    signal.signal(signal.SIGTERM, lambda *args: [p.terminate() for p in subprocesses])
     # watch subprocesses
     try:
         while True:
@@ -775,13 +754,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     except Exception as e:
         q_error.put("picosnitch subprocess exception: " + str(e))
     # something went wrong, attempt to restart picosnitch (terminate by running `picosnitch stop`)
-    try:
-        p_updater.terminate(60, True)
-    except Exception:
-        try:
-            p_updater.terminate(10)
-        except Exception:
-            pass
+    _ = [p.terminate() for p in subprocesses]
     subprocess.Popen(sys.argv[:-1] + ["restart"])
     return 0
 
@@ -844,11 +817,11 @@ def start_daemon():
                 print(VERSION)
                 return 0
             else:
-                print("usage: picosnitch start|stop|restart|version")
+                print("usage: picosnitch start|stop|restart|version|view")
                 return 0
             return 0
         else:
-            print("usage: picosnitch start|stop|restart|version")
+            print("usage: picosnitch start|stop|restart|version|view")
             return 0
     else:
         print("Did not detect a supported operating system", file=sys.stderr)
