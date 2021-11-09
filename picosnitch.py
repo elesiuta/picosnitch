@@ -515,7 +515,7 @@ def update_snitch(snitch: dict, proc: dict, ctime: str) -> None:
     _ = snitch.pop("WRITELOCK")
 
 
-def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_ready, _q_out):
+def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
     """main subprocess where snitch.json is updated with new connections and the user is notified"""
     # drop root privileges and init variables for loop
     parent_process = multiprocessing.parent_process()
@@ -579,13 +579,46 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_ready, _q_
                 write(snitch)
 
 
-def sql_subprocess(init_pickle, p_sha, p_virustotal, sql_recv_pipe, q_error, _q_in, _q_out):
+def sql_subprocess(init_pickle, p_sha, p_virustotal, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
     """updates sqlite db with new connections and reports back to updater_subprocess if needed"""
     import sqlite3
     parent_process = multiprocessing.parent_process()
+    # easier to update a copy of snitch here than trying to keep them in sync (just need to track sha256 and vt_results after this)
+    snitch, update_snitch_pending = pickle.loads(init_pickle)
+    ctime = time.ctime()
+    for proc in update_snitch_pending:
+        try:
+            update_snitch(snitch, proc, ctime)
+        except Exception as e:
+            error = "SQL update snitch " + type(e).__name__ + str(e.args) + str(proc)
+            q_error.put(error)
+    # init sql connection
+    if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
+        home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
+    else:
+        home_dir = os.path.expanduser("~")
+    file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.db")
+    con = sqlite3.connect(file_path)
+    # set signals to close sql connection on termination (probably not necessary unless wanting to commit too, should it?)
+    signal.signal(signal.SIGTERM, lambda *args: con.close())
+    signal.signal(signal.SIGINT, lambda *args: con.close())
+    # main loop
     while True:
-        time.sleep(5)
-    
+        if not parent_process.is_alive():
+            return 0
+        try:
+            q_updater_in.put("ready")  # should I make sure this is empty first? which side, or both?
+            new_processes_q = []
+            sql_pipe.poll(timeout=15)  # updater should be able to respond within this much time
+            while sql_pipe.poll(timeout=0.1):  # make sure updater is done
+                new_processes_q.append(sql_pipe.recv_bytes())
+            new_processes = [pickle.loads(proc) for proc in new_processes_q]
+            # iterate through them, adding each to db (if logging enabled)
+            # don't need to update snitch completely, just check for new processes, new sha, new vt
+            # put them in q_update_in
+        except Exception as e:
+            error = "SQL " + type(e).__name__ + str(e.args)
+            q_error.put(error)
 
 
 def monitor_subprocess(snitch_pipe, q_error, _q_in, _q_out):
@@ -719,7 +752,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                                init_args=(snitch_updater_pickle, snitch_updater_pipe, sql_send_pipe, q_error,)
                               )
     p_sql = ProcessManager(name="snitchsql", target=sql_subprocess,
-                           init_args=(snitch_updater_pickle, p_sha, p_virustotal, sql_recv_pipe, q_error,)
+                           init_args=(snitch_updater_pickle, p_sha, p_virustotal, sql_recv_pipe, p_updater.q_in, q_error,)
                           )
     del snitch_updater_pickle
     # set signals
