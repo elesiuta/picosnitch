@@ -750,10 +750,10 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
         help_bar = f"space/enter: toggle subquery  t: cycle time period  s: cycle subquery column  r: refresh data  q: quit {' ': <{curses.COLS}}"
         if is_subquery:
             status_bar = f"picosnitch {VERSION}\t time period: {time_period[time_i]}\t {p_names[pri_i].lower()}: {primary_value}{' ': <{curses.COLS}}"
-            column_names = f"{s_names[sec_i]: <{curses.COLS*3//4}}{'Entries': <{curses.COLS//4+3}}"
+            column_names = f"{s_names[sec_i]: <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
         else:
             status_bar = f"picosnitch {VERSION}\t time period: {time_period[time_i]}{' ': <{curses.COLS}}"
-            column_names = f"{p_names[pri_i]: <{curses.COLS*3//4}}{'Entries': <{curses.COLS//4+3}}"
+            column_names = f"{p_names[pri_i]: <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
         # display screen
         stdscr.clear()
         stdscr.attrset(curses.color_pair(4) | curses.A_BOLD)
@@ -785,7 +785,7 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                     name = name.replace("\0", "")
                 elif (not is_subquery and p_col[pri_i] == "uid") or (is_subquery and s_col[sec_i] == "uid"):
                     name = f"{pwd.getpwuid(name).pw_name} ({name})"
-                stdscr.addstr(line - offset, 0, f"{name: <{curses.COLS*3//4}}{value: <{curses.COLS-(curses.COLS*3//4)}}")
+                stdscr.addstr(line - offset, 0, f"{name: <{curses.COLS*7//8}}{value: <{curses.COLS-(curses.COLS*7//8)}}")
             line += 1
         stdscr.refresh()
         if toggle_subquery:
