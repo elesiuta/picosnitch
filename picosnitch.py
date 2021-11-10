@@ -18,7 +18,6 @@
 # https://github.com/elesiuta/picosnitch
 
 import atexit
-import collections
 import functools
 import ipaddress
 import json
@@ -34,14 +33,15 @@ import socket
 import struct
 import subprocess
 import sys
+import textwrap
 import time
 import typing
 
 try:
     import psutil
 except Exception as e:
-    print(type(e).__name__ + str(e.args))
-    print("Make sure dependency is installed, or environment is preserved if running with sudo")
+    print(type(e).__name__ + str(e.args), file=sys.stderr)
+    print("Make sure dependency is installed, or environment is preserved if running with sudo", file=sys.stderr)
 
 try:
     import plyer
@@ -351,7 +351,7 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiproces
 def initial_poll(snitch: dict) -> list:
     """poll initial processes and connections using psutil and queue for update_snitch()"""
     ctime = time.ctime()
-    update_snitch_pending = []
+    initial_processes = []
     current_connections = set(psutil.net_connections(kind="all"))
     for conn in current_connections:
         try:
@@ -361,7 +361,7 @@ def initial_poll(snitch: dict) -> list:
                 proc["uid"] = proc["uids"][0]
                 proc["ip"] = conn.raddr.ip
                 proc["port"] = conn.raddr.port
-                update_snitch_pending.append(proc)
+                initial_processes.append(proc)
         except Exception as e:
             # too late to grab process info (most likely) or some other error
             error = "Init " + type(e).__name__ + str(e.args) + str(conn)
@@ -370,7 +370,7 @@ def initial_poll(snitch: dict) -> list:
             else:
                 error += "{process no longer exists}"
             snitch["Errors"].append(ctime + " " + error)
-    return update_snitch_pending
+    return initial_processes
 
 
 def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue) -> None:
@@ -476,14 +476,14 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     # drop root privileges and init variables for loop
     parent_process = multiprocessing.parent_process()
     drop_root_privileges()
-    snitch, update_snitch_pending = pickle.loads(init_pickle)
+    snitch, initial_processes = pickle.loads(init_pickle)
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
     # init signal handlers
     signal.signal(signal.SIGTERM, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
     signal.signal(signal.SIGINT, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
     # update snitch with initial running processes and connections
-    update_snitch_proc_and_notify(snitch, [pickle.dumps(proc) for proc in update_snitch_pending])
+    update_snitch_proc_and_notify(snitch, [pickle.dumps(proc) for proc in initial_processes])
     new_processes = []
     new_processes_q = []
     # snitch updater main loop
@@ -550,9 +550,9 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.db")
     con = sqlite3.connect(file_path)
     # easier to update a copy of snitch here than trying to keep them in sync (just need to track sha256 and vt_results after this)
-    snitch, update_snitch_pending = pickle.loads(init_pickle)
+    snitch, initial_processes = pickle.loads(init_pickle)
     get_vt_results(snitch, p_virustotal.q_out, q_updater_in, True)
-    update_snitch_sha_and_sql(snitch, [pickle.dumps(proc) for proc in update_snitch_pending], p_virustotal.q_in, q_updater_in)
+    update_snitch_sha_and_sql(snitch, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in)
     # set signals to close sql connection on termination (probably not necessary unless wanting to commit too, should it?)
     signal.signal(signal.SIGTERM, lambda *args: con.close())
     signal.signal(signal.SIGINT, lambda *args: con.close())
@@ -720,8 +720,8 @@ def main(vt_api_key: str = ""):
     if vt_api_key:
         snitch["Config"]["VT API key"] = vt_api_key
     # do initial poll of current network connections
-    update_snitch_pending = initial_poll(snitch)
-    snitch_updater_pickle = pickle.dumps((snitch, update_snitch_pending))
+    initial_processes = initial_poll(snitch)
+    snitch_updater_pickle = pickle.dumps((snitch, initial_processes))
     # start picosnitch process monitor
     if __name__ == "__main__":
         sys.exit(picosnitch_master_process(snitch["Config"], snitch_updater_pickle))
@@ -729,13 +729,41 @@ def main(vt_api_key: str = ""):
     sys.exit(1)
 
 
-def start_ui():
+def start_ui() -> int:
     """start a curses ui"""
-    pass
+    # raise NotImplementedError
+    print(textwrap.dedent("""
+        @@&@@                                                              @@@@,
+      &&.,,. &&&&&&%&%&&&&&&&&(..                      ..&&%&%&&&&&&&&%&&&&  .,#&%
+        ,,/%#/(....,.,/(.  ...*,,%%                  %#*,..,... // ...,..//#%*,
+             @@@@@@#((      #(/    @@  %@@@@@@@@  /@@    #(,      ##@@&@@@@
+                   %@&    #(  .      @@/********@@(        (((    @@
+                     .@@((    ,    @@.,*,,****,,,,(@@      . .#(@@
+                        @@@@@@&@@@@@@,,*,,,,,,,,,,(@@@@@@@@&@@@@
+                                   @@**/*/*,**///*(@@
+                                   @@.****/*//,*,*/@@
+                                     @&//*////,/&&(
+                                       ,*,,,,,,,
+
+    Loading database ...
+    """))
+    return 0
 
 
 def start_daemon():
     """startup picosnitch as a daemon and ensure only one instance is running"""
+    readme = textwrap.dedent(f"""    picosnitch is a small program to monitor your system for processes that
+    make network connections - https://github.com/elesiuta/picosnitch
+
+    picosnitch comes with ABSOLUTELY NO WARRANTY. This is free software, and you
+    are welcome to redistribute it under certain conditions. See the GNU General
+    Public Licence for details.
+
+    usage: picosnitch start|stop|restart|view|version
+                        |    |      |      |     |--> {VERSION}
+                        |    |      |      |--> curses ui
+                        |____|______|--> daemon controls
+    """)
     if sys.prefix != sys.base_prefix:
             print("Warning: picosnitch is running in a virtual environment, notifications may not function", file=sys.stderr)
     if os.name == "posix":
@@ -754,7 +782,7 @@ def start_daemon():
                 if not tmp_snitch["Config"]["VT API key"] and "Template" in tmp_snitch:
                     tmp_snitch["Config"]["VT API key"] = input("Enter your VirusTotal API key (optional)\n>>> ")
             except Exception as e:
-                print(type(e).__name__ + str(e.args))
+                print(type(e).__name__ + str(e.args), file=sys.stderr)
                 sys.exit(1)
             class PicoDaemon(Daemon):
                 def run(self):
@@ -766,15 +794,17 @@ def start_daemon():
                 daemon.stop()
             elif sys.argv[1] == "restart":
                 daemon.restart()
+            elif sys.argv[1] == "view":
+                return start_ui()
             elif sys.argv[1] == "version":
-                print(VERSION)
+                print(f"version: {VERSION} ({__file__})")
                 return 0
             else:
-                print("usage: picosnitch start|stop|restart|version|view")
+                print(readme)
                 return 0
             return 0
         else:
-            print("usage: picosnitch start|stop|restart|version|view")
+            print(readme)
             return 0
     else:
         print("Did not detect a supported operating system", file=sys.stderr)
