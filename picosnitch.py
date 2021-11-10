@@ -337,6 +337,7 @@ def merge_commands(cmd: str, cmd_list: list) -> None:
     cmd_list.append(cmd)
 
 
+@functools.lru_cache()
 def get_sha256(exe: str) -> str:
     """get sha256 of process executable"""
     try:
@@ -356,34 +357,35 @@ def get_sha256(exe: str) -> str:
 #     return proc
 
 
-def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, check_pending: bool = False):
+def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, check_pending: bool = False) -> None:
     """get virustotal results from subprocess and update snitch"""
     if check_pending:
-        for exe in snitch["Processes"]:
-            for sha256 in snitch["Processes"][exe]["results"]:
-                if snitch["Processes"][exe]["results"][sha256] == "Pending":
+        for exe in snitch["SHA256"]:
+            for sha256 in snitch["SHA256"][exe]:
+                if snitch["SHA256"][exe][sha256] == "VT Pending":
                     proc = {"exe": exe}
                     q_vt.put(pickle.dumps((proc, sha256)))
     else:
         while not q_vt.empty():
             proc, sha256, result, suspicious = pickle.loads(q_vt.get())
-            snitch["Processes"][proc["exe"]]["results"][sha256] = result
-            if suspicious:
-                toast("Suspicious results for " + proc["name"])
+            snitch["SHA256"][proc["exe"]][sha256] = result
+            q_out.put(pickle.dumps({"type": "vt", "name": proc["name"], "exe": proc["exe"], "sha256": sha256, "result": result, "suspicious": suspicious}))
+            # if suspicious:
+            #     toasts.append("Suspicious results for " + proc["name"])
 
 
-def safe_q_get(p: multiprocessing.Process, q: multiprocessing.Queue):
-    """prevent the asking subprocess from hanging on the next request/result check if func_subprocess dies"""
-    parent_process = multiprocessing.parent_process()
-    while True:
-        try:
-            if not parent_process.is_alive() or p.is_alive():
-                # send signal so handler is called if registered for asking subprocess
-                os.kill(os.getpid(), signal.SIGTERM)
-            return q.get(block=True, timeout=15)
-        except queue.Empty:
-            # try again until something dies or gets results
-            pass
+# def safe_q_get(p: multiprocessing.Process, q: multiprocessing.Queue):
+#     """prevent the asking subprocess from hanging on the next request/result check if func_subprocess dies"""
+#     parent_process = multiprocessing.parent_process()
+#     while True:
+#         try:
+#             if not parent_process.is_alive() or p.is_alive():
+#                 # send signal so handler is called if registered for asking subprocess
+#                 os.kill(os.getpid(), signal.SIGTERM)
+#             return q.get(block=True, timeout=15)
+#         except queue.Empty:
+#             # try again until something dies or gets results
+#             pass
 
 
 def initial_poll(snitch: dict) -> list:
@@ -402,8 +404,9 @@ def initial_poll(snitch: dict) -> list:
     for conn in current_connections:
         try:
             if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
-                proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid"], ad_value="")
+                proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid", "uids"], ad_value="")
                 proc["cmdline"] = shlex.join(proc["cmdline"])
+                proc["uid"] = proc["uids"][0]
                 proc["ip"] = conn.raddr.ip
                 proc["port"] = conn.raddr.port
                 # _ = current_processes.pop(proc["exe"], 0)
@@ -423,52 +426,70 @@ def initial_poll(snitch: dict) -> list:
     return update_snitch_pending
 
 
-def update_snitch_wrapper(snitch: dict, update_snitch_pending: list):
-    """loop over update_snitch() with pending update list"""
+# def update_snitch_wrapper(snitch: dict, ):
+#     """loop over update_snitch() with pending update list"""
+#     try:
+#         # q_sha_pending.put(pickle.dumps(proc["exe"]))
+#         # sha256 = pickle.loads(safe_q_get(q_sha_results, q_updater_term))
+#         update_snitch(snitch, proc, ctime)
+#     except Exception as e:
+#         error = "Update snitch " + type(e).__name__ + str(e.args) + str(proc)
+#         snitch["Errors"].append(ctime + " " + error)
+#         toast("Update snitch error: " + error, file=sys.stderr)
+
+
+def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue) -> None:
+    """update the snitch with sha data, update sql with conns (todo), return list of notifications"""
     ctime = time.ctime()
-    for proc in update_snitch_pending:
-        try:
-            # q_sha_pending.put(pickle.dumps(proc["exe"]))
-            # sha256 = pickle.loads(safe_q_get(q_sha_results, q_updater_term))
-            update_snitch(snitch, proc, ctime)
-        except Exception as e:
-            error = "Update snitch " + type(e).__name__ + str(e.args) + str(proc)
-            snitch["Errors"].append(ctime + " " + error)
-            toast("Update snitch error: " + error, file=sys.stderr)
+    for proc in new_processes:
+        proc = pickle.loads(proc)
+        sha256 = get_sha256(proc["exe"])
+        if proc["exe"] in snitch["SHA256"]:
+            if sha256 not in snitch["SHA256"][proc["exe"]]:
+                snitch["SHA256"][proc["exe"]][sha256] = "VT Pending"
+                q_vt.put(pickle.dumps((proc, sha256)))
+                q_out.put(pickle.dumps({"type": "sha", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
+        else:
+            snitch["SHA256"][proc["exe"]] = {sha256: "VT Pending"}
+            q_vt.put(pickle.dumps((proc, sha256)))
+            q_out.put(pickle.dumps({"type": "sha", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
 
 
-def update_snitch(snitch: dict, proc: dict, ctime: str) -> None:
+def update_snitch_proc_and_notify(snitch: dict, new_processes: list[bytes]) -> None:
     """update the snitch with data from queues and create a notification if new entry"""
     # Prevent overwriting the snitch before this function completes in the event of a termination signal
     snitch["WRITELOCK"] = True
-    # Get DNS reverse name and reverse the name for sorting
-    # reversed_dns = reverse_domain_name(reverse_dns_lookup(conn["ip"]))
-    # Omit fields from log
-    # if True or not snitch["Config"]["Log command lines"]:
-    #     proc["cmdline"] = ""
-    # if True or not snitch["Config"]["Log remote address"]:
-    #     reversed_dns = ""
-    # Update Latest Entries
-    if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
-        snitch["Latest Entries"].append(ctime + " " + proc["name"] + " - " + proc["exe"])
-    # Update Names
-    if proc["name"] in snitch["Names"]:
-        if proc["exe"] not in snitch["Names"][proc["name"]]:
-            snitch["Names"][proc["name"]].append(proc["exe"])
-            toast("New executable detected for " + proc["name"] + ": " + proc["exe"])
-    else: # elif conn["ip"] or conn["port"] >= 0:  # port 0 is a conn where port wasn't detected, -1 is proc without conn detected
-        snitch["Names"][proc["name"]] = [proc["exe"]]
-        toast("First network connection detected for " + proc["name"])
+    ctime = time.ctime()
+    for proc in new_processes:
+        proc = pickle.loads(proc)
+        if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
+            snitch["Latest Entries"].append(ctime + " " + proc["name"] + " - " + proc["exe"])
+        if proc["name"] in snitch["Names"]:
+            if proc["exe"] not in snitch["Names"][proc["name"]]:
+                snitch["Names"][proc["name"]].append(proc["exe"])
+                toast("New executable detected for " + proc["name"] + ": " + proc["exe"])
+        else:
+            snitch["Names"][proc["name"]] = [proc["exe"]]
+            toast("First network connection detected for " + proc["name"])
+        if proc["exe"] in snitch["Processes"]:
+            if proc["name"] not in snitch["Processes"][proc["exe"]]:
+                snitch["Processes"][proc["exe"]].append(proc["name"])
+                toast("New name detected for " + proc["exe"] + ": " + proc["name"])
+        else:
+            snitch["Processes"][proc["exe"]] = [proc["name"]]
+    _ = snitch.pop("WRITELOCK")
+
+    # might be useful for sql stuff
+        # Get DNS reverse name and reverse the name for sorting
+        # reversed_dns = reverse_domain_name(reverse_dns_lookup(conn["ip"]))
+        # Omit fields from log
+        # if True or not snitch["Config"]["Log command lines"]:
+        #     proc["cmdline"] = ""
+        # if True or not snitch["Config"]["Log remote address"]:
+        #     reversed_dns = ""
+        # Update Latest Entries
     # elif not snitch["Config"]["Only log connections"]:
     #     snitch["Names"][proc["name"]] = [proc["exe"]]
-    # Update Processes
-    if proc["exe"] in snitch["Processes"]:
-        if proc["name"] not in snitch["Processes"][proc["exe"]]:
-            snitch["Processes"][proc["exe"]].append(proc["name"])
-            toast("New name detected for " + proc["exe"] + ": " + proc["name"])
-    else:
-        snitch["Processes"][proc["exe"]] = [proc["name"]]
-        snitch["SHA256"][proc["exe"]] = {}
         # snitch["Processes"][proc["exe"]] = {
         #     "name": proc["name"],
         #     "cmdlines": [proc["cmdline"]],
@@ -512,7 +533,6 @@ def update_snitch(snitch: dict, proc: dict, ctime: str) -> None:
     #     if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
     #         snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, proc["exe"]]
     # Unlock the snitch for writing
-    _ = snitch.pop("WRITELOCK")
 
 
 def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
@@ -534,7 +554,8 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     # update snitch with initial running processes and connections
     # if init_scan:
         # get_vt_results(snitch, q_vt_pending, True)
-    update_snitch_wrapper(snitch, update_snitch_pending)
+    update_snitch_proc_and_notify(snitch, [pickle.dumps(proc) for proc in update_snitch_pending])
+    new_processes = []
     new_processes_q = []
     # known_pids[p_virustotal.pid] = {"name": p_virustotal.name, "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": p_virustotal.pid}
     # known_pids[os.getpid()] = {"name": "snitchupdater", "exe": __file__, "cmdline": shlex.join(sys.argv), "pid": os.getpid()}
@@ -563,26 +584,35 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
         # time.sleep(5)
         snitch_pipe.poll(timeout=5)
         while snitch_pipe.poll():
-            new_processes_q.append(snitch_pipe.recv_bytes())
+            new_processes.append(snitch_pipe.recv_bytes())
         # process the list and update snitch
-        new_processes = [pickle.loads(proc) for proc in new_processes_q]
-        update_snitch_wrapper(snitch, new_processes)
+        update_snitch_proc_and_notify(snitch, new_processes)
         # get_vt_results(snitch, q_vt_results, False)
-        del new_processes
+        new_processes_q += new_processes
+        new_processes = []
         while not q_in.empty():
-            msg: str = q_in.get()
-            if msg == "ready":
+            msg: dict = pickle.loads(q_in.get())
+            if msg["type"] == "ready":
                 for proc in new_processes_q:
                     sql_pipe.send_bytes(proc)
-                del new_processes_q
                 new_processes_q = []
-            elif msg.startswith("sha256"):
-                pass # either split on \0, or just use index and put exe path last
-            elif msg.startswith("vt"):
-                pass
-            else:
-                # error
-                pass
+                break
+            elif msg["type"] == "sha256":
+                if msg["exe"] in snitch["SHA256"]:
+                    if msg["sha256"] not in snitch["SHA256"][proc["exe"]]:
+                        snitch["SHA256"][msg["exe"]][msg["sha256"]] = "VT Pending"
+                        toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
+                else:
+                    snitch["SHA256"][msg["exe"]] = {msg["sha256"]: "VT Pending"}
+                    toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
+            elif msg["type"] == "vt":
+                if msg["exe"] in snitch["SHA256"]:
+                    if msg["sha256"] not in snitch["SHA256"][proc["exe"]]:
+                        snitch["SHA256"][msg["exe"]][msg["sha256"]] = msg["result"]
+                else:
+                    snitch["SHA256"][msg["exe"]] = {msg["sha256"]: msg["result"]}
+                if msg["suspicious"]:
+                    toast("Suspicious VT results for " + msg["name"])
         # write snitch
         if time.time() - last_write > 30:
             new_size = sys.getsizeof(pickle.dumps(snitch))
@@ -592,19 +622,10 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                 write(snitch)
 
 
-def sql_subprocess(init_pickle, p_sha, p_virustotal, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
+def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
     """updates sqlite db with new connections and reports back to updater_subprocess if needed"""
     import sqlite3
     parent_process = multiprocessing.parent_process()
-    # easier to update a copy of snitch here than trying to keep them in sync (just need to track sha256 and vt_results after this)
-    snitch, update_snitch_pending = pickle.loads(init_pickle)
-    ctime = time.ctime()
-    for proc in update_snitch_pending:
-        try:
-            update_snitch(snitch, proc, ctime)
-        except Exception as e:
-            error = "SQL update snitch " + type(e).__name__ + str(e.args) + str(proc)
-            q_error.put(error)
     # init sql connection
     if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
         home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
@@ -612,6 +633,10 @@ def sql_subprocess(init_pickle, p_sha, p_virustotal, sql_pipe, q_updater_in, q_e
         home_dir = os.path.expanduser("~")
     file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.db")
     con = sqlite3.connect(file_path)
+    # easier to update a copy of snitch here than trying to keep them in sync (just need to track sha256 and vt_results after this)
+    snitch, update_snitch_pending = pickle.loads(init_pickle)
+    get_vt_results(snitch, p_virustotal.q_out, q_updater_in, True)
+    update_snitch_sha_and_sql(snitch, [pickle.dumps(proc) for proc in update_snitch_pending], p_virustotal.q_in, q_updater_in)
     # set signals to close sql connection on termination (probably not necessary unless wanting to commit too, should it?)
     signal.signal(signal.SIGTERM, lambda *args: con.close())
     signal.signal(signal.SIGINT, lambda *args: con.close())
@@ -626,9 +651,9 @@ def sql_subprocess(init_pickle, p_sha, p_virustotal, sql_pipe, q_updater_in, q_e
             while sql_pipe.poll(timeout=0.1):  # make sure updater is done
                 new_processes_q.append(sql_pipe.recv_bytes())
             new_processes = [pickle.loads(proc) for proc in new_processes_q]
-            # iterate through them, adding each to db (if logging enabled)
-            # don't need to update snitch completely, just check for new processes, new sha, new vt
-            # put them in q_update_in
+            update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
+            get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
+            del new_processes
         except Exception as e:
             error = "SQL " + type(e).__name__ + str(e.args)
             q_error.put(error)
@@ -759,17 +784,17 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     sql_recv_pipe, sql_send_pipe = multiprocessing.Pipe(duplex=False)
     q_error = multiprocessing.Queue()
     p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess, init_args=(snitch_monitor_pipe, q_error,))
-    p_sha = ProcessManager(name="snitchsha", target=func_subprocess, init_args=(functools.lru_cache(get_sha256),))
+    # p_sha = ProcessManager(name="snitchsha", target=func_subprocess, init_args=(functools.lru_cache(get_sha256),))
     p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess, init_args=(config,))
     p_updater = ProcessManager(name="snitchupdater", target=updater_subprocess,
                                init_args=(snitch_updater_pickle, snitch_updater_pipe, sql_send_pipe, q_error,)
                               )
     p_sql = ProcessManager(name="snitchsql", target=sql_subprocess,
-                           init_args=(snitch_updater_pickle, p_sha, p_virustotal, sql_recv_pipe, p_updater.q_in, q_error,)
+                           init_args=(snitch_updater_pickle, p_virustotal, sql_recv_pipe, p_updater.q_in, q_error,)
                           )
     del snitch_updater_pickle
     # set signals
-    subprocesses = [p_monitor, p_sha, p_virustotal, p_updater, p_sql]
+    subprocesses = [p_monitor, p_virustotal, p_updater, p_sql]
     signal.signal(signal.SIGINT, lambda *args: [p.terminate() for p in subprocesses])
     signal.signal(signal.SIGTERM, lambda *args: [p.terminate() for p in subprocesses])
     # watch subprocesses
