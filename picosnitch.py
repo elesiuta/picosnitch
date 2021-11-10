@@ -27,6 +27,7 @@ import importlib
 import multiprocessing
 import os
 import pickle
+import pwd
 import queue
 import shlex
 import signal
@@ -213,7 +214,7 @@ def read() -> dict:
             "Keep logs (days)": 365,
             "Log command lines": True,
             "Log remote address": True,
-            "Log ignore": [80, "chrome", "firefox"],
+            "Log ignore": [],
             "VT API key": "",
             "VT file upload": False,
             "VT limit request": 15
@@ -389,7 +390,7 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
             snitch["SHA256"][proc["exe"]] = {sha256: "VT Pending"}
             q_vt.put(pickle.dumps((proc, sha256)))
             q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
-        # filter from logs (may remove feature)
+        # filter from logs
         if not snitch["Config"]["Log command lines"]:
             proc["cmdline"] = ""
         if snitch["Config"]["Log remote address"]:
@@ -704,9 +705,12 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     # init and splash screen
     curses.cbreak()
     curses.noecho()
+    curses.curs_set(0)
     curses.start_color()
     curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLUE)
     curses.init_pair(2, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+    curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_WHITE)
+    curses.init_pair(4, curses.COLOR_WHITE, curses.COLOR_MAGENTA)
     stdscr.clear()
     lines = splash.splitlines()
     for i in range(len(lines)):
@@ -719,76 +723,159 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
         else:
             stdscr.addstr(i, 0, lines[i])
     stdscr.refresh()
+    time.sleep(0.5)
     # screens
-    time_period = [""]
-    screen_list = ["Applications", "Host Names", "Host IPs", "Ports", "Users"]
-    screen_dict = {}
-    screen_queries = {}
-    screen_subqueries = {}
+    time_i = 0
+    time_period = ["All", "1 minute", "3 minutes", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "1 hour", "3 hours", "6 hours", "12 hours", "1 day", "3 days", "7 days", "30 days", "365 days"]
+    pri_i = 0
+    screens = ["Applications", "Host Names", "Host IPs", "Ports", "Users"]
+    p_names = ["Application", "Host Name", "Host IP", "Port", "User"]
+    p_col = ["exe", "domain", "ip", "port", "uid"]
+    sec_i = 0
+    s_names = ["Application", "Name", "Command", "SHA256", "Connection Time", "Host Name", "Host IP", "Port", "User"]
+    s_col = ["exe", "name", "cmdline", "sha256", "contime", "domain", "ip", "port", "uid"]
     # queries (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer)
     cur = con.cursor()
-    screen_queries["Applications"] = "SELECT exe, COUNT(exe) as Count FROM connections GROUP BY exe"
-    screen_queries["Host Names"] = "SELECT domain, COUNT(domain) as Count FROM connections GROUP BY domain"
-    screen_queries["Host IPs"] = "SELECT ip, COUNT(ip) as Count FROM connections GROUP BY ip"
-    screen_queries["Ports"] = "SELECT port, COUNT(port) as Count FROM connections GROUP BY port"
-    screen_queries["Users"] = "SELECT uid, COUNT(uid) as Count FROM connections GROUP BY uid"
-    for query in screen_queries:
-        cur.execute(screen_queries[query])
-        screen_dict[query] = cur.fetchall()
     # ui loop
-    cursor = 1
-    screen_i = 0
+    max_y, max_x = stdscr.getmaxyx()
+    first_line = 4
+    cursor, line = first_line, first_line
+    primary_value = ""
     toggle_subquery = False
+    is_subquery = False
+    update_query = True
+    execute_query = True
+    current_query, current_screen = "", [""]
     while True:
+        # adjust cursor
+        pri_i %= len(p_col)
+        sec_i %= len(s_col)
+        time_i %= len(time_period)
+        cursor %= line
+        if cursor < first_line:
+            cursor = first_line
+        # generate screen
+        if update_query:
+            if time_i == 0:
+                time_query = ""
+            else:
+                if is_subquery:
+                    time_query = f" AND contime > datetime(\"now\", \"localtime\",\"-{time_period[time_i]}\")"
+                else:
+                    time_query = f" WHERE contime > datetime(\"now\", \"localtime\", \"-{time_period[time_i]}\")"
+            if is_subquery:
+                current_query = f"SELECT {s_col[sec_i]}, COUNT({s_col[sec_i]}) as Count FROM connections WHERE {p_col[pri_i]} IS \"{primary_value}\"{time_query} GROUP BY {s_col[sec_i]}"
+            else:
+                current_query = f"SELECT {p_col[pri_i]}, COUNT({p_col[pri_i]}) as Count FROM connections{time_query} GROUP BY {p_col[pri_i]}"
+            update_query = False
+        if execute_query:
+            cur.execute(current_query)
+            current_screen = cur.fetchall()
+            execute_query = False
+        title_bar = f"<- {screens[pri_i-1]: <{curses.COLS//3 - 2}}{screens[pri_i]: ^{curses.COLS//3 - 2}}{screens[(pri_i+1) % len(screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
+        help_bar = f"space/enter: toggle subquery  t: cycle time period  s: cycle subquery column  r: refresh data  q: quit {' ': <{curses.COLS}}"
+        if is_subquery:
+            status_bar = f"picosnitch {VERSION}\t time period: {time_period[time_i]}\t {p_names[pri_i].lower()}: {primary_value}{' ': <{curses.COLS}}"
+            column_names = f"{s_names[sec_i]: <{curses.COLS*3//4}}{'Entries': <{curses.COLS//4+3}}"
+        else:
+            status_bar = f"picosnitch {VERSION}\t time period: {time_period[time_i]}{' ': <{curses.COLS}}"
+            column_names = f"{p_names[pri_i]: <{curses.COLS*3//4}}{'Entries': <{curses.COLS//4+3}}"
+        # display screen
         stdscr.clear()
-        stdscr.attrset(curses.color_pair(0) | curses.A_BOLD)
-        stdscr.addstr("{prev: <{width}}{curr: ^{width}}{next: >{width}}".format(width=curses.COLS//3, prev=screen_list[screen_i-1], curr=screen_list[screen_i], next=screen_list[(screen_i+1) % len(screen_list)]))
-        line = 1
+        stdscr.attrset(curses.color_pair(4) | curses.A_BOLD)
+        stdscr.addstr(0, 0, status_bar)
+        stdscr.addstr(1, 0, help_bar)
+        stdscr.addstr(2, 0, title_bar)
+        stdscr.addstr(3, 0, column_names)
+        line = first_line
         offset = max(0, cursor - curses.LINES + 3)
-        for name, value in screen_dict[screen_list[screen_i]]:
+        for name, value in current_screen:
             if line == cursor:
                 stdscr.attrset(curses.color_pair(1) | curses.A_BOLD)
                 if toggle_subquery:
-                    toggle_subquery = False
+                    if is_subquery:
+                        is_subquery = False
+                        update_query = True
+                        execute_query = True
+                    else:
+                        primary_value = name
+                        is_subquery = True
+                        update_query = True
+                        execute_query = True
+                    break
             else:
                 stdscr.attrset(curses.color_pair(0))
             if 0 <= line - offset < curses.LINES - 1:
-                stdscr.addstr(line - offset, 0, "%s     %s" % (name, value))
+                # special cases (cmdline null chars, uid)
+                if type(name) == str:
+                    name = name.replace("\0", "")
+                elif (not is_subquery and p_col[pri_i] == "uid") or (is_subquery and s_col[sec_i] == "uid"):
+                    name = f"{pwd.getpwuid(name).pw_name} ({name})"
+                stdscr.addstr(line - offset, 0, f"{name: <{curses.COLS*3//4}}{value: <{curses.COLS-(curses.COLS*3//4)}}")
             line += 1
         stdscr.refresh()
+        if toggle_subquery:
+            toggle_subquery = False
+            continue
+        # user input
         ch = stdscr.getch()
         if ch == ord("\n") or ch == ord(" "):
-            pass
+            toggle_subquery = True
         elif ch == curses.KEY_BACKSPACE:
-            toggle_subquery = False
+            is_subquery = False
+            update_query = True
+            execute_query = True
         elif ch == ord("r"):
-            pass # refresh
+            execute_query = True
+        elif ch == ord("s"):
+            sec_i += 1
+            update_query = True
+            execute_query = True
+        elif ch == ord("S"):
+            sec_i -= 1
+            update_query = True
+            execute_query = True
+        elif ch == ord("t"):
+            time_i += 1
+            update_query = True
+            execute_query = True
+        elif ch == ord("T"):
+            time_i -= 1
+            update_query = True
+            execute_query = True
         elif ch == curses.KEY_UP:
             cursor -= 1
-            if cursor <= 0:
+            if cursor < first_line:
                 cursor = -1
         elif ch == curses.KEY_DOWN:
             cursor += 1
         elif ch == curses.KEY_PPAGE:
             cursor -= curses.LINES
-            if cursor < 1:
-                cursor = 1
+            if cursor < first_line:
+                cursor = first_line
         elif ch == curses.KEY_NPAGE:
             cursor += curses.LINES
             if cursor >= line:
                 cursor = line - 1
         elif ch == curses.KEY_LEFT:
-            screen_i -= 1
-            screen_i %= len(screen_list)
+            pri_i -= 1
+            is_subquery = False
+            update_query = True
+            execute_query = True
         elif ch == curses.KEY_RIGHT:
-            screen_i += 1
-            screen_i %= len(screen_list)
+            pri_i += 1
+            is_subquery = False
+            update_query = True
+            execute_query = True
+        elif ch == curses.KEY_RESIZE and curses.is_term_resized(max_y, max_x):
+            max_y, max_x = stdscr.getmaxyx()
+            stdscr.clear()
+            curses.resizeterm(max_y, max_x)
+            stdscr.refresh()
+            cursor = first_line
         elif ch == 27 or ch == ord("q"):
             con.close()
             return 0
-        cursor %= line
-        if cursor == 0:
-            cursor = 1
 
 def start_ui() -> int:
     """start a curses ui"""
