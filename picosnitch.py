@@ -30,6 +30,7 @@ import queue
 import shlex
 import signal
 import socket
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -373,9 +374,10 @@ def initial_poll(snitch: dict) -> list:
     return initial_processes
 
 
-def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue) -> None:
+def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, con: sqlite3.Connection) -> None:
     """update the snitch with sha data, update sql with conns (todo), return list of notifications"""
     ctime = time.ctime()
+    cur = con.cursor()
     for proc in new_processes:
         proc = pickle.loads(proc)
         sha256 = get_sha256(proc["exe"])
@@ -388,6 +390,11 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
             snitch["SHA256"][proc["exe"]] = {sha256: "VT Pending"}
             q_vt.put(pickle.dumps((proc, sha256)))
             q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
+        domain = reverse_domain_name(reverse_dns_lookup(proc["ip"]))
+        cur.execute(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ''',
+            (proc["exe"], proc["name"], proc["cmdline"], sha256, ctime, domain, proc["ip"], proc["port"], proc["uid"])
+        )
+    con.commit()
 
 
 def update_snitch_proc_and_notify(snitch: dict, new_processes: list[bytes]) -> None:
@@ -515,14 +522,14 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                 break
             elif msg["type"] == "sha256":
                 if msg["exe"] in snitch["SHA256"]:
-                    if msg["sha256"] not in snitch["SHA256"][proc["exe"]]:
+                    if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
                         snitch["SHA256"][msg["exe"]][msg["sha256"]] = "VT Pending"
                         toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
                 else:
                     snitch["SHA256"][msg["exe"]] = {msg["sha256"]: "VT Pending"}
             elif msg["type"] == "vt":
                 if msg["exe"] in snitch["SHA256"]:
-                    if msg["sha256"] not in snitch["SHA256"][proc["exe"]]:
+                    if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
                         toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
                     snitch["SHA256"][msg["exe"]][msg["sha256"]] = msg["result"]
                 else:
@@ -549,10 +556,16 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
         home_dir = os.path.expanduser("~")
     file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.db")
     con = sqlite3.connect(file_path)
+    cur = con.cursor()
+    cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
+    if cur.fetchone()[0] !=1:
+        cur.execute(''' CREATE TABLE connections
+                        (exe text, name text, cmdline text, sha256 text, ctime text, domain text, ip text, port integer, uid integer) ''')
+    con.commit()
     # easier to update a copy of snitch here than trying to keep them in sync (just need to track sha256 and vt_results after this)
     snitch, initial_processes = pickle.loads(init_pickle)
     get_vt_results(snitch, p_virustotal.q_out, q_updater_in, True)
-    update_snitch_sha_and_sql(snitch, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in)
+    update_snitch_sha_and_sql(snitch, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in, con)
     # set signals to close sql connection on termination (probably not necessary unless wanting to commit too, should it?)
     signal.signal(signal.SIGTERM, lambda *args: con.close())
     signal.signal(signal.SIGINT, lambda *args: con.close())
@@ -566,7 +579,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
             sql_pipe.poll(timeout=15)  # updater should be able to respond within this much time
             while sql_pipe.poll(timeout=0.1):  # make sure updater is done
                 new_processes.append(sql_pipe.recv_bytes())
-            update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
+            update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in, con)
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
             del new_processes
         except Exception as e:
@@ -731,19 +744,19 @@ def main(vt_api_key: str = ""):
 
 def start_ui() -> int:
     """start a curses ui"""
-    # raise NotImplementedError
+    raise NotImplementedError
     print(textwrap.dedent("""
         @@&@@                                                              @@@@,
       &&.,,. &&&&&&%&%&&&&&&&&(..                      ..&&%&%&&&&&&&&%&&&&  .,#&%
         ,,/%#/(....,.,/(.  ...*,,%%                  %#*,..,... // ...,..//#%*,
              @@@@@@#((      #(/    @@  %@@@@@@@@  /@@    #(,      ##@@&@@@@
-                   %@&    #(  .      @@/********@@(        (((    @@
-                     .@@((    ,    @@.,*,,****,,,,(@@      . .#(@@
-                        @@@@@@&@@@@@@,,*,,,,,,,,,,(@@@@@@@@&@@@@
-                                   @@**/*/*,**///*(@@
-                                   @@.****/*//,*,*/@@
-                                     @&//*////,/&&(
-                                       ,*,,,,,,,
+                   %@&    #(  .      @@\u001b[33m/********\033[0m@@(        (((    @@
+                     .@@((    ,    @@\u001b[33m.,*,,****,,,,\033[0m(@@      . .#(@@
+                        @@@@@@&@@@@@@\u001b[33m,,*,,,,,,,,,,\033[0m(@@@@@@@@&@@@@
+                                   @@\u001b[33m**/*/*,**///*\033[0m(@@
+                                   @@\u001b[33m.****/*//,*,*\033[0m/@@
+                                     @&\u001b[33m//*////,/\033[0m&&(
+                                       ,*\u001b[33m,,,,,,\033[0m,
 
     Loading database ...
     """))
