@@ -604,11 +604,11 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                         toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
                 else:
                     snitch["SHA256"][msg["exe"]] = {msg["sha256"]: "VT Pending"}
-                    toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
             elif msg["type"] == "vt":
                 if msg["exe"] in snitch["SHA256"]:
                     if msg["sha256"] not in snitch["SHA256"][proc["exe"]]:
-                        snitch["SHA256"][msg["exe"]][msg["sha256"]] = msg["result"]
+                        toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
+                    snitch["SHA256"][msg["exe"]][msg["sha256"]] = msg["result"]
                 else:
                     snitch["SHA256"][msg["exe"]] = {msg["sha256"]: msg["result"]}
                 if msg["suspicious"]:
@@ -645,12 +645,11 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
         if not parent_process.is_alive():
             return 0
         try:
-            q_updater_in.put("ready")  # should I make sure this is empty first? which side, or both?
-            new_processes_q = []
+            q_updater_in.put(pickle.dumps({"type": "ready"}))  # should I make sure this is empty first? which side, or both?
+            new_processes = []
             sql_pipe.poll(timeout=15)  # updater should be able to respond within this much time
             while sql_pipe.poll(timeout=0.1):  # make sure updater is done
-                new_processes_q.append(sql_pipe.recv_bytes())
-            new_processes = [pickle.loads(proc) for proc in new_processes_q]
+                new_processes.append(sql_pipe.recv_bytes())
             update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
             del new_processes
