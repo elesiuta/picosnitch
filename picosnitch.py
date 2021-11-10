@@ -365,7 +365,9 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
             q_vt.put(pickle.dumps((proc, sha256)))
             q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
         # filter from logs
-        if not snitch["Config"]["Log command lines"]:
+        if snitch["Config"]["Log command lines"]:
+            proc["cmdline"] = proc["cmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").replace("\0", "")
+        else:
             proc["cmdline"] = ""
         if snitch["Config"]["Log remote address"]:
             domain = reverse_dns_lookup(proc["ip"])
@@ -376,7 +378,6 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
         cur.execute(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ''',
             (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
         )
-    # todo: check disk writes and memory usage to adjust commit frequency if needed
     con.commit()
 
 
@@ -486,7 +487,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     else:
         home_dir = os.path.expanduser("~")
     file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.db")
-    con = sqlite3.connect(file_path)
+    con = sqlite3.connect(file_path, timeout=300)
     cur = con.cursor()
     cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
     if cur.fetchone()[0] !=1:
@@ -686,19 +687,18 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     curses.init_pair(2, curses.COLOR_YELLOW, curses.COLOR_BLACK)
     curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_WHITE)
     curses.init_pair(4, curses.COLOR_WHITE, curses.COLOR_MAGENTA)
+    splash_lines = splash.splitlines()
     stdscr.clear()
-    lines = splash.splitlines()
-    for i in range(len(lines)):
-        if "\u001b[33m" in lines[i]:
-            part1 = lines[i].split("\u001b[33m")
+    for i in range(len(splash_lines)):
+        if "\u001b[33m" in splash_lines[i]:
+            part1 = splash_lines[i].split("\u001b[33m")
             part2 = part1[1].split("\033[0m")
             stdscr.addstr(i, 0, part1[0])
             stdscr.addstr(i, len(part1[0]), part2[0], curses.color_pair(2))
             stdscr.addstr(i, len(part1[0]) + len(part2[0]), part2[1])
         else:
-            stdscr.addstr(i, 0, lines[i])
+            stdscr.addstr(i, 0, splash_lines[i])
     stdscr.refresh()
-    time.sleep(0.5)
     # screens from queries (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer)
     time_i = 0
     time_period = ["All", "1 minute", "3 minutes", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "1 hour", "3 hours", "6 hours", "12 hours", "1 day", "3 days", "7 days", "30 days", "365 days"]
@@ -742,7 +742,25 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                 current_query = f"SELECT {p_col[pri_i]}, COUNT({p_col[pri_i]}) as Count FROM connections{time_query} GROUP BY {p_col[pri_i]}"
             update_query = False
         if execute_query:
-            cur.execute(current_query)
+            while True:
+                try:
+                    cur.execute(current_query)
+                    break
+                except sqlite3.OperationalError:
+                    stdscr.clear()
+                    for i in range(len(splash_lines)):
+                        if "\u001b[33m" in splash_lines[i]:
+                            part1 = splash_lines[i].split("\u001b[33m")
+                            part2 = part1[1].split("\033[0m")
+                            stdscr.addstr(i, 0, part1[0])
+                            stdscr.addstr(i, len(part1[0]), part2[0], curses.color_pair(2))
+                            stdscr.addstr(i, len(part1[0]) + len(part2[0]), part2[1])
+                        else:
+                            stdscr.addstr(i, 0, splash_lines[i])
+                    stdscr.refresh()
+                except KeyboardInterrupt:
+                    con.close()
+                    return 0
             current_screen = cur.fetchall()
             execute_query = False
         title_bar = f"<- {screens[pri_i-1]: <{curses.COLS//3 - 2}}{screens[pri_i]: ^{curses.COLS//3 - 2}}{screens[(pri_i+1) % len(screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
@@ -867,18 +885,21 @@ def start_ui() -> int:
 
     Loading database ...
     """)
+    print(splash)
     # init sql connection
     if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
         home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
     else:
         home_dir = os.path.expanduser("~")
     file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.db")
-    con = sqlite3.connect(file_path)
+    con = sqlite3.connect(file_path, timeout=15)
     # check for table
     cur = con.cursor()
     cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
     if cur.fetchone()[0] !=1:
         raise Exception(f"Table 'connections' does not exist in {file_path}")
+    con.close()
+    con = sqlite3.connect(file_path, timeout=1)
     # start curses
     for err_count in reversed(range(30)):
         try:
