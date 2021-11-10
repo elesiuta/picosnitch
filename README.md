@@ -2,31 +2,22 @@
 - An ultra lightweight program for linux to monitor your system and notify you whenever it sees a new program that connects to the network
 - Or when the sha256 changes for one of these programs (can also check VirtusTotal)
 - And features a curses based UI for browsing past connections
-- Config and list of seen processes are stored in ~/.config/picosnitch/snitch.json
-- Connection log is stored in ~/.config/picosnitch/snitch.db
-- Error log is stored in ~/.config/picosnitch/error.log
 - Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
 # getting started
-## linux
+## installation
 - install from PyPI with  
 `pip3 install picosnitch[full] --upgrade --user`
 - depends on the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) (e.g. for Ubuntu)  
 `sudo apt install python3-bpfcc`
+## usage
 - run daemon with  
 `picosnitch start`
 - stop daemon with  
 `picosnitch stop`
 - view past connections with (does not matter whether daemon is running or not)  
 `picosnitch view`
-## building from source
-- install from source using python 3 with  
-`python setup.py install --user`
-- required dependencies (installed automatically from PyPI on setup if not already present)  
-`plyer psutil vt-py`
-- additional dependency ([requires manual installation]((https://github.com/iovisor/bcc/blob/master/INSTALL.md)))  
-`bcc`
-# configuration
-- stored in ~/.config/picosnitch/snitch.json
+## configuration
+- config and list of seen processes are stored in `~/.config/picosnitch/snitch.json`
 - stop picosnitch if it is currently running before making any edits otherwise your changes will be lost
 ```python
 {
@@ -47,3 +38,12 @@
   "SHA256": {} # Log of processes by executable containing sha256 hash(es) and VirusTotal results
 }
 ```
+- the connection log is stored in `~/.config/picosnitch/snitch.db`
+- the error log is stored in `~/.config/picosnitch/error.log`
+# building from source
+- install from source using python 3 with  
+`python setup.py install --user`
+- required dependencies (installed automatically from PyPI on setup if not already present)  
+`plyer psutil vt-py`
+- additional dependency ([requires manual installation]((https://github.com/iovisor/bcc/blob/master/INSTALL.md)))  
+`bcc`
