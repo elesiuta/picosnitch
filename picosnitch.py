@@ -272,7 +272,7 @@ def write_snitch_and_exit(snitch: dict, q_error: multiprocessing.Queue, snitch_p
     """write snitch one last time"""
     while not q_error.empty():
         error = q_error.get()
-        snitch["Errors"].append(time.ctime() + " " + error)
+        snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
         toast(error, file=sys.stderr)
     write(snitch)
     snitch_pipe.close()
@@ -290,38 +290,36 @@ def toast(msg: str, file=sys.stdout) -> None:
 def reverse_dns_lookup(ip: str) -> str:
     """do a reverse dns lookup, return original ip if fails"""
     try:
-        return socket.getnameinfo((ip, 0), 0)[0]
+        host = socket.getnameinfo((ip, 0), 0)[0]
+        return ".".join(reversed(host.split(".")))
     except Exception:
         return ip
 
 
-def reverse_domain_name(dns: str) -> str:
-    """reverse domain name, don't reverse if ip"""
-    try:
-        _ = ipaddress.ip_address(dns)
-        return dns
-    except ValueError:
-        return ".".join(reversed(dns.split(".")))
-
-
-def merge_commands(cmd: str, cmd_list: list) -> None:
-    """if there is a close match to cmd in cmd_list, replace it with a common pattern, otherwise append cmd to cmd_list"""
-    args = shlex.split(cmd)
-    for i in range(len(cmd_list)):  # cmds
-        i_args = shlex.split(cmd_list[i])
-        if len(args) == len(i_args) and all(len(args[a]) == len(i_args[a]) for a in range(len(args))):
-            new_args = []
-            for a in range(len(args)):  # args
-                new_arg = ""
-                for c in range(len(args[a])):  # chars
-                    if args[a][c] == i_args[a][c]:
-                        new_arg += args[a][c]
-                    else:
-                        new_arg += "*"
-                new_args.append(new_arg)
-            cmd_list[i] = shlex.join(new_args)
-            return
-    cmd_list.append(cmd)
+def command_summary(cmd_list: list) -> list:
+    """find common patterns in commands to create a summary list"""
+    summary = []
+    for cmd in cmd_list:
+        args = shlex.split(cmd)
+        found_match = False
+        for i in range(len(summary)):  # cmds
+            i_args = shlex.split(summary[i])
+            if len(args) == len(i_args) and all(len(args[a]) == len(i_args[a]) for a in range(len(args))):
+                found_match = True
+                new_args = []
+                for a in range(len(args)):  # args
+                    new_arg = ""
+                    for c in range(len(args[a])):  # chars
+                        if args[a][c] == i_args[a][c]:
+                            new_arg += args[a][c]
+                        else:
+                            new_arg += "*"
+                    new_args.append(new_arg)
+                summary[i] = shlex.join(new_args)
+                break
+        if not found_match:
+            summary.append(cmd)
+    return summary
 
 
 @functools.lru_cache()
@@ -352,7 +350,7 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiproces
 
 def initial_poll(snitch: dict) -> list:
     """poll initial processes and connections using psutil and queue for update_snitch()"""
-    ctime = time.ctime()
+    datetime = time.strftime("%Y-%m-%d %H:%M:%S")
     initial_processes = []
     current_connections = set(psutil.net_connections(kind="all"))
     for conn in current_connections:
@@ -371,13 +369,13 @@ def initial_poll(snitch: dict) -> list:
                 error += str(proc)
             else:
                 error += "{process no longer exists}"
-            snitch["Errors"].append(ctime + " " + error)
+            snitch["Errors"].append(datetime + " " + error)
     return initial_processes
 
 
 def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, con: sqlite3.Connection) -> None:
     """update the snitch with sha data, update sql with conns (todo), return list of notifications"""
-    ctime = time.ctime()
+    datetime = time.strftime("%Y-%m-%d %H:%M:%S")
     cur = con.cursor()
     for proc in new_processes:
         proc = pickle.loads(proc)
@@ -391,10 +389,19 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
             snitch["SHA256"][proc["exe"]] = {sha256: "VT Pending"}
             q_vt.put(pickle.dumps((proc, sha256)))
             q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
-        domain = reverse_domain_name(reverse_dns_lookup(proc["ip"]))
+        # filter from logs (may remove feature)
+        if not snitch["Config"]["Log command lines"]:
+            proc["cmdline"] = ""
+        if snitch["Config"]["Log remote address"]:
+            domain = reverse_dns_lookup(proc["ip"])
+        else:
+            domain, ip = "", ""
+        if proc["port"] in snitch["Config"]["Log ignore"] or proc["name"] in snitch["Config"]["Log ignore"]:
+            continue
         cur.execute(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ''',
-            (proc["exe"], proc["name"], proc["cmdline"], sha256, ctime, domain, proc["ip"], proc["port"], proc["uid"])
+            (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
         )
+    # todo: check disk writes and memory usage to adjust commit frequency if needed
     con.commit()
 
 
@@ -402,11 +409,11 @@ def update_snitch_proc_and_notify(snitch: dict, new_processes: list[bytes]) -> N
     """update the snitch with data from queues and create a notification if new entry"""
     # Prevent overwriting the snitch before this function completes in the event of a termination signal
     snitch["WRITELOCK"] = True
-    ctime = time.ctime()
+    datetime = time.strftime("%Y-%m-%d %H:%M:%S")
     for proc in new_processes:
         proc = pickle.loads(proc)
         if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
-            snitch["Latest Entries"].append(ctime + " " + proc["name"] + " - " + proc["exe"])
+            snitch["Latest Entries"].append(datetime + " " + proc["name"] + " - " + proc["exe"])
         if proc["name"] in snitch["Names"]:
             if proc["exe"] not in snitch["Names"][proc["name"]]:
                 snitch["Names"][proc["name"]].append(proc["exe"])
@@ -423,61 +430,6 @@ def update_snitch_proc_and_notify(snitch: dict, new_processes: list[bytes]) -> N
             snitch["SHA256"][proc["exe"]] = {}
     _ = snitch.pop("WRITELOCK")
 
-    # might be useful for sql stuff
-        # Get DNS reverse name and reverse the name for sorting
-        # reversed_dns = reverse_domain_name(reverse_dns_lookup(conn["ip"]))
-        # Omit fields from log
-        # if True or not snitch["Config"]["Log command lines"]:
-        #     proc["cmdline"] = ""
-        # if True or not snitch["Config"]["Log remote address"]:
-        #     reversed_dns = ""
-        # Update Latest Entries
-    # elif not snitch["Config"]["Only log connections"]:
-    #     snitch["Names"][proc["name"]] = [proc["exe"]]
-        # snitch["Processes"][proc["exe"]] = {
-        #     "name": proc["name"],
-        #     "cmdlines": [proc["cmdline"]],
-        #     "first seen": ctime,
-        #     "last seen": ctime,
-        #     "days seen": 1,
-        #     "ports": [conn["port"]],
-        #     "remote addresses": [],
-        #     "results": {sha256: "Pending"}
-        # }
-        # q_vt_pending.put(pickle.dumps((proc, sha256)))
-        # if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
-        #     snitch["Processes"][proc["exe"]]["remote addresses"].append(reversed_dns)
-    # else:
-    #     entry = snitch["Processes"][proc["exe"]]
-    #     if proc["name"] not in entry["name"]:
-    #         entry["name"] += " alternative=" + proc["name"]
-    #     if proc["cmdline"] not in entry["cmdlines"]:
-    #         merge_commands(proc["cmdline"], entry["cmdlines"])
-    #         entry["cmdlines"].sort()
-    #     if conn["port"] not in entry["ports"]:
-    #         entry["ports"].append(conn["port"])
-    #         entry["ports"].sort()
-    #     if reversed_dns not in entry["remote addresses"]:
-    #         if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
-    #             entry["remote addresses"].append(reversed_dns)
-    #     if sha256 not in entry["results"]:
-    #         entry["results"][sha256] = "Pending"
-    #         q_vt_pending.put(pickle.dumps((proc, sha256)))
-    #         toast("New sha256 detected for " + proc["name"] + ": " + proc["exe"])
-    #     if ctime.split()[:3] != entry["last seen"].split()[:3]:
-    #         entry["days seen"] += 1
-    #     entry["last seen"] = ctime
-    # # Update Remote Addresses
-    # if reversed_dns in snitch["Remote Addresses"]:
-    #     if proc["exe"] not in snitch["Remote Addresses"][reversed_dns]:
-    #         snitch["Remote Addresses"][reversed_dns].insert(1, proc["exe"])
-    #         if "No processes found during polling" in snitch["Remote Addresses"][reversed_dns]:
-    #             snitch["Remote Addresses"][reversed_dns].remove("No processes found during polling")
-    # else:
-    #     if conn["port"] not in snitch["Config"]["Remote address unlog"] and proc["name"] not in snitch["Config"]["Remote address unlog"]:
-    #         snitch["Remote Addresses"][reversed_dns] = ["First connection: " + ctime, proc["exe"]]
-    # Unlock the snitch for writing
-
 
 def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
     """main subprocess where snitch.json is updated with new connections and the user is notified"""
@@ -492,6 +444,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     signal.signal(signal.SIGINT, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
     # update snitch with initial running processes and connections
     update_snitch_proc_and_notify(snitch, [pickle.dumps(proc) for proc in initial_processes])
+    del initial_processes
     new_processes = []
     new_processes_q = []
     # snitch updater main loop
@@ -499,14 +452,14 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
         # check for errors
         while not q_error.empty():
             error = q_error.get()
-            snitch["Errors"].append(time.ctime() + " " + error)
+            snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
             toast(error, file=sys.stderr)
         # check if terminating
         if not parent_process.is_alive():
-            snitch["Errors"].append(time.ctime() + " picosnitch has stopped")
+            snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " picosnitch has stopped")
             toast("picosnitch has stopped", file=sys.stderr)
             write_snitch_and_exit(snitch, q_error, snitch_pipe)
-        # get list of new processes and connections since last update
+        # get list of new processes and connections since last update (might give this loop its own subprocess)
         snitch_pipe.poll(timeout=5)
         while snitch_pipe.poll():
             new_processes.append(snitch_pipe.recv_bytes())
@@ -549,7 +502,10 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
 def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
     """updates sqlite db with new connections and reports back to updater_subprocess if needed"""
     parent_process = multiprocessing.parent_process()
-    # init sql connection
+    # easier to update a copy of snitch here than trying to keep them in sync (just need to track sha256 and vt_results after this)
+    snitch, initial_processes = pickle.loads(init_pickle)
+    get_vt_results(snitch, p_virustotal.q_out, q_updater_in, True)
+    # init sql database
     if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
         home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
     else:
@@ -560,15 +516,16 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
     if cur.fetchone()[0] !=1:
         cur.execute(''' CREATE TABLE connections
-                        (exe text, name text, cmdline text, sha256 text, ctime text, domain text, ip text, port integer, uid integer) ''')
+                        (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer) ''')
+    else:
+        pass # todo: remove entries older than snitch["Config"]["Keep logs (days)"]
     con.commit()
-    # easier to update a copy of snitch here than trying to keep them in sync (just need to track sha256 and vt_results after this)
-    snitch, initial_processes = pickle.loads(init_pickle)
-    get_vt_results(snitch, p_virustotal.q_out, q_updater_in, True)
-    update_snitch_sha_and_sql(snitch, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in, con)
     # set signals to close sql connection on termination (probably not necessary unless wanting to commit too, should it?)
     signal.signal(signal.SIGTERM, lambda *args: con.close())
     signal.signal(signal.SIGINT, lambda *args: con.close())
+    # process initial connections
+    update_snitch_sha_and_sql(snitch, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in, con)
+    del initial_processes
     # main loop
     while True:
         if not parent_process.is_alive():
@@ -763,11 +720,12 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             stdscr.addstr(i, 0, lines[i])
     stdscr.refresh()
     # screens
+    time_period = [""]
     screen_list = ["Applications", "Host Names", "Host IPs", "Ports", "Users"]
     screen_dict = {}
     screen_queries = {}
     screen_subqueries = {}
-    # queries (exe text, name text, cmdline text, sha256 text, ctime text, domain text, ip text, port integer, uid integer)
+    # queries (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer)
     cur = con.cursor()
     screen_queries["Applications"] = "SELECT exe, COUNT(exe) as Count FROM connections GROUP BY exe"
     screen_queries["Host Names"] = "SELECT domain, COUNT(domain) as Count FROM connections GROUP BY domain"
@@ -780,7 +738,7 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     # ui loop
     cursor = 1
     screen_i = 0
-    toggle_expand = False
+    toggle_subquery = False
     while True:
         stdscr.clear()
         stdscr.attrset(curses.color_pair(0) | curses.A_BOLD)
@@ -790,8 +748,8 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
         for name, value in screen_dict[screen_list[screen_i]]:
             if line == cursor:
                 stdscr.attrset(curses.color_pair(1) | curses.A_BOLD)
-                if toggle_expand:
-                    toggle_expand = False
+                if toggle_subquery:
+                    toggle_subquery = False
             else:
                 stdscr.attrset(curses.color_pair(0))
             if 0 <= line - offset < curses.LINES - 1:
@@ -801,8 +759,14 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
         ch = stdscr.getch()
         if ch == ord("\n") or ch == ord(" "):
             pass
+        elif ch == curses.KEY_BACKSPACE:
+            toggle_subquery = False
+        elif ch == ord("r"):
+            pass # refresh
         elif ch == curses.KEY_UP:
             cursor -= 1
+            if cursor <= 0:
+                cursor = -1
         elif ch == curses.KEY_DOWN:
             cursor += 1
         elif ch == curses.KEY_PPAGE:
@@ -823,7 +787,8 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             con.close()
             return 0
         cursor %= line
-
+        if cursor == 0:
+            cursor = 1
 
 def start_ui() -> int:
     """start a curses ui"""
