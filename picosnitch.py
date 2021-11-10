@@ -452,7 +452,7 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
         else:
             snitch["SHA256"][proc["exe"]] = {sha256: "VT Pending"}
             q_vt.put(pickle.dumps((proc, sha256)))
-            q_out.put(pickle.dumps({"type": "sha", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
+            q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
 
 
 def update_snitch_proc_and_notify(snitch: dict, new_processes: list[bytes]) -> None:
@@ -477,6 +477,7 @@ def update_snitch_proc_and_notify(snitch: dict, new_processes: list[bytes]) -> N
                 toast("New name detected for " + proc["exe"] + ": " + proc["name"])
         else:
             snitch["Processes"][proc["exe"]] = [proc["name"]]
+            snitch["SHA256"][proc["exe"]] = {}
     _ = snitch.pop("WRITELOCK")
 
     # might be useful for sql stuff
