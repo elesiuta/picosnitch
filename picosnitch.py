@@ -297,32 +297,6 @@ def reverse_dns_lookup(ip: str) -> str:
         return ip
 
 
-def command_summary(cmd_list: list) -> list:
-    """find common patterns in commands to create a summary list"""
-    summary = []
-    for cmd in cmd_list:
-        args = shlex.split(cmd)
-        found_match = False
-        for i in range(len(summary)):  # cmds
-            i_args = shlex.split(summary[i])
-            if len(args) == len(i_args) and all(len(args[a]) == len(i_args[a]) for a in range(len(args))):
-                found_match = True
-                new_args = []
-                for a in range(len(args)):  # args
-                    new_arg = ""
-                    for c in range(len(args[a])):  # chars
-                        if args[a][c] == i_args[a][c]:
-                            new_arg += args[a][c]
-                        else:
-                            new_arg += "*"
-                    new_args.append(new_arg)
-                summary[i] = shlex.join(new_args)
-                break
-        if not found_match:
-            summary.append(cmd)
-    return summary
-
-
 @functools.lru_cache()
 def get_sha256(exe: str) -> str:
     """get sha256 of process executable"""
