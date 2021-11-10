@@ -18,6 +18,7 @@
 # https://github.com/elesiuta/picosnitch
 
 import atexit
+import curses
 import functools
 import ipaddress
 import json
@@ -547,7 +548,6 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
 
 def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
     """updates sqlite db with new connections and reports back to updater_subprocess if needed"""
-    import sqlite3
     parent_process = multiprocessing.parent_process()
     # init sql connection
     if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
@@ -742,10 +742,92 @@ def main(vt_api_key: str = ""):
     sys.exit(1)
 
 
+def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
+    """for curses"""
+    # init and splash screen
+    curses.cbreak()
+    curses.noecho()
+    curses.start_color()
+    curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLUE)
+    curses.init_pair(2, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+    stdscr.clear()
+    lines = splash.splitlines()
+    for i in range(len(lines)):
+        if "\u001b[33m" in lines[i]:
+            part1 = lines[i].split("\u001b[33m")
+            part2 = part1[1].split("\033[0m")
+            stdscr.addstr(i, 0, part1[0])
+            stdscr.addstr(i, len(part1[0]), part2[0], curses.color_pair(2))
+            stdscr.addstr(i, len(part1[0]) + len(part2[0]), part2[1])
+        else:
+            stdscr.addstr(i, 0, lines[i])
+    stdscr.refresh()
+    # screens
+    screen_list = ["Applications", "Host Names", "Host IPs", "Ports", "Users"]
+    screen_dict = {}
+    screen_queries = {}
+    screen_subqueries = {}
+    # queries (exe text, name text, cmdline text, sha256 text, ctime text, domain text, ip text, port integer, uid integer)
+    cur = con.cursor()
+    screen_queries["Applications"] = "SELECT exe, COUNT(exe) as Count FROM connections GROUP BY exe"
+    screen_queries["Host Names"] = "SELECT domain, COUNT(domain) as Count FROM connections GROUP BY domain"
+    screen_queries["Host IPs"] = "SELECT ip, COUNT(ip) as Count FROM connections GROUP BY ip"
+    screen_queries["Ports"] = "SELECT port, COUNT(port) as Count FROM connections GROUP BY port"
+    screen_queries["Users"] = "SELECT uid, COUNT(uid) as Count FROM connections GROUP BY uid"
+    for query in screen_queries:
+        cur.execute(screen_queries[query])
+        screen_dict[query] = cur.fetchall()
+    # ui loop
+    cursor = 1
+    screen_i = 0
+    toggle_expand = False
+    while True:
+        stdscr.clear()
+        stdscr.attrset(curses.color_pair(0) | curses.A_BOLD)
+        stdscr.addstr("{prev: <{width}}{curr: ^{width}}{next: >{width}}".format(width=curses.COLS//3, prev=screen_list[screen_i-1], curr=screen_list[screen_i], next=screen_list[(screen_i+1) % len(screen_list)]))
+        line = 1
+        offset = max(0, cursor - curses.LINES + 3)
+        for name, value in screen_dict[screen_list[screen_i]]:
+            if line == cursor:
+                stdscr.attrset(curses.color_pair(1) | curses.A_BOLD)
+                if toggle_expand:
+                    toggle_expand = False
+            else:
+                stdscr.attrset(curses.color_pair(0))
+            if 0 <= line - offset < curses.LINES - 1:
+                stdscr.addstr(line - offset, 0, "%s     %s" % (name, value))
+            line += 1
+        stdscr.refresh()
+        ch = stdscr.getch()
+        if ch == ord("\n") or ch == ord(" "):
+            pass
+        elif ch == curses.KEY_UP:
+            cursor -= 1
+        elif ch == curses.KEY_DOWN:
+            cursor += 1
+        elif ch == curses.KEY_PPAGE:
+            cursor -= curses.LINES
+            if cursor < 1:
+                cursor = 1
+        elif ch == curses.KEY_NPAGE:
+            cursor += curses.LINES
+            if cursor >= line:
+                cursor = line - 1
+        elif ch == curses.KEY_LEFT:
+            screen_i -= 1
+            screen_i %= len(screen_list)
+        elif ch == curses.KEY_RIGHT:
+            screen_i += 1
+            screen_i %= len(screen_list)
+        elif ch == 27 or ch == ord("q"):
+            con.close()
+            return 0
+        cursor %= line
+
+
 def start_ui() -> int:
     """start a curses ui"""
-    raise NotImplementedError
-    print(textwrap.dedent("""
+    splash = textwrap.dedent("""
         @@&@@                                                              @@@@,
       &&.,,. &&&&&&%&%&&&&&&&&(..                      ..&&%&%&&&&&&&&%&&&&  .,#&%
         ,,/%#/(....,.,/(.  ...*,,%%                  %#*,..,... // ...,..//#%*,
@@ -759,8 +841,27 @@ def start_ui() -> int:
                                        ,*\u001b[33m,,,,,,\033[0m,
 
     Loading database ...
-    """))
-    return 0
+    """)
+    # init sql connection
+    if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
+        home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
+    else:
+        home_dir = os.path.expanduser("~")
+    file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.db")
+    con = sqlite3.connect(file_path)
+    # check for table
+    cur = con.cursor()
+    cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
+    if cur.fetchone()[0] !=1:
+        raise Exception(f"Table connections does not exist in {file_path}")
+    # start curses
+    for err_count in reversed(range(30)):
+        try:
+            return curses.wrapper(main_ui, splash, con)
+        except curses.error:
+            print("CURSES DISPLAY ERROR: try resizing your terminal, ui will close in %s seconds" % (err_count + 1), file=sys.stderr)
+            time.sleep(1)
+    return 1
 
 
 def start_daemon():
@@ -790,6 +891,7 @@ def start_daemon():
                 else:
                     args = ["sudo", "-E", sys.executable] + sys.argv
                 os.execvp("sudo", args)
+            assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
             try:
                 tmp_snitch = read()
                 if not tmp_snitch["Config"]["VT API key"] and "Template" in tmp_snitch:
@@ -802,8 +904,10 @@ def start_daemon():
                     main(tmp_snitch["Config"]["VT API key"])
             daemon = PicoDaemon("/tmp/daemon-picosnitch.pid")
             if sys.argv[1] == "start":
+                print("starting picosnitch")
                 daemon.start()
             elif sys.argv[1] == "stop":
+                print("stopping picosnitch")
                 daemon.stop()
             elif sys.argv[1] == "restart":
                 daemon.restart()
