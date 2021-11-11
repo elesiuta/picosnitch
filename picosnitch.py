@@ -769,7 +769,7 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             current_screen = cur.fetchall()
             execute_query = False
         title_bar = f"<- {screens[pri_i-1]: <{curses.COLS//3 - 2}}{screens[pri_i]: ^{curses.COLS//3 - 2}}{screens[(pri_i+1) % len(screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
-        help_bar = f"space/enter: toggle subquery  t: cycle time period  s: cycle subquery column  r: refresh data  q: quit {' ': <{curses.COLS}}"
+        help_bar = f"space/enter: toggle subquery  t: time period  s: subquery column  r: refresh  q: quit {' ': <{curses.COLS}}"
         if is_subquery:
             status_bar = f"picosnitch {VERSION}\t time period: {time_period[time_i]}\t {p_names[pri_i].lower()}: {primary_value}{' ': <{curses.COLS}}"
             column_names = f"{s_names[sec_i]: <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
