@@ -478,6 +478,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
 def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
     """updates sqlite db with new connections and reports back to updater_subprocess if needed"""
     parent_process = multiprocessing.parent_process()
+    drop_root_privileges()
     # easier to update a copy of snitch here than trying to keep them in sync (just need to track sha256 and vt_results after this)
     snitch, initial_processes = pickle.loads(init_pickle)
     get_vt_results(snitch, p_virustotal.q_out, q_updater_in, True)
@@ -494,7 +495,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
         cur.execute(''' CREATE TABLE connections
                         (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer) ''')
     else:
-        cur.execute(''' DELETE FROM connections WHERE contime < datetime("now", "localtime", "-? days") ''', (str(snitch["Config"]["Keep logs (days)"]),))
+        cur.execute(''' DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") ''' % int(snitch["Config"]["Keep logs (days)"]))
     con.commit()
     # set signals to close sql connection on termination (probably not necessary unless wanting to commit too, should it?)
     signal.signal(signal.SIGTERM, lambda *args: con.close())
@@ -509,7 +510,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
         try:
             q_updater_in.put(pickle.dumps({"type": "ready"}))  # should I make sure this is empty first? which side, or both?
             new_processes = []
-            sql_pipe.poll(timeout=15)  # updater should be able to respond within this much time
+            sql_pipe.poll(timeout=30)  # updater should be able to respond within this much time
             while sql_pipe.poll(timeout=0.1):  # make sure updater is done
                 new_processes.append(sql_pipe.recv_bytes())
             update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in, con)
@@ -703,9 +704,9 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     time_i = 0
     time_period = ["All", "1 minute", "3 minutes", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "1 hour", "3 hours", "6 hours", "12 hours", "1 day", "3 days", "7 days", "30 days", "365 days"]
     pri_i = 0
-    screens = ["Applications", "Host Names", "Host IPs", "Ports", "Users"]
-    p_names = ["Application", "Host Name", "Host IP", "Port", "User"]
-    p_col = ["exe", "domain", "ip", "port", "uid"]
+    screens = ["Applications", "Host Names", "Host IPs", "Ports", "Users", "Connection Time"]
+    p_names = ["Application", "Host Name", "Host IP", "Port", "User", "Connection Time"]
+    p_col = ["exe", "domain", "ip", "port", "uid", "contime"]
     sec_i = 0
     s_names = ["Application", "Name", "Command", "SHA256", "Connection Time", "Host Name", "Host IP", "Port", "User"]
     s_col = ["exe", "name", "cmdline", "sha256", "contime", "domain", "ip", "port", "uid"]
@@ -786,13 +787,9 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                 if toggle_subquery:
                     if is_subquery:
                         is_subquery = False
-                        update_query = True
-                        execute_query = True
                     else:
                         primary_value = name
                         is_subquery = True
-                        update_query = True
-                        execute_query = True
                     break
             else:
                 stdscr.attrset(curses.color_pair(0))
@@ -807,6 +804,8 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
         stdscr.refresh()
         if toggle_subquery:
             toggle_subquery = False
+            update_query = True
+            execute_query = True
             continue
         # user input
         ch = stdscr.getch()
