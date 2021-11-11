@@ -481,7 +481,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     drop_root_privileges()
     # easier to update a copy of snitch here than trying to keep them in sync (just need to track sha256 and vt_results after this)
     snitch, initial_processes = pickle.loads(init_pickle)
-    get_vt_results(snitch, p_virustotal.q_out, q_updater_in, True)
+    get_vt_results(snitch, p_virustotal.q_in, q_updater_in, True)
     # init sql database
     if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
         home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
