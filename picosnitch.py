@@ -502,13 +502,14 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     con.close()
     # process initial connections
     transactions = update_snitch_sha_and_sql(snitch, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in)
-    con = sqlite3.connect(file_path, isolation_level="EXCLUSIVE")
+    con = sqlite3.connect(file_path)
     with con:
         # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
         con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
     con.close()
     del transactions
     del initial_processes
+    transactions = []
     # main loop
     while True:
         if not parent_process.is_alive():
@@ -520,13 +521,17 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
             while sql_pipe.poll(timeout=0.1):  # make sure updater is done
                 new_processes.append(sql_pipe.recv_bytes())
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
-            transactions = update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
-            con = sqlite3.connect(file_path, timeout=300, isolation_level="EXCLUSIVE")
-            with con:
-                # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
-                con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
+            transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
+            con = sqlite3.connect(file_path)
+            try:
+                with con:
+                    # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
+                    con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
+                del transactions
+                transactions = []
+            except Exception:
+                pass
             con.close()
-            del transactions
             del new_processes
         except Exception as e:
             error = "SQL " + type(e).__name__ + str(e.args)
