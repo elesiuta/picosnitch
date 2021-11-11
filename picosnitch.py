@@ -352,10 +352,10 @@ def initial_poll(snitch: dict) -> list:
     return initial_processes
 
 
-def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, con: sqlite3.Connection) -> None:
+def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue) -> list[tuple]:
     """update the snitch with sha data, update sql with conns, return list of notifications"""
     datetime = time.strftime("%Y-%m-%d %H:%M:%S")
-    cur = con.cursor()
+    transactions = []
     for proc in new_processes:
         proc = pickle.loads(proc)
         sha256 = get_sha256(proc["exe"])
@@ -379,10 +379,8 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
             domain, ip = "", ""
         if proc["port"] in snitch["Config"]["Log ignore"] or proc["name"] in snitch["Config"]["Log ignore"]:
             continue
-        cur.execute(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ''',
-            (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
-        )
-    con.commit()
+        transactions.append((proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"]))
+    return transactions
 
 
 def update_snitch_proc_and_notify(snitch: dict, new_processes: list[bytes]) -> None:
@@ -492,7 +490,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     else:
         home_dir = os.path.expanduser("~")
     file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.db")
-    con = sqlite3.connect(file_path, timeout=300)
+    con = sqlite3.connect(file_path)
     cur = con.cursor()
     cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
     if cur.fetchone()[0] !=1:
@@ -501,11 +499,15 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     else:
         cur.execute(''' DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") ''' % int(snitch["Config"]["Keep logs (days)"]))
     con.commit()
-    # set signals to close sql connection on termination (probably not necessary unless wanting to commit too, should it?)
-    signal.signal(signal.SIGTERM, lambda *args: con.close())
-    signal.signal(signal.SIGINT, lambda *args: con.close())
+    con.close()
     # process initial connections
-    update_snitch_sha_and_sql(snitch, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in, con)
+    transactions = update_snitch_sha_and_sql(snitch, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in)
+    con = sqlite3.connect(file_path, isolation_level="EXCLUSIVE")
+    with con:
+        # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
+        con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
+    con.close()
+    del transactions
     del initial_processes
     # main loop
     while True:
@@ -517,8 +519,14 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
             sql_pipe.poll(timeout=30)  # updater should be able to respond within this much time
             while sql_pipe.poll(timeout=0.1):  # make sure updater is done
                 new_processes.append(sql_pipe.recv_bytes())
-            update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in, con)
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
+            transactions = update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
+            con = sqlite3.connect(file_path, timeout=300, isolation_level="EXCLUSIVE")
+            with con:
+                # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
+                con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
+            con.close()
+            del transactions
             del new_processes
         except Exception as e:
             error = "SQL " + type(e).__name__ + str(e.args)
