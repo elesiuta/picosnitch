@@ -314,7 +314,11 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiproces
         for exe in snitch["SHA256"]:
             for sha256 in snitch["SHA256"][exe]:
                 if snitch["SHA256"][exe][sha256] == "VT Pending":
-                    proc = {"exe": exe}
+                    if exe in snitch["Processes"] and snitch["Processes"][exe]:
+                        name = snitch["Processes"][exe]
+                    else:
+                        name = exe
+                    proc = {"exe": exe, "name": name}
                     q_vt.put(pickle.dumps((proc, sha256)))
     else:
         while not q_vt.empty():
