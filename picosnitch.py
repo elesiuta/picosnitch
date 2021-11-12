@@ -535,13 +535,13 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
                 q_error.put("sync error between sql and updater on ready")
             timeout_counter = 0
             while True:
-                while sql_pipe.poll():
+                while sql_pipe.poll(timeout=1):
                     new_processes.append(sql_pipe.recv_bytes())
                 timeout_counter += 1
                 if pickle.loads(new_processes[-1]) == "done":
                     _ = new_processes.pop()
                     break
-                elif timeout_counter > 1000:
+                elif timeout_counter > 30:
                     q_error.put("sync error between sql and updater on receive")
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
             if time.time() - last_write > snitch["Config"]["Min DB write period (sec)"]:
