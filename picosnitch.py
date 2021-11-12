@@ -207,7 +207,7 @@ class ProcessManager:
         return self.pp.memory_info().rss
 
 
-def read() -> dict:
+def read_snitch() -> dict:
     """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
         "Config": {
@@ -241,7 +241,7 @@ def read() -> dict:
     return template
 
 
-def write(snitch: dict) -> None:
+def write_snitch(snitch: dict) -> None:
     """write snitch to correct location (root privileges should be dropped first)"""
     file_path = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "snitch.json")
     error_log = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "error.log")
@@ -275,7 +275,7 @@ def write_snitch_and_exit(snitch: dict, q_error: multiprocessing.Queue, snitch_p
         error = q_error.get()
         snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
         toast(error, file=sys.stderr)
-    write(snitch)
+    write_snitch(snitch)
     snitch_pipe.close()
     sys.exit(0)
 
@@ -450,6 +450,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
             if msg["type"] == "ready":
                 for proc in new_processes_q:
                     sql_pipe.send_bytes(proc)
+                sql_pipe.send_bytes(pickle.dumps("done"))
                 new_processes_q = []
                 break
             elif msg["type"] == "sha256":
@@ -474,7 +475,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
             if new_size != sizeof_snitch or time.time() - last_write > 600:
                 sizeof_snitch = new_size
                 last_write = time.time()
-                write(snitch)
+                write_snitch(snitch)
 
 
 def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
@@ -515,11 +516,14 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
         if not parent_process.is_alive():
             return 0
         try:
-            q_updater_in.put(pickle.dumps({"type": "ready"}))  # should I make sure this is empty first? which side, or both?
+            q_updater_in.put(pickle.dumps({"type": "ready"}))
             new_processes = []
-            sql_pipe.poll(timeout=30)  # updater should be able to respond within this much time
-            while sql_pipe.poll(timeout=0.1):  # make sure updater is done
-                new_processes.append(sql_pipe.recv_bytes())
+            sql_pipe.poll(timeout=None)
+            while True:
+                while sql_pipe.poll(timeout=0.1):
+                    new_processes.append(sql_pipe.recv_bytes())
+                if pickle.loads(new_processes[-1]) == "done":
+                    break
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
             transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
             con = sqlite3.connect(file_path)
@@ -679,7 +683,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
 def main(vt_api_key: str = ""):
     """init picosnitch"""
     # read config and set VT API key if entered
-    snitch = read()
+    snitch = read_snitch()
     _ = snitch.pop("Template", 0)
     if vt_api_key:
         snitch["Config"]["VT API key"] = vt_api_key
@@ -955,7 +959,7 @@ def start_daemon():
                 os.execvp("sudo", args)
             assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
             try:
-                tmp_snitch = read()
+                tmp_snitch = read_snitch()
                 if not tmp_snitch["Config"]["VT API key"] and "Template" in tmp_snitch:
                     tmp_snitch["Config"]["VT API key"] = input("Enter your VirusTotal API key (optional)\n>>> ")
             except Exception as e:
