@@ -742,9 +742,9 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     p_names = ["Application", "Name", "SHA256", "Connection Time", "Host Name", "Host IP", "Port", "User"]
     p_col = ["exe", "name", "sha256", "contime", "domain", "ip", "port", "uid"]
     sec_i = 0
-    s_screens = ["Applications", "Names", "Commands", "SHA256", "Connection Time", "Host Names", "Host IPs", "Ports", "Users"]
-    s_names = ["Application", "Name", "Command", "SHA256", "Connection Time", "Host Name", "Host IP", "Port", "User"]
-    s_col = ["exe", "name", "cmdline", "sha256", "contime", "domain", "ip", "port", "uid"]
+    s_screens = p_screens + ["Commands"]
+    s_names = p_names + ["Command"]
+    s_col = p_col + ["cmdline"]
     # ui loop
     max_y, max_x = stdscr.getmaxyx()
     first_line = 4
