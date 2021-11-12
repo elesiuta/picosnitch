@@ -18,6 +18,7 @@
 # https://github.com/elesiuta/picosnitch
 
 import atexit
+import collections
 import curses
 import functools
 import ipaddress
@@ -355,7 +356,8 @@ def initial_poll(snitch: dict) -> list:
 def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue) -> list[tuple]:
     """update the snitch with sha data, update sql with conns, return list of notifications"""
     datetime = time.strftime("%Y-%m-%d %H:%M:%S")
-    transactions = []
+    event_counter = collections.defaultdict(int)
+    transactions = set()
     for proc in new_processes:
         proc = pickle.loads(proc)
         sha256 = get_sha256(proc["exe"])
@@ -379,7 +381,10 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
             domain, proc["ip"] = "", ""
         if proc["port"] in snitch["Config"]["Log ignore"] or proc["name"] in snitch["Config"]["Log ignore"]:
             continue
-        transactions.append((proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"]))
+        event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
+        event_counter[hash(event)] += 1
+        transactions.add(event)
+    transactions = [(*event, event_counter[hash(event)]) for event in transactions]
     return transactions
 
 
@@ -438,7 +443,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                 snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
                 toast(error, file=sys.stderr)
             # get list of new processes and connections since last update (might give this loop its own subprocess)
-            snitch_pipe.poll(timeout=5)
+            snitch_pipe.poll(timeout=10)
             while snitch_pipe.poll():
                 new_processes.append(snitch_pipe.recv_bytes())
             # process the list and update snitch
@@ -499,7 +504,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
     if cur.fetchone()[0] !=1:
         cur.execute(''' CREATE TABLE connections
-                        (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer) ''')
+                        (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, events integer) ''')
     else:
         cur.execute(''' DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") ''' % int(snitch["Config"]["Keep logs (days)"]))
     con.commit()
@@ -509,7 +514,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     con = sqlite3.connect(file_path)
     with con:
         # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
-        con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
+        con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
     con.close()
     del transactions
     del initial_processes
@@ -538,7 +543,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
             try:
                 with con:
                     # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
-                    con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
+                    con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
                 del transactions
                 transactions = []
             except Exception as e:
@@ -768,9 +773,9 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                 else:
                     time_query = f" WHERE contime > datetime(\"now\", \"localtime\", \"-{time_period[time_i]}\")"
             if is_subquery:
-                current_query = f"SELECT {s_col[sec_i]}, COUNT({s_col[sec_i]}) as Count FROM connections WHERE {p_col[pri_i]} IS \"{primary_value}\"{time_query} GROUP BY {s_col[sec_i]}"
+                current_query = f"SELECT {s_col[sec_i]}, SUM(\"events\") as Sum FROM connections WHERE {p_col[pri_i]} IS \"{primary_value}\"{time_query} GROUP BY {s_col[sec_i]}"
             else:
-                current_query = f"SELECT {p_col[pri_i]}, COUNT({p_col[pri_i]}) as Count FROM connections{time_query} GROUP BY {p_col[pri_i]}"
+                current_query = f"SELECT {p_col[pri_i]}, SUM(\"events\") as Sum FROM connections{time_query} GROUP BY {p_col[pri_i]}"
             update_query = False
         if execute_query:
             while True:
