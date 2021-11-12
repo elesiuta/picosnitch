@@ -745,9 +745,9 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     time_i = 0
     time_period = ["All", "1 minute", "3 minutes", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "1 hour", "3 hours", "6 hours", "12 hours", "1 day", "3 days", "7 days", "30 days", "365 days"]
     pri_i = 0
-    p_screens = ["Applications", "Names", "SHA256", "Connection Time", "Host Names", "Host IPs", "Ports", "Users"]
-    p_names = ["Application", "Name", "SHA256", "Connection Time", "Host Name", "Host IP", "Port", "User"]
-    p_col = ["exe", "name", "sha256", "contime", "domain", "ip", "port", "uid"]
+    p_screens = ["Applications", "Names", "SHA256", "Host Names", "Host IPs", "Ports", "Users", "Connection Time"]
+    p_names = ["Application", "Name", "SHA256", "Host Name", "Host IP", "Port", "User", "Connection Time"]
+    p_col = ["exe", "name", "sha256", "domain", "ip", "port", "uid", "contime"]
     sec_i = 0
     s_screens = p_screens + ["Commands"]
     s_names = p_names + ["Command"]
@@ -898,6 +898,10 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             cursor += curses.LINES
             if cursor >= line:
                 cursor = line - 1
+        elif ch == curses.KEY_HOME:
+            cursor = first_line
+        elif ch == curses.KEY_END:
+            cursor = len(current_screen) + first_line - 1
         elif ch == curses.KEY_LEFT:
             if is_subquery:
                 sec_i -= 1
