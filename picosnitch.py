@@ -384,8 +384,7 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
         event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
         event_counter[hash(event)] += 1
         transactions.add(event)
-    transactions = [(*event, event_counter[hash(event)]) for event in transactions]
-    return transactions
+    return [(*event, event_counter[hash(event)]) for event in transactions]
 
 
 def update_snitch_proc_and_notify(snitch: dict, new_processes: list[bytes]) -> None:
