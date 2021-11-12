@@ -180,6 +180,9 @@ class ProcessManager:
     def __init__(self, name: str, target: typing.Callable, init_args: tuple = ()) -> None:
         self.name, self.target, self.init_args = name, target, init_args
         self.q_in, self.q_out = multiprocessing.Queue(), multiprocessing.Queue()
+        self.start()
+
+    def start(self) -> None:
         self.p = multiprocessing.Process(name=self.name, target=self.target, daemon=True,
                                          args=(*self.init_args, self.q_in, self.q_out)
                                         )
@@ -675,6 +678,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     signal.signal(signal.SIGINT, lambda *args: [p.terminate() for p in subprocesses])
     signal.signal(signal.SIGTERM, lambda *args: [p.terminate() for p in subprocesses])
     # watch subprocesses
+    suspend_check_last = time.time()
     try:
         while True:
             time.sleep(5)
@@ -687,6 +691,11 @@ def picosnitch_master_process(config, snitch_updater_pickle):
             if sum(p.memory() for p in subprocesses) > 512000000:
                 q_error.put("picosnitch memory usage exceeded 512 MB, attempting restart")
                 break
+            suspend_check_now = time.time()
+            if suspend_check_now - suspend_check_last > 30:
+                p_monitor.terminate()
+                p_monitor.start()
+            suspend_check_last = suspend_check_now
     except Exception as e:
         q_error.put("picosnitch subprocess exception: %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
     # something went wrong, attempt to restart picosnitch (terminate by running `picosnitch stop`)
