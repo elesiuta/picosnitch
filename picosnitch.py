@@ -988,16 +988,19 @@ def start_daemon():
                     args = ["sudo", "-E", sys.executable] + sys.argv
                 os.execvp("sudo", args)
             assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
-            try:
-                tmp_snitch = read_snitch()
-                if not tmp_snitch["Config"]["VT API key"] and "Template" in tmp_snitch:
-                    tmp_snitch["Config"]["VT API key"] = input("Enter your VirusTotal API key (optional)\n>>> ")
-            except Exception as e:
-                print(type(e).__name__ + str(e.args), file=sys.stderr)
-                sys.exit(1)
+            if sys.argv[1] == "stop":
+                vt_api_key = ""
+            else:
+                try:
+                    tmp_snitch = read_snitch()
+                    if not tmp_snitch["Config"]["VT API key"] and "Template" in tmp_snitch:
+                        vt_api_key = input("Enter your VirusTotal API key (optional)\n>>> ")
+                except Exception as e:
+                    print(type(e).__name__ + str(e.args), file=sys.stderr)
+                    sys.exit(1)
             class PicoDaemon(Daemon):
                 def run(self):
-                    main(tmp_snitch["Config"]["VT API key"])
+                    main(vt_api_key)
             daemon = PicoDaemon("/tmp/daemon-picosnitch.pid")
             if sys.argv[1] == "start":
                 print("starting picosnitch")
