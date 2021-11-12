@@ -516,7 +516,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     with con:
         # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
         con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
-    con.close()
+    # con.close()
     transactions = []
     new_processes = []
     last_write = 0
@@ -548,7 +548,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
             if time.time() - last_write > snitch["Config"]["Min DB write period (sec)"]:
                 transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
                 new_processes = []
-                con = sqlite3.connect(file_path)
+                # con = sqlite3.connect(file_path)
                 try:
                     with con:
                         # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
@@ -558,7 +558,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
                 except Exception as e:
                     error = "SQL execute %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
                     q_error.put(error)
-                con.close()
+                # con.close()
         except Exception as e:
             error = "SQL subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
             q_error.put(error)
@@ -667,7 +667,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     sql_recv_pipe, sql_send_pipe = multiprocessing.Pipe(duplex=False)
     q_error = multiprocessing.Queue()
     p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess, init_args=(snitch_monitor_pipe, q_error,))
-    p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess, init_args=(config,))
+    p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess, init_args=(config, q_error,))
     p_updater = ProcessManager(name="snitchupdater", target=updater_subprocess,
                                init_args=(snitch_updater_pickle, snitch_updater_pipe, sql_send_pipe, q_error,)
                               )
