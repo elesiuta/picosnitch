@@ -987,9 +987,8 @@ def start_daemon():
                     args = ["sudo", "-E", sys.executable] + sys.argv
                 os.execvp("sudo", args)
             assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
-            if sys.argv[1] == "stop":
-                vt_api_key = ""
-            else:
+            vt_api_key = ""
+            if sys.argv[1] in ["start", "restart"]:
                 try:
                     tmp_snitch = read_snitch()
                     if not tmp_snitch["Config"]["VT API key"] and "Template" in tmp_snitch:
