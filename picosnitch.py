@@ -613,7 +613,7 @@ def monitor_subprocess(snitch_pipe, q_error, _q_in, _q_out):
     return 1
 
 
-def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results):
+def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
     """get virustotal results of process executable"""
     parent_process = multiprocessing.parent_process()
     drop_root_privileges()
@@ -622,7 +622,6 @@ def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results):
         vt_enabled = True
     except ImportError:
         vt_enabled = False
-    last_error = 0
     while True:
         try:
             if not parent_process.is_alive():
@@ -656,10 +655,9 @@ def virustotal_subprocess(config: dict, q_vt_pending, q_vt_results):
             # have to timeout here to check whether to terminate otherwise this could stay hanging
             # daemon=True flag for multiprocessing.Process does not work after root privileges are dropped for parent
             pass
-        except Exception:
-            if time.time() - last_error < 30:
-                return 1
-            last_error = time.time()
+        except Exception as e:
+            error = "VT %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
+            q_error.put(error)
 
 
 def picosnitch_master_process(config, snitch_updater_pickle):
@@ -695,7 +693,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                 q_error.put("picosnitch memory usage exceeded 512 MB, attempting restart")
                 break
     except Exception as e:
-        q_error.put("picosnitch subprocess exception: " + str(e))
+        q_error.put("picosnitch subprocess exception: %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
     # something went wrong, attempt to restart picosnitch (terminate by running `picosnitch stop`)
     _ = [p.terminate() for p in subprocesses]
     subprocess.Popen(sys.argv[:-1] + ["restart"])
