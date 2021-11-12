@@ -442,7 +442,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                 snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
                 toast(error, file=sys.stderr)
             # get list of new processes and connections since last update (might give this loop its own subprocess)
-            snitch_pipe.poll(timeout=10)
+            snitch_pipe.poll(timeout=15)
             while snitch_pipe.poll():
                 new_processes.append(snitch_pipe.recv_bytes())
             # process the list and update snitch
@@ -518,6 +518,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     del transactions
     del initial_processes
     transactions = []
+    last_write = 0
     # main loop
     while True:
         if not parent_process.is_alive():
@@ -538,18 +539,20 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
                     raise Exception("sync error between sql and updater")
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
             transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
-            con = sqlite3.connect(file_path)
-            try:
-                with con:
-                    # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
-                    con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
-                del transactions
-                transactions = []
-            except Exception as e:
-                error = "SQL execute %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
-                q_error.put(error)
-            con.close()
             del new_processes
+            if time.time() - last_write > 30:
+                con = sqlite3.connect(file_path)
+                try:
+                    with con:
+                        # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
+                        con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
+                    del transactions
+                    transactions = []
+                    last_write = time.time()
+                except Exception as e:
+                    error = "SQL execute %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
+                    q_error.put(error)
+                con.close()
         except Exception as e:
             error = "SQL subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
             q_error.put(error)
