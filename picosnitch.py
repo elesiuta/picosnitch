@@ -825,6 +825,7 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
         stdscr.addstr(2, 0, title_bar)
         stdscr.addstr(3, 0, column_names)
         line = first_line
+        cursor = min(cursor, len(current_screen) + first_line - 1)
         offset = max(0, cursor - curses.LINES + 3)
         for name, value in current_screen:
             if line == cursor:
