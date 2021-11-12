@@ -212,6 +212,7 @@ def read_snitch() -> dict:
     """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
         "Config": {
+            "Min DB write period (sec)": 30,
             "Keep logs (days)": 365,
             "Log command lines": True,
             "Log remote address": True,
@@ -510,13 +511,12 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     con.close()
     # process initial connections
     transactions = update_snitch_sha_and_sql(snitch, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in)
+    del initial_processes
     con = sqlite3.connect(file_path)
     with con:
         # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
         con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
     con.close()
-    del transactions
-    del initial_processes
     transactions = []
     new_processes = []
     last_write = 0
@@ -525,29 +525,34 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
         if not parent_process.is_alive():
             return 0
         try:
-            q_updater_in.put(pickle.dumps({"type": "ready"}))
-            sql_pipe.poll(timeout=None)
+            while not q_updater_in.empty() and not sql_pipe.poll():
+                # wait until q_updater_in becomes empty or sql_pipe has something
+                time.sleep(1)
+            if q_updater_in.empty() and not sql_pipe.poll():
+                # only say ready if q_updater_in is empty and sql_pipe is empty
+                q_updater_in.put(pickle.dumps({"type": "ready"}))
+                sql_pipe.poll(timeout=None)
+            else:
+                q_error.put("sync error between sql and updater on ready")
             timeout_counter = 0
             while True:
-                while sql_pipe.poll(timeout=1):
+                while sql_pipe.poll():
                     new_processes.append(sql_pipe.recv_bytes())
                 timeout_counter += 1
                 if pickle.loads(new_processes[-1]) == "done":
                     _ = new_processes.pop()
                     break
-                elif timeout_counter > 350:
-                    raise Exception("sync error between sql and updater")
+                elif timeout_counter > 1000:
+                    raise Exception("sync error between sql and updater on receive")
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
-            if time.time() - last_write > 30:
+            if time.time() - last_write > snitch["Config"]["Min DB write period (sec)"]:
                 transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
-                del new_processes
                 new_processes = []
                 con = sqlite3.connect(file_path)
                 try:
                     with con:
                         # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
                         con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
-                    del transactions
                     transactions = []
                     last_write = time.time()
                 except Exception as e:
