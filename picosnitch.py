@@ -212,7 +212,7 @@ def read_snitch() -> dict:
     """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
         "Config": {
-            "Min DB write period (sec)": 30,
+            "Min DB write period (sec)": 10,
             "Keep logs (days)": 365,
             "Log command lines": True,
             "Log remote address": True,
@@ -383,9 +383,9 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
         if proc["port"] in snitch["Config"]["Log ignore"] or proc["name"] in snitch["Config"]["Log ignore"]:
             continue
         event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
-        event_counter[hash(event)] += 1
+        event_counter[str(event)] += 1
         transactions.add(event)
-    return [(*event, event_counter[hash(event)]) for event in transactions]
+    return [(*event, event_counter[str(event)]) for event in transactions]
 
 
 def update_snitch_proc_and_notify(snitch: dict, new_processes: list[bytes]) -> None:
@@ -443,7 +443,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                 snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
                 toast(error, file=sys.stderr)
             # get list of new processes and connections since last update (might give this loop its own subprocess)
-            snitch_pipe.poll(timeout=15)
+            snitch_pipe.poll(timeout=5)
             while snitch_pipe.poll():
                 new_processes.append(snitch_pipe.recv_bytes())
             # process the list and update snitch
@@ -482,8 +482,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                     last_write = time.time()
                     write_snitch(snitch)
         except Exception as e:
-            error = "Updater %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
-            q_error.put(error)
+            q_error.put("Updater %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
 def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
@@ -516,7 +515,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     with con:
         # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
         con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
-    # con.close()
+    con.close()
     transactions = []
     new_processes = []
     last_write = 0
@@ -543,12 +542,12 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
                     _ = new_processes.pop()
                     break
                 elif timeout_counter > 1000:
-                    raise Exception("sync error between sql and updater on receive")
+                    q_error.put("sync error between sql and updater on receive")
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
             if time.time() - last_write > snitch["Config"]["Min DB write period (sec)"]:
                 transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
                 new_processes = []
-                # con = sqlite3.connect(file_path)
+                con = sqlite3.connect(file_path)
                 try:
                     with con:
                         # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
@@ -556,12 +555,10 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
                     transactions = []
                     last_write = time.time()
                 except Exception as e:
-                    error = "SQL execute %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
-                    q_error.put(error)
-                # con.close()
+                    q_error.put("SQL execute %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+                con.close()
         except Exception as e:
-            error = "SQL subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
-            q_error.put(error)
+            q_error.put("SQL subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
 def monitor_subprocess(snitch_pipe, q_error, _q_in, _q_out):
@@ -606,8 +603,7 @@ def monitor_subprocess(snitch_pipe, q_error, _q_in, _q_out):
             try:
                 b.perf_buffer_poll(timeout=-1)
             except Exception as e:
-                error = "BPF %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
-                q_error.put(error)
+                q_error.put("BPF %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
     else:
         q_error.put("Snitch subprocess permission error, requires root")
     return 1
@@ -656,8 +652,7 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
             # daemon=True flag for multiprocessing.Process does not work after root privileges are dropped for parent
             pass
         except Exception as e:
-            error = "VT %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
-            q_error.put(error)
+            q_error.put("VT %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
 def picosnitch_master_process(config, snitch_updater_pickle):
