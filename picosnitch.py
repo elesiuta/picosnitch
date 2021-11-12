@@ -755,7 +755,7 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     # ui loop
     max_y, max_x = stdscr.getmaxyx()
     first_line = 4
-    cursor, line = first_line, first_line
+    cursor, saved_cursor, line = first_line, first_line, first_line
     primary_value = ""
     toggle_subquery = False
     is_subquery = False
@@ -857,7 +857,12 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
         ch = stdscr.getch()
         if ch == ord("\n") or ch == ord(" "):
             toggle_subquery = True
+            if not is_subquery:
+                saved_cursor = cursor
         elif ch == curses.KEY_BACKSPACE:
+            if is_subquery:
+                cursor = saved_cursor
+                line = saved_cursor + 1
             is_subquery = False
             update_query = True
             execute_query = True
