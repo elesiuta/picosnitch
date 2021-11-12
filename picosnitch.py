@@ -518,6 +518,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     del transactions
     del initial_processes
     transactions = []
+    new_processes = []
     last_write = 0
     # main loop
     while True:
@@ -525,7 +526,6 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
             return 0
         try:
             q_updater_in.put(pickle.dumps({"type": "ready"}))
-            new_processes = []
             sql_pipe.poll(timeout=None)
             timeout_counter = 0
             while True:
@@ -538,9 +538,10 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
                 elif timeout_counter > 350:
                     raise Exception("sync error between sql and updater")
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
-            transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
-            del new_processes
             if time.time() - last_write > 30:
+                transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
+                del new_processes
+                new_processes = []
                 con = sqlite3.connect(file_path)
                 try:
                     with con:
