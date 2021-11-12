@@ -448,9 +448,9 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
         while not q_in.empty():
             msg: dict = pickle.loads(q_in.get())
             if msg["type"] == "ready":
-                sql_pipe.send_bytes(pickle.dumps(len(new_processes_q)))
                 for proc in new_processes_q:
                     sql_pipe.send_bytes(proc)
+                sql_pipe.send_bytes(pickle.dumps("done"))
                 new_processes_q = []
                 break
             elif msg["type"] == "sha256":
@@ -518,8 +518,12 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
         try:
             q_updater_in.put(pickle.dumps({"type": "ready"}))
             new_processes = []
-            for i in range(pickle.loads(sql_pipe.recv_bytes())):
-                new_processes.append(sql_pipe.recv_bytes())
+            sql_pipe.poll(timeout=None)
+            while True:
+                while sql_pipe.poll(timeout=0.1):
+                    new_processes.append(sql_pipe.recv_bytes())
+                if pickle.loads(new_processes[-1]) == "done":
+                    break
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
             transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
             con = sqlite3.connect(file_path)
