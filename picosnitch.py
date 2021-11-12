@@ -427,55 +427,58 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     new_processes_q = []
     # snitch updater main loop
     while True:
-        # check for errors
-        while not q_error.empty():
-            error = q_error.get()
-            snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
-            toast(error, file=sys.stderr)
-        # check if terminating
         if not parent_process.is_alive():
             snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " picosnitch has stopped")
             toast("picosnitch has stopped", file=sys.stderr)
             write_snitch_and_exit(snitch, q_error, snitch_pipe)
-        # get list of new processes and connections since last update (might give this loop its own subprocess)
-        snitch_pipe.poll(timeout=5)
-        while snitch_pipe.poll():
-            new_processes.append(snitch_pipe.recv_bytes())
-        # process the list and update snitch
-        update_snitch_proc_and_notify(snitch, new_processes)
-        new_processes_q += new_processes
-        new_processes = []
-        while not q_in.empty():
-            msg: dict = pickle.loads(q_in.get())
-            if msg["type"] == "ready":
-                for proc in new_processes_q:
-                    sql_pipe.send_bytes(proc)
-                sql_pipe.send_bytes(pickle.dumps("done"))
-                new_processes_q = []
-                break
-            elif msg["type"] == "sha256":
-                if msg["exe"] in snitch["SHA256"]:
-                    if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
-                        snitch["SHA256"][msg["exe"]][msg["sha256"]] = "VT Pending"
-                        toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
-                else:
-                    snitch["SHA256"][msg["exe"]] = {msg["sha256"]: "VT Pending"}
-            elif msg["type"] == "vt":
-                if msg["exe"] in snitch["SHA256"]:
-                    if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
-                        toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
-                    snitch["SHA256"][msg["exe"]][msg["sha256"]] = msg["result"]
-                else:
-                    snitch["SHA256"][msg["exe"]] = {msg["sha256"]: msg["result"]}
-                if msg["suspicious"]:
-                    toast("Suspicious VT results for " + msg["name"])
-        # write snitch
-        if time.time() - last_write > 30:
-            new_size = sys.getsizeof(pickle.dumps(snitch))
-            if new_size != sizeof_snitch or time.time() - last_write > 600:
-                sizeof_snitch = new_size
-                last_write = time.time()
-                write_snitch(snitch)
+        try:
+            # check for errors
+            while not q_error.empty():
+                error = q_error.get()
+                snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
+                toast(error, file=sys.stderr)
+            # get list of new processes and connections since last update (might give this loop its own subprocess)
+            snitch_pipe.poll(timeout=5)
+            while snitch_pipe.poll():
+                new_processes.append(snitch_pipe.recv_bytes())
+            # process the list and update snitch
+            update_snitch_proc_and_notify(snitch, new_processes)
+            new_processes_q += new_processes
+            new_processes = []
+            while not q_in.empty():
+                msg: dict = pickle.loads(q_in.get())
+                if msg["type"] == "ready":
+                    for proc in new_processes_q:
+                        sql_pipe.send_bytes(proc)
+                    sql_pipe.send_bytes(pickle.dumps("done"))
+                    new_processes_q = []
+                    break
+                elif msg["type"] == "sha256":
+                    if msg["exe"] in snitch["SHA256"]:
+                        if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
+                            snitch["SHA256"][msg["exe"]][msg["sha256"]] = "VT Pending"
+                            toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
+                    else:
+                        snitch["SHA256"][msg["exe"]] = {msg["sha256"]: "VT Pending"}
+                elif msg["type"] == "vt":
+                    if msg["exe"] in snitch["SHA256"]:
+                        if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
+                            toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
+                        snitch["SHA256"][msg["exe"]][msg["sha256"]] = msg["result"]
+                    else:
+                        snitch["SHA256"][msg["exe"]] = {msg["sha256"]: msg["result"]}
+                    if msg["suspicious"]:
+                        toast("Suspicious VT results for " + msg["name"])
+            # write snitch
+            if time.time() - last_write > 30:
+                new_size = sys.getsizeof(pickle.dumps(snitch))
+                if new_size != sizeof_snitch or time.time() - last_write > 600:
+                    sizeof_snitch = new_size
+                    last_write = time.time()
+                    write_snitch(snitch)
+        except Exception as e:
+            error = "Updater %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
+            q_error.put(error)
 
 
 def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
@@ -519,11 +522,15 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
             q_updater_in.put(pickle.dumps({"type": "ready"}))
             new_processes = []
             sql_pipe.poll(timeout=None)
+            timeout_counter = 0
             while True:
-                while sql_pipe.poll(timeout=0.1):
+                while sql_pipe.poll(timeout=1):
                     new_processes.append(sql_pipe.recv_bytes())
+                timeout_counter += 1
                 if pickle.loads(new_processes[-1]) == "done":
                     break
+                elif timeout_counter > 350:
+                    raise Exception("sync error between sql and updater")
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
             transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
             con = sqlite3.connect(file_path)
@@ -533,12 +540,13 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
                     con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
                 del transactions
                 transactions = []
-            except Exception:
-                pass
+            except Exception as e:
+                error = "SQL execute %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
+                q_error.put(error)
             con.close()
             del new_processes
         except Exception as e:
-            error = "SQL " + type(e).__name__ + str(e.args)
+            error = "SQL subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
             q_error.put(error)
 
 
@@ -584,7 +592,7 @@ def monitor_subprocess(snitch_pipe, q_error, _q_in, _q_out):
             try:
                 b.perf_buffer_poll(timeout=-1)
             except Exception as e:
-                error = "BPF " + type(e).__name__ + str(e.args)
+                error = "BPF %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno)
                 q_error.put(error)
     else:
         q_error.put("Snitch subprocess permission error, requires root")
