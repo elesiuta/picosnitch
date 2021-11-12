@@ -376,7 +376,7 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
         if snitch["Config"]["Log remote address"]:
             domain = reverse_dns_lookup(proc["ip"])
         else:
-            domain, ip = "", ""
+            domain, proc["ip"] = "", ""
         if proc["port"] in snitch["Config"]["Log ignore"] or proc["name"] in snitch["Config"]["Log ignore"]:
             continue
         transactions.append((proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"]))
@@ -528,6 +528,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
                     new_processes.append(sql_pipe.recv_bytes())
                 timeout_counter += 1
                 if pickle.loads(new_processes[-1]) == "done":
+                    _ = new_processes.pop()
                     break
                 elif timeout_counter > 350:
                     raise Exception("sync error between sql and updater")
