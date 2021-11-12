@@ -738,12 +738,13 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     time_i = 0
     time_period = ["All", "1 minute", "3 minutes", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "1 hour", "3 hours", "6 hours", "12 hours", "1 day", "3 days", "7 days", "30 days", "365 days"]
     pri_i = 0
-    screens = ["Applications", "Names", "Commands", "SHA256", "Connection Time", "Host Names", "Host IPs", "Ports", "Users"]
-    p_names = ["Application", "Name", "Command", "SHA256", "Connection Time", "Host Name", "Host IP", "Port", "User"]
-    p_col = ["exe", "name", "cmdline", "sha256", "contime", "domain", "ip", "port", "uid"]
+    p_screens = ["Applications", "Names", "SHA256", "Connection Time", "Host Names", "Host IPs", "Ports", "Users"]
+    p_names = ["Application", "Name", "SHA256", "Connection Time", "Host Name", "Host IP", "Port", "User"]
+    p_col = ["exe", "name", "sha256", "contime", "domain", "ip", "port", "uid"]
     sec_i = 0
-    s_names = p_names
-    s_col = p_col
+    s_screens = ["Applications", "Names", "Commands", "SHA256", "Connection Time", "Host Names", "Host IPs", "Ports", "Users"]
+    s_names = ["Application", "Name", "Command", "SHA256", "Connection Time", "Host Name", "Host IP", "Port", "User"]
+    s_col = ["exe", "name", "cmdline", "sha256", "contime", "domain", "ip", "port", "uid"]
     # ui loop
     max_y, max_x = stdscr.getmaxyx()
     first_line = 4
@@ -800,11 +801,11 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             execute_query = False
         help_bar = f"space/enter: filter on entry  backspace: remove filter  t: time period  r: refresh  q: quit {' ': <{curses.COLS}}"
         if is_subquery:
-            title_bar = f"<- {screens[sec_i-1]: <{curses.COLS//3 - 2}}{screens[sec_i]: ^{curses.COLS//3 - 2}}{screens[(sec_i+1) % len(screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
+            title_bar = f"<- {s_screens[sec_i-1]: <{curses.COLS//3 - 2}}{s_screens[sec_i]: ^{curses.COLS//3 - 2}}{s_screens[(sec_i+1) % len(s_screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
             status_bar = f"picosnitch {VERSION}\t time period: {time_period[time_i]}\t {p_names[pri_i].lower()}: {primary_value}{' ': <{curses.COLS}}"
             column_names = f"{s_names[sec_i]: <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
         else:
-            title_bar = f"<- {screens[pri_i-1]: <{curses.COLS//3 - 2}}{screens[pri_i]: ^{curses.COLS//3 - 2}}{screens[(pri_i+1) % len(screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
+            title_bar = f"<- {p_screens[pri_i-1]: <{curses.COLS//3 - 2}}{p_screens[pri_i]: ^{curses.COLS//3 - 2}}{p_screens[(pri_i+1) % len(p_screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
             status_bar = f"picosnitch {VERSION}\t time period: {time_period[time_i]}{' ': <{curses.COLS}}"
             column_names = f"{p_names[pri_i]: <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
         # display screen
@@ -821,6 +822,9 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                 stdscr.attrset(curses.color_pair(1) | curses.A_BOLD)
                 if toggle_subquery:
                     if is_subquery:
+                        if s_col[sec_i] not in p_col:
+                            is_subquery = False
+                            break
                         pri_i = sec_i
                     primary_value = name
                     is_subquery = True
