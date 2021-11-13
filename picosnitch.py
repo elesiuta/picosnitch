@@ -565,6 +565,7 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe"""
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
+    signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
     # backup_queue = multiprocessing.Queue() # could hold stuff if pipe error then try sending later?
     @functools.lru_cache(maxsize=1024)
     def get_exe(pid: int) -> str:
@@ -690,25 +691,22 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                 break
             suspend_check_now = time.time()
             if suspend_check_now - suspend_check_last > 20:
-                q_error.put("detected wake up from suspend, restarting picosnitch ...")
-                time.sleep(5)
-                break
+                p_monitor.q_in.put("terminate")
+                p_monitor.terminate()
+                _ = p_monitor.q_in.get()
+                p_monitor.start()
             suspend_check_last = suspend_check_now
     except Exception as e:
         q_error.put("picosnitch subprocess exception: %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
-    # something went wrong, attempt to restart picosnitch (terminate by running `picosnitch stop`)
-    for p in subprocesses:
-        try:
-            p.terminate()
-        except Exception:
-            q_error.put("failed to terminate %s" % (p.name))
-            time.sleep(1)
-    time.sleep(5)  # to prevent it from spawning new processes too quickly if it fails right away
+    # attempt to restart picosnitch (terminate by running `picosnitch stop`)
+    time.sleep(5)
+    _ = [p.terminate() for p in subprocesses]
     if importlib.util.find_spec("picosnitch"):
-        args = ["sudo", "-E", "python3", "-m", "picosnitch", "restart"]
+        args = ["python3", "-m", "picosnitch", "restart"]
     else:
-        args = ["sudo", "-E", sys.executable, sys.argv[0], "restart"]
-    os.execvp("sudo", args)
+        args = [sys.executable, sys.argv[0], "restart"]
+    subprocess.Popen(args)
+    return 0
 
 
 def main(vt_api_key: str = ""):
