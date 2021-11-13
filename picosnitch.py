@@ -300,7 +300,6 @@ def reverse_dns_lookup(ip: str) -> str:
         return ip
 
 
-@functools.lru_cache()
 def get_sha256(exe: str) -> str:
     """get sha256 of process executable"""
     try:
@@ -355,14 +354,14 @@ def initial_poll(snitch: dict) -> list:
     return initial_processes
 
 
-def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue) -> list[tuple]:
+def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, get_sha256_cache) -> list[tuple]:
     """update the snitch with sha data, update sql with conns, return list of notifications"""
     datetime = time.strftime("%Y-%m-%d %H:%M:%S")
     event_counter = collections.defaultdict(int)
     transactions = set()
     for proc in new_processes:
         proc = pickle.loads(proc)
-        sha256 = get_sha256(proc["exe"])
+        sha256 = get_sha256_cache(proc["exe"])
         if proc["exe"] in snitch["SHA256"]:
             if sha256 not in snitch["SHA256"][proc["exe"]]:
                 snitch["SHA256"][proc["exe"]][sha256] = "VT Pending"
@@ -489,7 +488,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
 def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
     """updates sqlite db with new connections and reports back to updater_subprocess if needed"""
     parent_process = multiprocessing.parent_process()
-    drop_root_privileges()
+    get_sha256_cache = functools.cache(get_sha256)
     # easier to update a copy of snitch here than trying to keep them in sync (just need to track sha256 and vt_results after this)
     snitch, initial_processes = pickle.loads(init_pickle)
     get_vt_results(snitch, p_virustotal.q_in, q_updater_in, True)
@@ -510,7 +509,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     con.commit()
     con.close()
     # process initial connections
-    transactions = update_snitch_sha_and_sql(snitch, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in)
+    transactions = update_snitch_sha_and_sql(snitch, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in, get_sha256_cache)
     del initial_processes
     con = sqlite3.connect(file_path)
     with con:
@@ -546,7 +545,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
                     q_error.put("sync error between sql and updater on receive")
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
             if time.time() - last_write > snitch["Config"]["Min DB write period (sec)"]:
-                transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
+                transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in, get_sha256_cache)
                 new_processes = []
                 con = sqlite3.connect(file_path)
                 try:
@@ -947,7 +946,6 @@ def start_ui() -> int:
 
     Loading database ...
     """)
-    print(splash)
     # init sql connection
     if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
         home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
