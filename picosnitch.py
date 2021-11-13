@@ -704,8 +704,11 @@ def picosnitch_master_process(config, snitch_updater_pickle):
             q_error.put("failed to terminate %s" % (p.name))
             time.sleep(1)
     time.sleep(5)  # to prevent it from spawning new processes too quickly if it fails right away
-    subprocess.Popen(sys.argv[:-1] + ["restart"])
-    return 0
+    if importlib.util.find_spec("picosnitch"):
+        args = ["sudo", "-E", "python3", "-m", "picosnitch", "restart"]
+    else:
+        args = ["sudo", "-E", sys.executable, sys.argv[0], "restart"]
+    os.execvp("sudo", args)
 
 
 def main(vt_api_key: str = ""):
