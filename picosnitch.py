@@ -454,6 +454,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
             while not q_in.empty():
                 msg: dict = pickle.loads(q_in.get())
                 if msg["type"] == "ready":
+                    sql_pipe.send_bytes(pickle.dumps(len(new_processes_q)))
                     for proc in new_processes_q:
                         sql_pipe.send_bytes(proc)
                     sql_pipe.send_bytes(pickle.dumps("done"))
@@ -524,25 +525,45 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
         if not parent_process.is_alive():
             return 0
         try:
+            # prep to receive new connections (wait if necessary then send "ready")
             while not q_updater_in.empty() and not sql_pipe.poll():
                 # wait until q_updater_in becomes empty or sql_pipe has something
                 time.sleep(1)
+            if not q_updater_in.empty():
+                q_error.put("sync error between sql and updater on ready (queue not empty)")
+            if sql_pipe.poll():
+                q_error.put("sync error between sql and updater on ready (pipe not empty)")
             if q_updater_in.empty() and not sql_pipe.poll():
                 # only say ready if q_updater_in is empty and sql_pipe is empty
                 q_updater_in.put(pickle.dumps({"type": "ready"}))
                 sql_pipe.poll(timeout=None)
-            else:
-                q_error.put("sync error between sql and updater on ready")
+            # receive first message, should be transfer size
+            transfer_size = -1
+            if sql_pipe.poll(timeout=10):
+                first_pickle = sql_pipe.recv_bytes()
+                if type(pickle.loads(first_pickle)) == int:
+                    transfer_size = pickle.loads(first_pickle)
+                elif pickle.loads(first_pickle) == "done":
+                    q_error.put("sync error between sql and updater on ready (received done)")
+                else:
+                    q_error.put("sync error between sql and updater on ready (did not receive transfer size)")
+                    new_processes.append(first_pickle)
+            # receive new connections until "done"
             timeout_counter = 0
             while True:
                 while sql_pipe.poll(timeout=1):
                     new_processes.append(sql_pipe.recv_bytes())
+                    transfer_size -= 1
                 timeout_counter += 1
                 if pickle.loads(new_processes[-1]) == "done":
                     _ = new_processes.pop()
+                    transfer_size += 1
                     break
-                elif timeout_counter > 30:
-                    q_error.put("sync error between sql and updater on receive")
+                elif timeout_counter > 60:
+                    q_error.put("sync error between sql and updater on receive (did not receive done)")
+            if transfer_size > 0:
+                q_error.put("sync error between sql and updater on receive (did not receive all messages)")
+            # process new connections
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
             if time.time() - last_write > snitch["Config"]["Min DB write period (sec)"]:
                 transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
