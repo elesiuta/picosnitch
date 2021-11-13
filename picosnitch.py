@@ -188,7 +188,6 @@ class ProcessManager:
                                         )
         self.p.start()
         self.pp = psutil.Process(self.p.pid)
-        self.time_last_start = time.time()
 
     def terminate(self) -> None:
         if self.p.is_alive():
@@ -691,17 +690,20 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                 break
             suspend_check_now = time.time()
             if suspend_check_now - suspend_check_last > 20:
-                p_monitor.q_in.put("terminate")
-                p_monitor.terminate()
-                _ = p_monitor.q_in.get()
-                p_monitor.start()
-                signal.signal(signal.SIGINT, lambda *args: [p.terminate() for p in subprocesses])
-                signal.signal(signal.SIGTERM, lambda *args: [p.terminate() for p in subprocesses])
+                q_error.put("detected wake up from suspend, restarting picosnitch ...")
+                time.sleep(5)
+                break
             suspend_check_last = suspend_check_now
     except Exception as e:
         q_error.put("picosnitch subprocess exception: %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
     # something went wrong, attempt to restart picosnitch (terminate by running `picosnitch stop`)
-    _ = [p.terminate() for p in subprocesses]
+    for p in subprocesses:
+        try:
+            p.terminate()
+        except Exception:
+            q_error.put("failed to terminate %s" % (p.name))
+            time.sleep(1)
+    time.sleep(5)  # to prevent it from spawning new processes too quickly if it fails right away
     subprocess.Popen(sys.argv[:-1] + ["restart"])
     return 0
 
