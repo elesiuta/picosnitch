@@ -362,6 +362,8 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
     transactions = set()
     for proc in new_processes:
         proc = pickle.loads(proc)
+        if type(proc) != dict:
+            continue
         sha256 = get_sha256(proc["exe"])
         if proc["exe"] in snitch["SHA256"]:
             if sha256 not in snitch["SHA256"][proc["exe"]]:
@@ -525,16 +527,10 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
         if not parent_process.is_alive():
             return 0
         try:
-            # prep to receive new connections (wait if necessary then send "ready")
-            while not q_updater_in.empty() and not sql_pipe.poll():
-                # wait until q_updater_in becomes empty or sql_pipe has something
-                time.sleep(1)
-            if not q_updater_in.empty():
-                q_error.put("sync error between sql and updater on ready (queue not empty)")
+            # prep to receive new connections
             if sql_pipe.poll():
                 q_error.put("sync error between sql and updater on ready (pipe not empty)")
-            if q_updater_in.empty() and not sql_pipe.poll():
-                # only say ready if q_updater_in is empty and sql_pipe is empty
+            else:
                 q_updater_in.put(pickle.dumps({"type": "ready"}))
                 sql_pipe.poll(timeout=None)
             # receive first message, should be transfer size
@@ -559,7 +555,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
                     _ = new_processes.pop()
                     transfer_size += 1
                     break
-                elif timeout_counter > 60:
+                elif timeout_counter > 30:
                     q_error.put("sync error between sql and updater on receive (did not receive done)")
             if transfer_size > 0:
                 q_error.put("sync error between sql and updater on receive (did not receive all messages)")
