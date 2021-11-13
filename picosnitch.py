@@ -196,9 +196,7 @@ class ProcessManager:
         self.p.join(timeout=20)
         if self.p.is_alive():
             self.p.kill()
-        self.p.join(timeout=10)
-        self.q_in.close()
-        self.q_out.close()
+        self.p.join(timeout=20)
         self.p.close()
 
     def is_alive(self) -> bool:
@@ -564,7 +562,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
             q_error.put("SQL subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
-def monitor_subprocess(snitch_pipe, q_error, _q_in, _q_out):
+def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe"""
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
@@ -601,7 +599,7 @@ def monitor_subprocess(snitch_pipe, q_error, _q_in, _q_out):
         b["ipv6_events"].open_perf_buffer(queue_ipv6_event)
         b["other_socket_events"].open_perf_buffer(queue_other_event)
         while True:
-            if not parent_process.is_alive():
+            if not parent_process.is_alive() or not q_in.empty():
                 return 0
             try:
                 b.perf_buffer_poll(timeout=-1)
@@ -693,7 +691,9 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                 break
             suspend_check_now = time.time()
             if suspend_check_now - suspend_check_last > 30:
+                p_monitor.q_in.put("terminate")
                 p_monitor.terminate()
+                _ = p_monitor.q_in.get()
                 p_monitor.start()
             suspend_check_last = suspend_check_now
     except Exception as e:
