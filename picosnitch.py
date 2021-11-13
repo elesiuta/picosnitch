@@ -690,11 +690,13 @@ def picosnitch_master_process(config, snitch_updater_pickle):
                 q_error.put("picosnitch memory usage exceeded 512 MB, attempting restart")
                 break
             suspend_check_now = time.time()
-            if suspend_check_now - suspend_check_last > 30:
+            if suspend_check_now - suspend_check_last > 20:
                 p_monitor.q_in.put("terminate")
                 p_monitor.terminate()
                 _ = p_monitor.q_in.get()
                 p_monitor.start()
+                signal.signal(signal.SIGINT, lambda *args: [p.terminate() for p in subprocesses])
+                signal.signal(signal.SIGTERM, lambda *args: [p.terminate() for p in subprocesses])
             suspend_check_last = suspend_check_now
     except Exception as e:
         q_error.put("picosnitch subprocess exception: %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
