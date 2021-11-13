@@ -212,7 +212,7 @@ def read_snitch() -> dict:
     """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
         "Config": {
-            "Min DB write period (sec)": 10,
+            "DB write min (sec)": 1,
             "Keep logs (days)": 365,
             "Log command lines": True,
             "Log remote address": True,
@@ -561,7 +561,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
                 q_error.put("sync error between sql and updater on receive (did not receive all messages)")
             # process new connections
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
-            if time.time() - last_write > snitch["Config"]["Min DB write period (sec)"]:
+            if time.time() - last_write > snitch["Config"]["DB write min (sec)"]:
                 transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
                 new_processes = []
                 con = sqlite3.connect(file_path)

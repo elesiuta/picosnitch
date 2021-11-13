@@ -22,6 +22,7 @@
 ```python
 {
   "Config": {
+    "DB write min (sec)": 1, # Minimum time between writing logs to snitch.db
     "Keep logs (days)": 365, # How many days to keep connection logs
     "Log command lines": True, # Log command line args for each executable
     "Log remote address": True, # Log remote addresses for each executable
