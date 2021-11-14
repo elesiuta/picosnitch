@@ -46,5 +46,5 @@
 `python setup.py install --user`
 - required dependencies (installed automatically from PyPI on setup if not already present)  
 `plyer psutil vt-py`
-- additional dependency ([requires manual installation]((https://github.com/iovisor/bcc/blob/master/INSTALL.md)))  
+- additional dependency ([requires manual installation](https://github.com/iovisor/bcc/blob/master/INSTALL.md))  
 `bcc`
