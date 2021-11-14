@@ -20,6 +20,7 @@
 import atexit
 import collections
 import curses
+import datetime
 import functools
 import ipaddress
 import json
@@ -332,7 +333,7 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiproces
 
 def initial_poll(snitch: dict) -> list:
     """poll initial processes and connections using psutil and queue for update_snitch()"""
-    datetime = time.strftime("%Y-%m-%d %H:%M:%S")
+    datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     initial_processes = []
     current_connections = set(psutil.net_connections(kind="all"))
     for conn in current_connections:
@@ -351,13 +352,13 @@ def initial_poll(snitch: dict) -> list:
                 error += str(proc)
             else:
                 error += "{process no longer exists}"
-            snitch["Errors"].append(datetime + " " + error)
+            snitch["Errors"].append(datetime_now + " " + error)
     return initial_processes
 
 
 def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue) -> list[tuple]:
     """update the snitch with sha data, update sql with conns, return list of notifications"""
-    datetime = time.strftime("%Y-%m-%d %H:%M:%S")
+    datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     event_counter = collections.defaultdict(int)
     transactions = set()
     for proc in new_processes:
@@ -385,7 +386,7 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
             domain, proc["ip"] = "", ""
         if proc["port"] in snitch["Config"]["Log ignore"] or proc["name"] in snitch["Config"]["Log ignore"]:
             continue
-        event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime, domain, proc["ip"], proc["port"], proc["uid"])
+        event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"])
         event_counter[str(event)] += 1
         transactions.add(event)
     return [(*event, event_counter[str(event)]) for event in transactions]
@@ -395,11 +396,11 @@ def update_snitch_proc_and_notify(snitch: dict, new_processes: list[bytes]) -> N
     """update the snitch with data from queues and create a notification if new entry"""
     # Prevent overwriting the snitch before this function completes in the event of a termination signal
     snitch["WRITELOCK"] = True
-    datetime = time.strftime("%Y-%m-%d %H:%M:%S")
+    datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     for proc in new_processes:
         proc = pickle.loads(proc)
         if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
-            snitch["Latest Entries"].append(datetime + " " + proc["name"] + " - " + proc["exe"])
+            snitch["Latest Entries"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"])
         if proc["name"] in snitch["Names"]:
             if proc["exe"] not in snitch["Names"][proc["name"]]:
                 snitch["Names"][proc["name"]].append(proc["exe"])
@@ -770,7 +771,19 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     stdscr.refresh()
     # screens from queries (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer)
     time_i = 0
+    time_j = 0
     time_period = ["All", "1 minute", "3 minutes", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "1 hour", "3 hours", "6 hours", "12 hours", "1 day", "3 days", "7 days", "30 days", "365 days"]
+    time_minutes = [0, 1, 3, 5, 10, 15, 30, 60, 180, 360, 720, 1440, 4320, 10080, 43200, 525600]
+    time_deltas = [datetime.timedelta(minutes=x) for x in time_minutes]
+    time_r = ["second"] + ["minute"]*6 + ["hour"]*4 + ["day"]*3 + ["month"] + ["year"]
+    time_resolution = collections.OrderedDict({
+        "second": lambda x: x,
+        "minute": lambda x: x.replace(microsecond=0, second=0),
+        "hour": lambda x: x.replace(microsecond=0, second=0, minute=0),
+        "day": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0),
+        "month": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1),
+        "year": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1, month=1),
+    })
     pri_i = 0
     p_screens = ["Applications", "Names", "SHA256", "Host Names", "Host IPs", "Ports", "Users", "Connection Time"]
     p_names = ["Application", "Name", "SHA256", "Host Name", "Host IP", "Port", "User", "Connection Time"]
@@ -794,18 +807,26 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
         pri_i %= len(p_col)
         sec_i %= len(s_col)
         time_i %= len(time_period)
+        if time_j < 0 or time_i == 0:
+            time_j = 0
         cursor %= line
         if cursor < first_line:
             cursor = first_line
         # generate screen
         if update_query:
+            if time_j == 0:
+                time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%Y-%m-%d %H:%M:%S")
+                time_history_end = "now"
+            elif time_i != 0:
+                time_history_start = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j + 1)).strftime("%Y-%m-%d %H:%M:%S")
+                time_history_end = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * time_j).strftime("%Y-%m-%d %H:%M:%S")
             if time_i == 0:
                 time_query = ""
             else:
                 if is_subquery:
-                    time_query = f" AND contime > datetime(\"now\", \"localtime\",\"-{time_period[time_i]}\")"
+                    time_query = f" AND contime > datetime(\"{time_history_start}\") AND contime < datetime(\"{time_history_end}\")"
                 else:
-                    time_query = f" WHERE contime > datetime(\"now\", \"localtime\", \"-{time_period[time_i]}\")"
+                    time_query = f" WHERE contime > datetime(\"{time_history_start}\") AND contime < datetime(\"{time_history_end}\")"
             if is_subquery:
                 current_query = f"SELECT {s_col[sec_i]}, SUM(\"events\") as Sum FROM connections WHERE {p_col[pri_i]} IS \"{primary_value}\"{time_query} GROUP BY {s_col[sec_i]}"
             else:
@@ -833,14 +854,14 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                     return 0
             current_screen = cur.fetchall()
             execute_query = False
-        help_bar = f"space/enter: filter on entry  backspace: remove filter  t: time period  r: refresh  q: quit {' ': <{curses.COLS}}"
+        help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  r: refresh  q: quit {' ': <{curses.COLS}}"
         if is_subquery:
             title_bar = f"<- {s_screens[sec_i-1]: <{curses.COLS//3 - 2}}{s_screens[sec_i]: ^{curses.COLS//3 - 2}}{s_screens[(sec_i+1) % len(s_screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
-            status_bar = f"picosnitch {VERSION}\t time period: {time_period[time_i]}\t {p_names[pri_i].lower()}: {primary_value}{' ': <{curses.COLS}}"
+            status_bar = f"picosnitch {VERSION}\t history: {time_history_end}\t time range: {time_period[time_i]}\t {p_names[pri_i].lower()}: {primary_value}{' ': <{curses.COLS}}"
             column_names = f"{s_names[sec_i]: <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
         else:
             title_bar = f"<- {p_screens[pri_i-1]: <{curses.COLS//3 - 2}}{p_screens[pri_i]: ^{curses.COLS//3 - 2}}{p_screens[(pri_i+1) % len(p_screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
-            status_bar = f"picosnitch {VERSION}\t time period: {time_period[time_i]}{' ': <{curses.COLS}}"
+            status_bar = f"picosnitch {VERSION}\t history: {time_history_end}\t time range: {time_period[time_i]}{' ': <{curses.COLS}}"
             column_names = f"{p_names[pri_i]: <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
         # display screen
         stdscr.clear()
@@ -909,6 +930,14 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             execute_query = True
         elif ch == ord("T"):
             time_i -= 1
+            update_query = True
+            execute_query = True
+        elif ch == ord("h"):
+            time_j += 1
+            update_query = True
+            execute_query = True
+        elif ch == ord("H"):
+            time_j -= 1
             update_query = True
             execute_query = True
         elif ch == curses.KEY_UP:
