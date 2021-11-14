@@ -1,6 +1,6 @@
 # picosnitch
 - An ultra lightweight program for linux that monitors your system and notifies you whenever it sees a new program that connects to the network
-- Or when the sha256 changes for one of those programs (can also check VirtusTotal)
+- Or when the sha256 changes for one of those programs (can also check VirusTotal)
 - And features a curses based UI for browsing past connections
 - Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
 # getting started
