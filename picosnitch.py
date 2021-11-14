@@ -53,7 +53,7 @@ try:
 except Exception:
     system_notification = lambda title, message, app_name: print(message)
 
-VERSION = "0.4.8dev"
+VERSION = "0.5.0"
 
 
 class Daemon:
@@ -478,7 +478,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                         snitch["SHA256"][msg["exe"]] = {msg["sha256"]: msg["result"]}
                     if msg["suspicious"]:
                         toast("Suspicious VT results for " + msg["name"])
-            # write snitch
+            # write snitch.json and error.log (no more than once per 30 seconds, and at least once per 10 minutes, may need adjusting, eg no delay if snitch["Errors"])
             if time.time() - last_write > 30:
                 new_size = sys.getsizeof(pickle.dumps(snitch))
                 if new_size != sizeof_snitch or time.time() - last_write > 600:
@@ -656,6 +656,7 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
                             q_vt_results.put(pickle.dumps((proc, sha256, "Failed to read file for upload", suspicious)))
                             continue
                     else:
+                        # could also be an invalid api key
                         q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (analysis not found)", suspicious)))
                         continue
                 if analysis.last_analysis_stats["malicious"] != 0 or analysis.last_analysis_stats["suspicious"] != 0:
@@ -866,7 +867,7 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             else:
                 stdscr.attrset(curses.color_pair(0))
             if 0 <= line - offset < curses.LINES - 1:
-                # special cases (cmdline null chars, uid)
+                # special cases (cmdline null chars, uid, maybe add sha256 and vt results or debsums lookup?)
                 if type(name) == str:
                     name = name.replace("\0", "")
                 elif (not is_subquery and p_col[pri_i] == "uid") or (is_subquery and s_col[sec_i] == "uid"):

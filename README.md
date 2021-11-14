@@ -1,6 +1,6 @@
 # picosnitch
-- An ultra lightweight program for linux to monitor your system and notify you whenever it sees a new program that connects to the network
-- Or when the sha256 changes for one of these programs (can also check VirtusTotal)
+- An ultra lightweight program for linux that monitors your system and notifies you whenever it sees a new program that connects to the network
+- Or when the sha256 changes for one of those programs (can also check VirtusTotal)
 - And features a curses based UI for browsing past connections
 - Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
 # getting started
@@ -14,7 +14,7 @@
 `picosnitch start`
 - stop daemon with  
 `picosnitch stop`
-- view past connections with (does not matter whether daemon is running or not)  
+- view past connections with  
 `picosnitch view`
 ## configuration
 - config and list of seen processes are stored in `~/.config/picosnitch/snitch.json`
@@ -22,7 +22,7 @@
 ```python
 {
   "Config": {
-    "DB write min (sec)": 1, # Minimum time between writing logs to snitch.db
+    "DB write min (sec)": 1, # Minimum time (seconds) between writing logs to snitch.db
     "Keep logs (days)": 365, # How many days to keep connection logs
     "Log command lines": True, # Log command line args for each executable
     "Log remote address": True, # Log remote addresses for each executable
