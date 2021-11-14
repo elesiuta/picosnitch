@@ -818,8 +818,8 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                 time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%Y-%m-%d %H:%M:%S")
                 time_history_end = "now"
             elif time_i != 0:
-                time_history_start = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j + 1)).strftime("%Y-%m-%d %H:%M:%S")
-                time_history_end = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * time_j).strftime("%Y-%m-%d %H:%M:%S")
+                time_history_start = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j)).strftime("%Y-%m-%d %H:%M:%S")
+                time_history_end = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-1)).strftime("%Y-%m-%d %H:%M:%S")
             if time_i == 0:
                 time_query = ""
             else:
@@ -925,10 +925,12 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             update_query = True
             execute_query = True
         elif ch == ord("t"):
+            time_j = 0
             time_i += 1
             update_query = True
             execute_query = True
         elif ch == ord("T"):
+            time_j = 0
             time_i -= 1
             update_query = True
             execute_query = True
