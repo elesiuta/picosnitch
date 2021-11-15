@@ -302,31 +302,31 @@ def reverse_dns_lookup(ip: str) -> str:
 
 
 @functools.cache
-def get_sha256(exe: str) -> str:
+def get_sha256(exe: str) -> typing.Union[str, None]:
     """get sha256 of process executable"""
     try:
         with open(exe, "rb") as f:
             sha256 = hashlib.sha256(f.read()).hexdigest()
         return sha256
     except Exception:
-        return "0000000000000000000000000000000000000000000000000000000000000000"
+        return None
 
 
 @functools.cache
 def get_sha256_retry(pid: int) -> str:
-    """try to get the real exe path for a failed sha256 (should at least work for most well-behaved flatpaks, so any all-0 sha256 should be seen as suspicious)"""
+    """try to get the real exe path for a failed sha256 (should at least work for most well-behaved flatpaks, so any all-? sha256 should be seen as suspicious)"""
     try:
         exe = os.readlink("/proc/%d/exe" % pid)
-        top_level = " /" + exe.split("/", 2)[1] + " "
-        tail = exe.split("/", 2)[2]
+        _, head, tail = exe.split("/", 2)
+        top_level = " /" + head + " "
         with open("/proc/%d/mountinfo" % pid, "r") as f:
             for line in f.readlines():
                 if top_level in line:
                     base_path = line.split()[3]
                     return get_sha256(os.path.join(base_path, tail))
-        return "0000000000000000000000000000000000000000000000000000000000000000"
+        return "????????????????????????????????????????????????????????????????"
     except Exception:
-        return "0000000000000000000000000000000000000000000000000000000000000000"
+        return "????????????????????????????????????????????????????????????????"
 
 
 def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, check_pending: bool = False) -> None:
@@ -383,7 +383,7 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
         if type(proc) != dict:
             continue
         sha256 = get_sha256(proc["exe"])
-        if sha256 == "0000000000000000000000000000000000000000000000000000000000000000":
+        if sha256 is None:
             sha256 = get_sha256_retry(proc["pid"])
         if proc["exe"] in snitch["SHA256"]:
             if sha256 not in snitch["SHA256"][proc["exe"]]:
