@@ -817,9 +817,11 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             if time_j == 0:
                 time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%Y-%m-%d %H:%M:%S")
                 time_history_end = "now"
+                time_history = "now"
             elif time_i != 0:
-                time_history_start = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j)).strftime("%Y-%m-%d %H:%M:%S")
-                time_history_end = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-1)).strftime("%Y-%m-%d %H:%M:%S")
+                time_history_start = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-1)).strftime("%Y-%m-%d %H:%M:%S")
+                time_history_end = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-2)).strftime("%Y-%m-%d %H:%M:%S")
+                time_history = f"{time_history_start} -> {time_history_end}"
             if time_i == 0:
                 time_query = ""
             else:
@@ -857,11 +859,11 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
         help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  r: refresh  q: quit {' ': <{curses.COLS}}"
         if is_subquery:
             title_bar = f"<- {s_screens[sec_i-1]: <{curses.COLS//3 - 2}}{s_screens[sec_i]: ^{curses.COLS//3 - 2}}{s_screens[(sec_i+1) % len(s_screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
-            status_bar = f"picosnitch {VERSION}\t history: {time_history_end}\t time range: {time_period[time_i]}\t {p_names[pri_i].lower()}: {primary_value}{' ': <{curses.COLS}}"
+            status_bar = f"picosnitch {VERSION}  history: {time_history}  time range: {time_period[time_i]}  {p_names[pri_i].lower()}: {primary_value}{' ': <{curses.COLS}}"
             column_names = f"{s_names[sec_i]: <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
         else:
             title_bar = f"<- {p_screens[pri_i-1]: <{curses.COLS//3 - 2}}{p_screens[pri_i]: ^{curses.COLS//3 - 2}}{p_screens[(pri_i+1) % len(p_screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
-            status_bar = f"picosnitch {VERSION}\t history: {time_history_end}\t time range: {time_period[time_i]}{' ': <{curses.COLS}}"
+            status_bar = f"picosnitch {VERSION}  history: {time_history}  time range: {time_period[time_i]}{' ': <{curses.COLS}}"
             column_names = f"{p_names[pri_i]: <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
         # display screen
         stdscr.clear()
