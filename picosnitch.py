@@ -54,7 +54,7 @@ try:
 except Exception:
     system_notification = lambda title, message, app_name: print(message)
 
-VERSION = "0.5.0"
+VERSION = "0.5.1dev"
 
 
 class Daemon:
@@ -312,6 +312,23 @@ def get_sha256(exe: str) -> str:
         return "0000000000000000000000000000000000000000000000000000000000000000"
 
 
+@functools.cache
+def get_sha256_retry(pid: int) -> str:
+    """try to get the real exe path for a failed sha256 (should at least work for most well-behaved flatpaks, so any all-0 sha256 should be seen as suspicious)"""
+    try:
+        exe = os.readlink("/proc/%d/exe" % pid)
+        top_level = " /" + exe.split("/", 2)[1] + " "
+        tail = exe.split("/", 2)[2]
+        with open("/proc/%d/mountinfo" % pid, "r") as f:
+            for line in f.readlines():
+                if top_level in line:
+                    base_path = line.split()[3]
+                    return get_sha256(os.path.join(base_path, tail))
+        return "0000000000000000000000000000000000000000000000000000000000000000"
+    except Exception:
+        return "0000000000000000000000000000000000000000000000000000000000000000"
+
+
 def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, check_pending: bool = False) -> None:
     """get virustotal results from subprocess and update snitch"""
     if check_pending:
@@ -366,6 +383,8 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
         if type(proc) != dict:
             continue
         sha256 = get_sha256(proc["exe"])
+        if sha256 == "0000000000000000000000000000000000000000000000000000000000000000":
+            sha256 = get_sha256_retry(proc["pid"])
         if proc["exe"] in snitch["SHA256"]:
             if sha256 not in snitch["SHA256"][proc["exe"]]:
                 snitch["SHA256"][proc["exe"]][sha256] = "VT Pending"
