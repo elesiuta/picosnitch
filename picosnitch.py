@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # picosnitch
-# Copyright (C) 2020 Eric Lesiuta
+# Copyright (C) 2020-2021 Eric Lesiuta
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
