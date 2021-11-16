@@ -302,10 +302,10 @@ def reverse_dns_lookup(ip: str) -> str:
 
 
 @functools.cache
-def get_sha256(exe: str) -> typing.Union[str, None]:
-    """get sha256 of process executable"""
+def get_sha256(pid: int) -> typing.Union[str, None]:
+    """get sha256 of process executable, more reliable to use /proc/pid/exe due to mounts and namespaces, and not sure how to get the actual path since not a normal symlink"""
     try:
-        with open(exe, "rb") as f:
+        with open("/proc/%d/exe" % pid, "rb") as f:
             sha256 = hashlib.sha256(f.read()).hexdigest()
         return sha256
     except Exception:
@@ -313,18 +313,12 @@ def get_sha256(exe: str) -> typing.Union[str, None]:
 
 
 @functools.cache
-def get_sha256_retry(pid: int) -> str:
-    """try to get the real exe path for a failed sha256 (should at least work for most well-behaved flatpaks, so any !??? sha256 should be seen as suspicious)"""
+def get_sha256_retry(exe: str) -> str:
+    """fallback to get sha256 of process executable with the path from readlink if the pid terminated, should try to get the actual path from /proc/pid/exe, or maybe keep a fd to it open"""
     try:
-        exe = os.readlink("/proc/%d/exe" % pid)
-        _, head, tail = exe.split("/", 2)
-        top_level = " /" + head + " "
-        with open("/proc/%d/mountinfo" % pid, "r") as f:
-            for line in f.readlines():
-                if top_level in line:
-                    base_path = line.split()[3]
-                    return get_sha256(os.path.join(base_path, tail))
-        return "!???????????????????????????????????????????????????????????????"
+        with open(exe, "rb") as f:
+            sha256 = hashlib.sha256(f.read()).hexdigest()
+        return sha256
     except Exception:
         return "!???????????????????????????????????????????????????????????????"
 
@@ -382,9 +376,9 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
         proc = pickle.loads(proc)
         if type(proc) != dict:
             continue
-        sha256 = get_sha256(proc["exe"])
+        sha256 = get_sha256(proc["pid"])
         if sha256 is None:
-            sha256 = get_sha256_retry(proc["pid"])
+            sha256 = get_sha256_retry(proc["exe"])
         if proc["exe"] in snitch["SHA256"]:
             if sha256 not in snitch["SHA256"][proc["exe"]]:
                 snitch["SHA256"][proc["exe"]][sha256] = "VT Pending"
