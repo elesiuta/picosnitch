@@ -301,22 +301,33 @@ def reverse_dns_lookup(ip: str) -> str:
         return ip
 
 
-@functools.cache
-def get_sha256(pid: int) -> typing.Union[str, None]:
-    """get sha256 of process executable, more reliable to use /proc/pid/exe due to mounts and namespaces, and not sure how to get the actual path since not a normal symlink"""
+@functools.lru_cache(maxsize=256)
+def get_sha256_fd(path: str) -> str:
+    """get sha256 of process executable from /proc/monitor_pid/fd/proc_exe_fd"""
+    try:
+        with open(path, "rb") as f:
+            sha256 = hashlib.sha256(f.read()).hexdigest()
+        return sha256
+    except Exception:
+        return "!???????????????????????????????????????????????????????????????"
+
+
+@functools.lru_cache(maxsize=1024)
+def get_sha256_pid(pid: int) -> str:
+    """get sha256 of process executable from /proc/pid/exe"""
     try:
         with open("/proc/%d/exe" % pid, "rb") as f:
             sha256 = hashlib.sha256(f.read()).hexdigest()
         return sha256
     except Exception:
-        return None
+        return "!???????????????????????????????????????????????????????????????"
 
 
 @functools.cache
-def get_sha256_retry(exe: str) -> str:
-    """fallback to get sha256 of process executable with the path from readlink if the pid terminated, should try to get the actual path from /proc/pid/exe, or maybe keep a fd to it open"""
+def get_sha256_readlink(path: str) -> str:
+    """get sha256 of process executable from readlink /proc/pid/exe"""
     try:
-        with open(exe, "rb") as f:
+        with open(path, "rb") as f:
             sha256 = hashlib.sha256(f.read()).hexdigest()
         return sha256
     except Exception:
@@ -352,6 +363,7 @@ def initial_poll(snitch: dict) -> list:
             if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid", "uids"], ad_value="")
                 proc["cmdline"] = shlex.join(proc["cmdline"])
+                proc["fd"] = ""
                 proc["uid"] = proc["uids"][0]
                 proc["ip"] = conn.raddr.ip
                 proc["port"] = conn.raddr.port
@@ -376,9 +388,16 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
         proc = pickle.loads(proc)
         if type(proc) != dict:
             continue
-        sha256 = get_sha256(proc["pid"])
-        if sha256 is None:
-            sha256 = get_sha256_retry(proc["exe"])
+        sha256 = "!"
+        try:
+            if os.readlink(proc["fd"]) == proc["exe"]:
+                sha256 = get_sha256_fd(proc["fd"])
+        except Exception:
+            pass
+        if sha256.startswith("!"):
+            sha256 = get_sha256_pid(proc["pid"])
+            if sha256.startswith("!"):
+                sha256 = get_sha256_readlink(proc["exe"])
         if proc["exe"] in snitch["SHA256"]:
             if sha256 not in snitch["SHA256"][proc["exe"]]:
                 snitch["SHA256"][proc["exe"]][sha256] = "VT Pending"
@@ -597,7 +616,21 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
-    # backup_queue = multiprocessing.Queue() # could hold stuff if pipe error then try sending later?
+    fd_queue = multiprocessing.Queue()
+    _ = [os.open("/proc/self/exe", os.O_RDONLY) for x in range(512)]
+    self_pid = os.getpid()
+    @functools.lru_cache(maxsize=256)
+    def get_fd(pid: int) -> str:
+        try:
+            fd = os.open("/proc/%d/exe" % pid, os.O_RDONLY)
+            fd_queue.put(fd)
+            try:
+                os.close(fd_queue.get())
+            except Exception:
+                pass
+            return "/proc/%d/fd/%d" % (self_pid, fd)
+        except Exception:
+            return ""
     @functools.lru_cache(maxsize=1024)
     def get_exe(pid: int) -> str:
         try:
@@ -616,16 +649,16 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
         b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
         def queue_ipv4_event(cpu, data, size):
             event = b["ipv4_events"].event(data)
-            exe, cmd = get_exe(event.pid), get_cmd(event.pid)
-            snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+            fd, exe, cmd = get_fd(event.pid), get_exe(event.pid), get_cmd(event.pid)
+            snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
         def queue_ipv6_event(cpu, data, size):
             event = b["ipv6_events"].event(data)
-            exe, cmd = get_exe(event.pid), get_cmd(event.pid)
-            snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
+            fd, exe, cmd = get_fd(event.pid), get_exe(event.pid), get_cmd(event.pid)
+            snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
         def queue_other_event(cpu, data, size):
             event = b["other_socket_events"].event(data)
-            exe, cmd = get_exe(event.pid), get_cmd(event.pid)
-            snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
+            fd, exe, cmd = get_fd(event.pid), get_exe(event.pid), get_cmd(event.pid)
+            snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
         b["ipv4_events"].open_perf_buffer(queue_ipv4_event)
         b["ipv6_events"].open_perf_buffer(queue_ipv6_event)
         b["other_socket_events"].open_perf_buffer(queue_other_event)
