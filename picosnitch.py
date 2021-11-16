@@ -56,6 +56,10 @@ except Exception:
 
 VERSION = "0.5.1dev"
 
+FD_CACHE = 256
+FD_MAX = 512
+PID_CACHE = 1024
+
 
 class Daemon:
 	"""A generic daemon class from http://www.jejik.com/files/examples/daemon3x.py
@@ -301,7 +305,7 @@ def reverse_dns_lookup(ip: str) -> str:
         return ip
 
 
-@functools.lru_cache(maxsize=256)
+@functools.lru_cache(maxsize=FD_CACHE)
 def get_sha256_fd(path: str) -> str:
     """get sha256 of process executable from /proc/monitor_pid/fd/proc_exe_fd"""
     try:
@@ -312,7 +316,7 @@ def get_sha256_fd(path: str) -> str:
         return "!???????????????????????????????????????????????????????????????"
 
 
-@functools.lru_cache(maxsize=1024)
+@functools.lru_cache(maxsize=PID_CACHE)
 def get_sha256_pid(pid: int) -> str:
     """get sha256 of process executable from /proc/pid/exe"""
     try:
@@ -617,9 +621,9 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
     parent_process = multiprocessing.parent_process()
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
     fd_queue = multiprocessing.Queue()
-    _ = [os.open("/proc/self/exe", os.O_RDONLY) for x in range(512)]
+    _ = [fd_queue.put(os.open("/proc/self/exe", os.O_RDONLY)) for x in range(FD_MAX)]
     self_pid = os.getpid()
-    @functools.lru_cache(maxsize=256)
+    @functools.lru_cache(maxsize=FD_CACHE)
     def get_fd(pid: int) -> str:
         try:
             fd = os.open("/proc/%d/exe" % pid, os.O_RDONLY)
@@ -631,13 +635,13 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
             return "/proc/%d/fd/%d" % (self_pid, fd)
         except Exception:
             return ""
-    @functools.lru_cache(maxsize=1024)
+    @functools.lru_cache(maxsize=PID_CACHE)
     def get_exe(pid: int) -> str:
         try:
             return os.readlink("/proc/%d/exe" % pid)
         except Exception:
             return ""
-    @functools.lru_cache(maxsize=1024)
+    @functools.lru_cache(maxsize=PID_CACHE)
     def get_cmd(pid: int) -> str:
         try:
             with open("/proc/%d/cmdline" % pid, "r") as f:
