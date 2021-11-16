@@ -827,7 +827,7 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     time_deltas = [datetime.timedelta(minutes=x) for x in time_minutes]
     time_r = ["second"] + ["minute"]*6 + ["hour"]*4 + ["day"]*3 + ["month"] + ["year"]
     time_resolution = collections.OrderedDict({
-        "second": lambda x: x,
+        "second": lambda x: x.replace(microsecond=0),
         "minute": lambda x: x.replace(microsecond=0, second=0),
         "hour": lambda x: x.replace(microsecond=0, second=0, minute=0),
         "day": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0),
@@ -867,7 +867,7 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             if time_j == 0:
                 time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%Y-%m-%d %H:%M:%S")
                 time_history_end = "now"
-                time_history = "now"
+                time_history = time_resolution["second"](datetime.datetime.now())
             elif time_i != 0:
                 time_history_start = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-1)).strftime("%Y-%m-%d %H:%M:%S")
                 time_history_end = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-2)).strftime("%Y-%m-%d %H:%M:%S")
@@ -967,6 +967,7 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             update_query = True
             execute_query = True
         elif ch == ord("r"):
+            update_query = True
             execute_query = True
         elif ch == ord("s"):
             sec_i += 1
