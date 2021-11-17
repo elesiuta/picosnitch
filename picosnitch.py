@@ -620,21 +620,25 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
-    fd_queue = multiprocessing.Queue()
-    _ = [fd_queue.put(os.open("/proc/self/exe", os.O_RDONLY)) for x in range(FD_MAX)]
+    fd_dict = collections.OrderedDict()
+    for x in range(FD_MAX):
+        fd_dict["tmp%d" % x] = os.open("/proc/self/exe", os.O_RDONLY)
     self_pid = os.getpid()
-    @functools.lru_cache(maxsize=FD_CACHE)
     def get_fd(pid: int) -> str:
         try:
-            fd = os.open("/proc/%d/exe" % pid, os.O_RDONLY)
-            fd_queue.put(fd)
-            try:
-                os.close(fd_queue.get())
-            except Exception:
-                pass
-            return "/proc/%d/fd/%d" % (self_pid, fd)
+            fd_dict.move_to_end(pid)
+            return "/proc/%d/fd/%d" % (self_pid, fd_dict[pid])
         except Exception:
-            return ""
+            try:
+                fd = os.open("/proc/%d/exe" % pid, os.O_RDONLY)
+                fd_dict[pid] = fd
+                try:
+                    os.close(fd_dict.popitem(last=False)[1])
+                except Exception:
+                    pass
+                return "/proc/%d/fd/%d" % (self_pid, fd)
+            except Exception:
+                return ""
     @functools.lru_cache(maxsize=PID_CACHE)
     def get_exe(pid: int) -> str:
         try:
