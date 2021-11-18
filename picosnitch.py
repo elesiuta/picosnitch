@@ -58,6 +58,7 @@ VERSION = "0.5.1dev"
 
 FD_CACHE = 256
 FD_MAX = 512
+PAGE_CNT = 8
 PID_CACHE = 1024
 
 
@@ -655,6 +656,9 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
     if os.getuid() == 0:
         b = BPF(text=bpf_text)
         b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
+        def queue_lost(*args):
+            # if you see this, try increasing priority with nice or increasing PAGE_CNT
+            q_error.put("BPF callbacks not processing fast enough, may have lost data")
         def queue_ipv4_event(cpu, data, size):
             event = b["ipv4_events"].event(data)
             fd, exe, cmd = get_fd(event.pid), get_exe(event.pid), get_cmd(event.pid)
@@ -667,9 +671,9 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
             event = b["other_socket_events"].event(data)
             fd, exe, cmd = get_fd(event.pid), get_exe(event.pid), get_cmd(event.pid)
             snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
-        b["ipv4_events"].open_perf_buffer(queue_ipv4_event)
-        b["ipv6_events"].open_perf_buffer(queue_ipv6_event)
-        b["other_socket_events"].open_perf_buffer(queue_other_event)
+        b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+        b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+        b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
         while True:
             if not parent_process.is_alive() or not q_in.empty():
                 return 0
