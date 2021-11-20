@@ -50,11 +50,14 @@ except Exception as e:
 
 try:
     import dbus
+    os.seteuid(int(os.getenv("SUDO_UID")))
     dbus_session_obj = dbus.SessionBus().get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications")
     interface = dbus.Interface(dbus_session_obj, "org.freedesktop.Notifications")
     system_notification = lambda title, message: interface.Notify("picosnitch", 0, "", title, message, [], [], 2000)
 except Exception:
     system_notification = lambda title, message: print(message)
+finally:
+    os.seteuid(os.getuid())
 
 VERSION = "0.5.1dev"
 
@@ -217,7 +220,7 @@ class ProcessManager:
 
 
 def read_snitch() -> dict:
-    """read snitch from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
+    """read snitch.json from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
         "Config": {
             "DB write min (sec)": 1,
@@ -252,9 +255,13 @@ def read_snitch() -> dict:
 
 
 def write_snitch(snitch: dict) -> None:
-    """write snitch to correct location (root privileges should be dropped first)"""
-    file_path = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "snitch.json")
-    error_log = os.path.join(os.path.expanduser("~"), ".config", "picosnitch", "error.log")
+    """write snitch.json and error.log to correct location (even if sudo is used without preserve-env)"""
+    if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
+        home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
+    else:
+        home_dir = os.path.expanduser("~")
+    file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.json")
+    error_log = os.path.join(home_dir, ".config", "picosnitch", "error.log")
     if snitch.pop("WRITELOCK", False):
         file_path += "~"
     if not os.path.isdir(os.path.dirname(file_path)):
@@ -270,13 +277,6 @@ def write_snitch(snitch: dict) -> None:
     except Exception:
         snitch["Errors"] = []
         toast("picosnitch write error", file=sys.stderr)
-
-
-def drop_root_privileges() -> None:
-    """drop root privileges on linux"""
-    if sys.platform.startswith("linux") and os.getuid() == 0:
-        os.setgid(int(os.getenv("SUDO_GID")))
-        os.setuid(int(os.getenv("SUDO_UID")))
 
 
 def write_snitch_and_exit(snitch: dict, q_error: multiprocessing.Queue, snitch_pipe):
@@ -459,9 +459,8 @@ def update_snitch_proc_and_notify(snitch: dict, new_processes: list[bytes]) -> N
 
 def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
     """main subprocess where snitch.json is updated with new connections and the user is notified"""
-    # drop root privileges and init variables for loop
+    # init variables for loop
     parent_process = multiprocessing.parent_process()
-    drop_root_privileges()
     snitch, initial_processes = pickle.loads(init_pickle)
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
@@ -691,7 +690,6 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
 def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
     """get virustotal results of process executable"""
     parent_process = multiprocessing.parent_process()
-    drop_root_privileges()
     try:
         import vt
         vt_enabled = True
