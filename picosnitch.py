@@ -302,8 +302,7 @@ def toast(msg: str, file=sys.stdout) -> None:
 def reverse_dns_lookup(ip: str) -> str:
     """do a reverse dns lookup, return original ip if fails"""
     try:
-        host = socket.getnameinfo((ip, 0), 0)[0]
-        return ".".join(reversed(host.split(".")))
+        return socket.getnameinfo((ip, 0), 0)[0]
     except Exception:
         return ip
 
