@@ -49,10 +49,12 @@ except Exception as e:
     print("Make sure dependency is installed, or environment is preserved if running with sudo", file=sys.stderr)
 
 try:
-    import plyer
-    system_notification = plyer.notification.notify
+    import dbus
+    dbus_session_obj = dbus.SessionBus().get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications")
+    interface = dbus.Interface(dbus_session_obj, "org.freedesktop.Notifications")
+    system_notification = lambda title, message: interface.Notify("picosnitch", 0, "", title, message, [], [], 2000)
 except Exception:
-    system_notification = lambda title, message, app_name: print(message)
+    system_notification = lambda title, message: print(message)
 
 VERSION = "0.5.1dev"
 
@@ -291,7 +293,7 @@ def write_snitch_and_exit(snitch: dict, q_error: multiprocessing.Queue, snitch_p
 def toast(msg: str, file=sys.stdout) -> None:
     """create a system tray notification, tries printing as a fallback, requires -E if running with sudo"""
     try:
-        system_notification(title="picosnitch", message=msg, app_name="picosnitch")
+        system_notification(title="picosnitch", message=msg)
     except Exception:
         print("picosnitch (toast failed): " + msg, file=file)
 

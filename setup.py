@@ -15,9 +15,9 @@ setuptools.setup(
     entry_points={"console_scripts": ["picosnitch = picosnitch:start_daemon"]},
     install_requires=["psutil"],
     extras_require={
-        "enable_notifications":  ["plyer"],
+        "enable_notifications":  ["dbus-python"],
         "enable_virustotal":  ["vt-py"],
-        "full":  ["plyer", "vt-py"]
+        "full":  ["dbus-python", "vt-py"]
     },
     classifiers=[
         "Programming Language :: Python :: 3",
