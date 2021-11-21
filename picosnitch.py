@@ -313,8 +313,7 @@ def get_sha256_fd(path: str) -> str:
     """get sha256 of process executable from /proc/monitor_pid/fd/proc_exe_fd"""
     try:
         with open(path, "rb") as f:
-            sha256 = hashlib.sha256(f.read()).hexdigest()
-        return sha256
+            return hashlib.sha256(f.read()).hexdigest()
     except Exception:
         return "!???????????????????????????????????????????????????????????????"
 
@@ -324,8 +323,7 @@ def get_sha256_pid(pid: int) -> str:
     """get sha256 of process executable from /proc/pid/exe"""
     try:
         with open("/proc/%d/exe" % pid, "rb") as f:
-            sha256 = hashlib.sha256(f.read()).hexdigest()
-        return sha256
+            return hashlib.sha256(f.read()).hexdigest()
     except Exception:
         return "!???????????????????????????????????????????????????????????????"
 
@@ -335,14 +333,13 @@ def get_sha256_readlink(path: str) -> str:
     """get sha256 of process executable from readlink /proc/pid/exe"""
     try:
         with open(path, "rb") as f:
-            sha256 = hashlib.sha256(f.read()).hexdigest()
-        return sha256
+            return hashlib.sha256(f.read()).hexdigest()
     except Exception:
         return "!???????????????????????????????????????????????????????????????"
 
 
 def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, check_pending: bool = False) -> None:
-    """get virustotal results from subprocess and update snitch"""
+    """get virustotal results from subprocess and update snitch, q_vt = q_in if check_pending else q_out"""
     if check_pending:
         for exe in snitch["SHA256"]:
             for sha256 in snitch["SHA256"][exe]:
@@ -361,7 +358,7 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiproces
 
 
 def initial_poll(snitch: dict) -> list:
-    """poll initial processes and connections using psutil and queue for update_snitch()"""
+    """poll initial processes and connections using psutil and queue for updater_subprocess"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     initial_processes = []
     current_connections = set(psutil.net_connections(kind="all"))
@@ -386,7 +383,7 @@ def initial_poll(snitch: dict) -> list:
     return initial_processes
 
 
-def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue) -> list[tuple]:
+def sql_subprocess_helper(snitch: dict, new_processes: list[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue) -> list[tuple]:
     """update the snitch with sha data, update sql with conns, return list of notifications"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     event_counter = collections.defaultdict(int)
@@ -431,8 +428,8 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
     return [(*event, event_counter[str(event)]) for event in transactions]
 
 
-def update_snitch_proc_and_notify(snitch: dict, new_processes: list[bytes]) -> None:
-    """update the snitch with data from queues and create a notification if new entry"""
+def updater_subprocess_helper(snitch: dict, new_processes: list[bytes]) -> None:
+    """update the snitch with connection data and create a notification if new entry"""
     # Prevent overwriting the snitch before this function completes in the event of a termination signal
     snitch["WRITELOCK"] = True
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -458,7 +455,7 @@ def update_snitch_proc_and_notify(snitch: dict, new_processes: list[bytes]) -> N
 
 
 def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
-    """main subprocess where snitch.json is updated with new connections and the user is notified"""
+    """coordinates connection data between subprocesses, updates snitch.json with new connections and creates notifications"""
     os.nice(-20)
     # init variables for loop
     parent_process = multiprocessing.parent_process()
@@ -469,7 +466,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     signal.signal(signal.SIGTERM, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
     signal.signal(signal.SIGINT, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
     # update snitch with initial running processes and connections
-    update_snitch_proc_and_notify(snitch, [pickle.dumps(proc) for proc in initial_processes])
+    updater_subprocess_helper(snitch, [pickle.dumps(proc) for proc in initial_processes])
     del initial_processes
     new_processes = []
     new_processes_q = []
@@ -490,7 +487,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
             while snitch_pipe.poll():
                 new_processes.append(snitch_pipe.recv_bytes())
             # process the list and update snitch
-            update_snitch_proc_and_notify(snitch, new_processes)
+            updater_subprocess_helper(snitch, new_processes)
             new_processes_q += new_processes
             new_processes = []
             while not q_in.empty():
@@ -552,7 +549,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     con.commit()
     con.close()
     # process initial connections
-    transactions = update_snitch_sha_and_sql(snitch, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in)
+    transactions = sql_subprocess_helper(snitch, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in)
     del initial_processes
     con = sqlite3.connect(file_path)
     with con:
@@ -602,7 +599,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
             # process new connections
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
             if time.time() - last_write > snitch["Config"]["DB write min (sec)"]:
-                transactions += update_snitch_sha_and_sql(snitch, new_processes, p_virustotal.q_in, q_updater_in)
+                transactions += sql_subprocess_helper(snitch, new_processes, p_virustotal.q_in, q_updater_in)
                 new_processes = []
                 con = sqlite3.connect(file_path)
                 try:
