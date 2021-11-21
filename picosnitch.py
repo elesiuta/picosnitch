@@ -459,6 +459,7 @@ def update_snitch_proc_and_notify(snitch: dict, new_processes: list[bytes]) -> N
 
 def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
     """main subprocess where snitch.json is updated with new connections and the user is notified"""
+    os.nice(-20)
     # init variables for loop
     parent_process = multiprocessing.parent_process()
     snitch, initial_processes = pickle.loads(init_pickle)
@@ -619,6 +620,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
 
 def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe"""
+    os.nice(-20)
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
