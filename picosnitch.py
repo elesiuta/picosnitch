@@ -409,7 +409,7 @@ def update_snitch_sha_and_sql(snitch: dict, new_processes: list[bytes], q_vt: mu
             if sha256 not in snitch["SHA256"][proc["exe"]]:
                 snitch["SHA256"][proc["exe"]][sha256] = "VT Pending"
                 q_vt.put(pickle.dumps((proc, sha256)))
-                q_out.put(pickle.dumps({"type": "sha", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
+                q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
         else:
             snitch["SHA256"][proc["exe"]] = {sha256: "VT Pending"}
             q_vt.put(pickle.dumps((proc, sha256)))
