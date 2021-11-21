@@ -303,7 +303,11 @@ def reverse_dns_lookup(ip: str) -> str:
     """do a reverse dns lookup, return original ip if fails"""
     try:
         host = socket.getnameinfo((ip, 0), 0)[0]
-        return ".".join(reversed(host.split(".")))
+        try:
+            _ = ipaddress.ip_address(host)
+            return ip
+        except ValueError:
+            return ".".join(reversed(host.split(".")))
     except Exception:
         return ip
 
