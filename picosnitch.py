@@ -60,6 +60,21 @@ except Exception:
 finally:
     os.seteuid(os.getuid())
 
+try:
+    if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
+        home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
+    else:
+        home_dir = os.path.expanduser("~")
+    file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.json")
+    with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
+        nofile = json.load(json_file)["Config"]["NOFILE"]
+    if type(nofile) == int:
+        new_limit = (nofile, resource.getrlimit(resource.RLIMIT_NOFILE)[1])
+        resource.setrlimit(resource.RLIMIT_NOFILE, new_limit)
+        time.sleep(0.5)
+except Exception:
+    pass
+
 VERSION = "0.5.1dev"
 
 FD_CACHE = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 64
@@ -219,11 +234,12 @@ def read_snitch() -> dict:
     """read snitch.json from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
         "Config": {
-            "DB write min (sec)": 1,
+            "DB write (sec)": 1,
             "Keep logs (days)": 365,
             "Log command lines": True,
             "Log remote address": True,
             "Log ignore": [],
+            "NOFILE": None,
             "VT API key": "",
             "VT file upload": False,
             "VT limit request": 15
@@ -657,7 +673,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
                 q_error.put("sync error between sql and updater on receive (did not receive all messages)")
             # process new connections
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
-            if time.time() - last_write > snitch["Config"]["DB write min (sec)"]:
+            if time.time() - last_write > snitch["Config"]["DB write (sec)"]:
                 transactions += sql_subprocess_helper(snitch, new_processes, p_virustotal.q_in, q_updater_in, q_error)
                 new_processes = []
                 con = sqlite3.connect(file_path)

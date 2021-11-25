@@ -22,13 +22,20 @@
 ```python
 {
   "Config": {
-    "DB write min (sec)": 1, # Minimum time (seconds) between writing logs to snitch.db
+    "DB write (sec)": 1, # Minimum time (seconds) between writing logs to snitch.db
+    # increasing it decreases disk writes by grouping connections into larger time buckets
+    # reducing time precision, decreasing database size, and increasing hash latency
+    # increasing it too much could cause processes to fall out of cache before hashing, see NOFILE
     "Keep logs (days)": 365, # How many days to keep connection logs
     "Log command lines": True, # Log command line args for each executable
     "Log remote address": True, # Log remote addresses for each executable
     "Log ignore": [80, "chrome", "firefox"], # List of process names (str) or ports (int)
     # will omit connections that match any of these from the connection log (snitch.db)
     # the process and executable will still be recorded in snitch.json
+    "NOFILE": None, # Set the maximum number of open file descriptors (int)
+    # increasing it allows more processes to be cached (typical system default is 1024)
+    # improving the performance (by also caching the result), and reliability of hashing processes
+    # specifically short lived processes which may have terminated before picosnitch can hash them
     "VT API key": "", # API key for VirusTotal, leave blank to disable
     "VT file upload": False, # Only hashes are uploaded by default
     "VT limit request": 15 # Number of seconds between requests
