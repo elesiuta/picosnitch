@@ -35,7 +35,7 @@
     "NOFILE": None, # Set the maximum number of open file descriptors (int)
     # increasing it allows more processes to be cached (typical system default is 1024)
     # improving the performance and reliability of hashing processes (also caches hash)
-    # e.g. short lived processes may terminate before picosnitch can hash them will live in cache
+    # e.g. short lived processes that may terminate before they can be hashed will live in cache
     "VT API key": "", # API key for VirusTotal, leave blank to disable
     "VT file upload": False, # Only hashes are uploaded by default
     "VT limit request": 15 # Number of seconds between requests
@@ -51,7 +51,7 @@
 # building from source
 - install from source using python 3 with  
 `python setup.py install --user`
-- required dependencies (installed automatically from PyPI on setup if not already present)  
-`plyer psutil vt-py`
-- additional dependency ([requires manual installation](https://github.com/iovisor/bcc/blob/master/INSTALL.md))  
+- dependencies installed automatically from PyPI on setup if not already present  
+`dbus-python psutil vt-py`
+- additional dependency, [requires manual installation](https://github.com/iovisor/bcc/blob/master/INSTALL.md)  
 `bcc`
