@@ -312,8 +312,13 @@ def reverse_dns_lookup(ip: str) -> str:
 def get_sha256_fd(path: str, _exe: str, _starttime: int) -> str:
     """get sha256 of process executable from /proc/monitor_pid/fd/proc_exe_fd"""
     try:
+        sha256 = hashlib.sha256()
         with open(path, "rb") as f:
-            return hashlib.sha256(f.read()).hexdigest()
+            data = f.read(1048576)
+            while data:
+                sha256.update(data)
+                data = f.read(1048576)
+        return sha256.hexdigest()
     except Exception:
         return "!???????????????????????????????????????????????????????????????"
 
@@ -322,8 +327,13 @@ def get_sha256_fd(path: str, _exe: str, _starttime: int) -> str:
 def get_sha256_pid(pid: int, _starttime: int) -> str:
     """get sha256 of process executable from /proc/pid/exe"""
     try:
+        sha256 = hashlib.sha256()
         with open("/proc/%d/exe" % pid, "rb") as f:
-            return hashlib.sha256(f.read()).hexdigest()
+            data = f.read(1048576)
+            while data:
+                sha256.update(data)
+                data = f.read(1048576)
+        return sha256.hexdigest()
     except Exception:
         return "!???????????????????????????????????????????????????????????????"
 
