@@ -69,9 +69,13 @@ try:
     with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
         nofile = json.load(json_file)["Config"]["NOFILE"]
     if type(nofile) == int:
-        new_limit = (nofile, resource.getrlimit(resource.RLIMIT_NOFILE)[1])
-        resource.setrlimit(resource.RLIMIT_NOFILE, new_limit)
-        time.sleep(0.5)
+        try:
+            new_limit = (nofile, resource.getrlimit(resource.RLIMIT_NOFILE)[1])
+            resource.setrlimit(resource.RLIMIT_NOFILE, new_limit)
+            time.sleep(0.5)
+        except Exception as e:
+            print(type(e).__name__ + str(e.args), file=sys.stderr)
+            print("Error: NOFILE was set in snitch.json but could not set RLIMIT_NOFILE", file=sys.stderr)
 except Exception:
     pass
 
