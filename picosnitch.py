@@ -375,7 +375,7 @@ def initial_poll(snitch: dict) -> list:
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid", "uids"], ad_value="")
                 proc["cmdline"] = shlex.join(proc["cmdline"])
                 proc["st"] = get_starttime(proc["pid"], False)
-                proc["fd"] = "/proc/%d/exe" % proc["pid"]
+                proc["fd"] = "/proc/%d/exe" % proc["pid"]  # default path so there is still a chance of hashing if not enough available file descriptors, without modifying code
                 proc["uid"] = proc["uids"][0]
                 proc["ip"] = conn.raddr.ip
                 proc["port"] = conn.raddr.port
@@ -582,10 +582,10 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     initial_processes_fd = initial_processes[FD_CACHE:]
     temp_fd = []
     if len(initial_processes) > FD_CACHE:
-        q_error.put("Warning: too many open connections to open file descriptors for hashing, some may close resulting in unknown hashes/errors")
+        q_error.put("Warning: too many preexisting connections to open file descriptors for hashing in time, may result in unknown hashes/errors if any terminate")
     for proc in initial_processes[:FD_CACHE]:
         try:
-            fd = os.open("/proc/%d/exe" % proc["pid"], os.O_RDONLY)
+            fd = os.open(proc["fd"], os.O_RDONLY)
             temp_fd.append(fd)
             proc["fd"] = "/proc/self/fd/%d" % fd
             initial_processes_fd.append(proc)
