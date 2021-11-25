@@ -31,6 +31,7 @@ import os
 import pickle
 import pwd
 import queue
+import resource
 import shlex
 import signal
 import socket
@@ -61,7 +62,7 @@ finally:
 
 VERSION = "0.5.1dev"
 
-FD_CACHE = 512
+FD_CACHE = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 16
 PAGE_CNT = 8
 PID_CACHE = 8192
 
@@ -374,7 +375,7 @@ def initial_poll(snitch: dict) -> list:
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid", "uids"], ad_value="")
                 proc["cmdline"] = shlex.join(proc["cmdline"])
                 proc["st"] = get_starttime(proc["pid"], False)
-                proc["fd"] = ""
+                proc["fd"] = "/proc/%d/exe" % proc["pid"]
                 proc["uid"] = proc["uids"][0]
                 proc["ip"] = conn.raddr.ip
                 proc["port"] = conn.raddr.port
@@ -578,9 +579,11 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     con.commit()
     con.close()
     # process initial connections
-    initial_processes_fd = []
+    initial_processes_fd = initial_processes[FD_CACHE:]
     temp_fd = []
-    for proc in initial_processes:
+    if len(initial_processes) > FD_CACHE:
+        q_error.put("Warning: too many open connections to open file descriptors for hashing, some may close resulting in unknown hashes/errors")
+    for proc in initial_processes[:FD_CACHE]:
         try:
             fd = os.open("/proc/%d/exe" % proc["pid"], os.O_RDONLY)
             temp_fd.append(fd)
