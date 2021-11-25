@@ -62,7 +62,7 @@ finally:
 
 VERSION = "0.5.1dev"
 
-FD_CACHE = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 16
+FD_CACHE = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 64
 PAGE_CNT = 8
 PID_CACHE = 8192
 
