@@ -1148,9 +1148,10 @@ def start_daemon():
     Public Licence for details.
 
     usage: picosnitch start|stop|restart|status|view|version
-                        |    |      |      |     |--> {VERSION}
-                        |    |      |      |--> curses ui
-                        |____|______|--> daemon controls
+                       |     |    |       |      |    |--> {VERSION}
+                       |     |    |       |      |--> curses ui
+                       |     |    |       |--> daemon status
+                       |_____|____|--> daemon controls
     """)
     if sys.prefix != sys.base_prefix:
             print("Warning: picosnitch is running in a virtual environment, notifications may not function", file=sys.stderr)
