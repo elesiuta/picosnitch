@@ -812,8 +812,8 @@ def picosnitch_master_process(config, snitch_updater_pickle):
             if any(p.is_zombie() for p in subprocesses):
                 q_error.put("picosnitch subprocess became a zombie, attempting restart")
                 break
-            if sum(p.memory() for p in subprocesses) > 512000000:
-                q_error.put("picosnitch memory usage exceeded 512 MB, attempting restart")
+            if sum(p.memory() for p in subprocesses) > 4096000000:
+                q_error.put("picosnitch memory usage exceeded 4096 MB, attempting restart")
                 break
             suspend_check_now = time.time()
             if suspend_check_now - suspend_check_last > 20:
