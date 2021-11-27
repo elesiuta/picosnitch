@@ -263,9 +263,7 @@ def read_snitch() -> dict:
     summary_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_summary.json")
     if os.path.exists(config_path):
         with open(config_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
-            data_config = json.load(json_file)
-        for key in data_config:
-            data["Config"][key] = data_config[key]
+            data["Config"] = json.load(json_file)
     else:
         data["Template"] = True
     if os.path.exists(summary_path):
