@@ -448,7 +448,7 @@ def sql_subprocess_helper(snitch: dict, new_processes: typing.List[bytes], q_vt:
         try:
             if not starttime:
                 # the process that made the connection has died, must rely on cached fd
-                if os.readlink(proc["fd"]) == proc["exe"]:
+                if os.path.islink(proc["fd"]) and os.readlink(proc["fd"]) == proc["exe"]:
                     # make sure cached fd is for the same process (probably)
                     sha256 = get_sha256_fd(proc["fd"], proc["exe"], proc["st"])
                 else:
@@ -458,7 +458,7 @@ def sql_subprocess_helper(snitch: dict, new_processes: typing.List[bytes], q_vt:
                 # the process that made the connection is still alive, can fallback on get_sha256_pid if FD_CACHE overflow
                 if starttime == proc["st"]:
                     # make sure pid hasn't been recycled
-                    if os.readlink(proc["fd"]) == proc["exe"]:
+                    if os.path.islink(proc["fd"]) and os.readlink(proc["fd"]) == proc["exe"]:
                         # make sure cached fd is for the same process (probably)
                         sha256 = get_sha256_fd(proc["fd"], proc["exe"], proc["st"])
                     else:
@@ -468,7 +468,7 @@ def sql_subprocess_helper(snitch: dict, new_processes: typing.List[bytes], q_vt:
                 else:
                     # pid was recycled, have to rely on cache
                     q_error.put("Warning: PID recycled for " + str(proc))
-                    if os.readlink(proc["fd"]) == proc["exe"]:
+                    if os.path.islink(proc["fd"]) and os.readlink(proc["fd"]) == proc["exe"]:
                         # make sure cached fd is for the same process (probably)
                         sha256 = get_sha256_fd(proc["fd"], proc["exe"], proc["st"])
         except Exception as e:
