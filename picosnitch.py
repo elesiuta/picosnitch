@@ -65,7 +65,7 @@ try:
         home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
     else:
         home_dir = os.path.expanduser("~")
-    file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.json")
+    file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_config.json")
     with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
         nofile = json.load(json_file)["Config"]["NOFILE"]
     if type(nofile) == int:
@@ -75,7 +75,7 @@ try:
             time.sleep(0.5)
         except Exception as e:
             print(type(e).__name__ + str(e.args), file=sys.stderr)
-            print("Error: NOFILE was set in snitch.json but could not set RLIMIT_NOFILE", file=sys.stderr)
+            print("Error: NOFILE was set in snitch_config.json but could not set RLIMIT_NOFILE", file=sys.stderr)
 except Exception:
     pass
 
@@ -263,15 +263,17 @@ def read_snitch() -> dict:
     summary_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_summary.json")
     if os.path.exists(config_path):
         with open(config_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
-            data["Config"] = json.load(json_file)
+            data_config = json.load(json_file)
+        for key in data_config:
+            data["Config"][key] = data_config[key]
     else:
         data["Template"] = True
     if os.path.exists(summary_path):
         with open(summary_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
-            summary = json.load(json_file)
-        for key in summary:
-            data[key] = summary[key]
-    assert all(key in data and type(data[key]) == type(template[key]) for key in template), "Invalid snitch.json"
+            data_summary = json.load(json_file)
+        for key in data_summary:
+            data[key] = data_summary[key]
+    assert all(key in data and type(data[key]) == type(template[key]) for key in template), "Invalid json files"
     assert all(key in data["Config"] and type(data["Config"][key]) == type(template["Config"][key]) for key in template["Config"]), "Invalid config"
     return data
 
@@ -283,12 +285,12 @@ def write_snitch(snitch: dict, write_config: bool = False) -> None:
     else:
         home_dir = os.path.expanduser("~")
     config_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_config.json")
-    file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_summary.json")
+    summary_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_summary.json")
     error_log = os.path.join(home_dir, ".config", "picosnitch", "error.log")
     if snitch.pop("WRITELOCK", False):
-        file_path += "~"
-    if not os.path.isdir(os.path.dirname(file_path)):
-        os.makedirs(os.path.dirname(file_path))
+        summary_path += "~"
+    if not os.path.isdir(os.path.dirname(summary_path)):
+        os.makedirs(os.path.dirname(summary_path))
     snitch_config = snitch["Config"]
     try:
         if write_config:
@@ -299,7 +301,7 @@ def write_snitch(snitch: dict, write_config: bool = False) -> None:
                 text_file.write("\n".join(snitch["Errors"]) + "\n")
         del snitch["Errors"]
         del snitch["Config"]
-        with open(file_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
+        with open(summary_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
             json.dump(snitch, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
         snitch["Errors"] = []
     except Exception:
@@ -528,7 +530,7 @@ def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
 
 
 def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
-    """coordinates connection data between subprocesses, updates snitch.json with new connections and creates notifications"""
+    """coordinates connection data between subprocesses, updates snitch_summary.json with new connections and creates notifications"""
     os.nice(-20)
     # init variables for loop
     parent_process = multiprocessing.parent_process()
@@ -588,7 +590,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                         snitch["SHA256"][msg["exe"]] = {msg["sha256"]: msg["result"]}
                     if msg["suspicious"]:
                         toast("Suspicious VT results for " + msg["name"])
-            # write snitch.json and error.log (no more than once per 30 seconds, and at least once per 10 minutes, may need adjusting, eg no delay if snitch["Errors"])
+            # write snitch_summary.json and error.log (no more than once per 30 seconds, and at least once per 10 minutes, may need adjusting, eg no delay if snitch["Errors"])
             if time.time() - last_write > 30:
                 new_size = sys.getsizeof(pickle.dumps(snitch))
                 if new_size != sizeof_snitch or time.time() - last_write > 600:
