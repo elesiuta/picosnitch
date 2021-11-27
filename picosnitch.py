@@ -314,7 +314,7 @@ def toast(msg: str, file=sys.stdout) -> None:
         print("picosnitch (toast failed): " + msg, file=file)
 
 
-@functools.cache
+@functools.lru_cache(maxsize=None)
 def reverse_dns_lookup(ip: str) -> str:
     """do a reverse dns lookup, return original ip if fails"""
     try:
@@ -421,7 +421,7 @@ def initial_poll(snitch: dict) -> list:
     return initial_processes
 
 
-def sql_subprocess_helper(snitch: dict, new_processes: list[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> list[tuple]:
+def sql_subprocess_helper(snitch: dict, new_processes: typing.List[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> typing.List[tuple]:
     """update the snitch with sha data, update sql with conns, return list of notifications"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     event_counter = collections.defaultdict(int)
@@ -488,7 +488,7 @@ def sql_subprocess_helper(snitch: dict, new_processes: list[bytes], q_vt: multip
     return [(*event, event_counter[str(event)]) for event in transactions]
 
 
-def updater_subprocess_helper(snitch: dict, new_processes: list[bytes]) -> None:
+def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -> None:
     """update the snitch with connection data and create a notification if new entry"""
     # Prevent overwriting the snitch before this function completes in the event of a termination signal
     snitch["WRITELOCK"] = True
