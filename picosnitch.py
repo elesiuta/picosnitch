@@ -235,7 +235,7 @@ class ProcessManager:
 
 
 def read_snitch() -> dict:
-    """read snitch.json from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
+    """read snitch_config.json and snitch_summary.json from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
         "Config": {
             "DB write (sec)": 1,
@@ -254,45 +254,58 @@ def read_snitch() -> dict:
         "Processes": {},
         "SHA256": {}
     }
+    data = template
     if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
         home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
     else:
         home_dir = os.path.expanduser("~")
-    file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.json")
-    if os.path.exists(file_path):
-        with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
-            data = json.load(json_file)
-        data["Errors"] = []
-        assert all(key in data and type(data[key]) == type(template[key]) for key in template), "Invalid snitch.json"
-        assert all(key in data["Config"] and type(data["Config"][key]) == type(template["Config"][key]) for key in template["Config"]), "Invalid config"
-        return data
-    template["Template"] = True
-    return template
+    config_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_config.json")
+    summary_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_summary.json")
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
+            data["Config"] = json.load(json_file)
+    else:
+        data["Template"] = True
+    if os.path.exists(summary_path):
+        with open(summary_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
+            summary = json.load(json_file)
+        for key in summary:
+            data[key] = summary[key]
+    assert all(key in data and type(data[key]) == type(template[key]) for key in template), "Invalid snitch.json"
+    assert all(key in data["Config"] and type(data["Config"][key]) == type(template["Config"][key]) for key in template["Config"]), "Invalid config"
+    return data
 
 
-def write_snitch(snitch: dict) -> None:
-    """write snitch.json and error.log to correct location (even if sudo is used without preserve-env)"""
+def write_snitch(snitch: dict, write_config: bool = False) -> None:
+    """write snitch_config.json, snitch_summary.json, and error.log to correct location (even if sudo is used without preserve-env)"""
     if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
         home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
     else:
         home_dir = os.path.expanduser("~")
-    file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.json")
+    config_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_config.json")
+    file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_summary.json")
     error_log = os.path.join(home_dir, ".config", "picosnitch", "error.log")
     if snitch.pop("WRITELOCK", False):
         file_path += "~"
     if not os.path.isdir(os.path.dirname(file_path)):
         os.makedirs(os.path.dirname(file_path))
+    snitch_config = snitch["Config"]
     try:
+        if write_config:
+            with open(config_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
+                json.dump(snitch_config, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
         if snitch["Errors"]:
             with open(error_log, "a", encoding="utf-8", errors="surrogateescape") as text_file:
                 text_file.write("\n".join(snitch["Errors"]) + "\n")
         del snitch["Errors"]
+        del snitch["Config"]
         with open(file_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
             json.dump(snitch, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
         snitch["Errors"] = []
     except Exception:
         snitch["Errors"] = []
         toast("picosnitch write error", file=sys.stderr)
+    snitch["Config"] = snitch_config
 
 
 def write_snitch_and_exit(snitch: dict, q_error: multiprocessing.Queue, snitch_pipe):
@@ -872,9 +885,10 @@ def main(vt_api_key: str = ""):
     """init picosnitch"""
     # read config and set VT API key if entered
     snitch = read_snitch()
-    _ = snitch.pop("Template", 0)
     if vt_api_key:
         snitch["Config"]["VT API key"] = vt_api_key
+    if snitch.pop("Template", False):
+        write_snitch(snitch, write_config=True)
     # do initial poll of current network connections
     initial_processes = initial_poll(snitch)
     snitch_updater_pickle = pickle.dumps((snitch, initial_processes))
