@@ -1010,14 +1010,13 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                     return 0
             current_screen = cur.fetchall()
             execute_query = False
+        status_bar = f"picosnitch {VERSION}  history: {time_history}  time range: {time_period[time_i]}  line: {cursor-first_line+1}/{len(current_screen)}{' ': <{curses.COLS}}"
         help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  r: refresh  q: quit {' ': <{curses.COLS}}"
         if is_subquery:
             title_bar = f"<- {s_screens[sec_i-1]: <{curses.COLS//3 - 2}}{s_screens[sec_i]: ^{curses.COLS//3 - 2}}{s_screens[(sec_i+1) % len(s_screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
-            status_bar = f"picosnitch {VERSION}  history: {time_history}  time range: {time_period[time_i]}  line: {cursor-first_line+1}/{len(current_screen)}{' ': <{curses.COLS}}"
             column_names = f"{f'{s_names[sec_i]} (where {p_names[pri_i].lower()} = {primary_value})': <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
         else:
             title_bar = f"<- {p_screens[pri_i-1]: <{curses.COLS//3 - 2}}{p_screens[pri_i]: ^{curses.COLS//3 - 2}}{p_screens[(pri_i+1) % len(p_screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
-            status_bar = f"picosnitch {VERSION}  history: {time_history}  time range: {time_period[time_i]}  line: {cursor-first_line+1}/{len(current_screen)}{' ': <{curses.COLS}}"
             column_names = f"{p_names[pri_i]: <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
         # display screen
         stdscr.clear()
