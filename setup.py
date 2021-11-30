@@ -7,10 +7,12 @@ with open("README.md", "r") as f:
 setuptools.setup(
     name="picosnitch",
     version=picosnitch.VERSION,
+    python_requires=">3.8.*",
     description="Protect your privacy, see which processes make remote network connections",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/elesiuta/picosnitch",
+    license="GPLv3",
     py_modules=["picosnitch"],
     entry_points={"console_scripts": ["picosnitch = picosnitch:start_daemon"]},
     install_requires=["psutil"],
@@ -20,6 +22,7 @@ setuptools.setup(
         "full":  ["dbus-python", "vt-py"]
     },
     classifiers=[
+        "Operating System :: POSIX :: Linux",
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
         "Topic :: System :: Networking :: Monitoring",
