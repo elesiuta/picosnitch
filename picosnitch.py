@@ -81,9 +81,9 @@ except Exception:
 
 VERSION = "0.5.1dev"
 
-FD_CACHE = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 64
+FD_CACHE = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128
 PAGE_CNT = 8
-PID_CACHE = 8192
+PID_CACHE = max(8192, 2*FD_CACHE)
 
 
 class Daemon:
@@ -341,34 +341,38 @@ def reverse_dns_lookup(ip: str) -> str:
         return ip
 
 
-@functools.lru_cache(maxsize=FD_CACHE)
-def get_sha256_fd(path: str, _exe: str, _starttime: int) -> str:
+@functools.lru_cache(maxsize=PID_CACHE)
+def get_sha256_fd(path: str, _pid: int, exe: str, _starttime: int) -> str:
     """get sha256 of process executable from /proc/monitor_pid/fd/proc_exe_fd"""
     try:
         sha256 = hashlib.sha256()
         with open(path, "rb") as f:
+            if os.readlink(path) != exe:
+                return "!!! FD_CACHE Overflow Error"
             data = f.read(1048576)
             while data:
                 sha256.update(data)
                 data = f.read(1048576)
         return sha256.hexdigest()
     except Exception:
-        return "!???????????????????????????????????????????????????????????????"
+        return "!!! Hash FD Read Error"
 
 
 @functools.lru_cache(maxsize=PID_CACHE)
-def get_sha256_pid(pid: int, _starttime: int) -> str:
+def get_sha256_pid(pid: int, exe: str, starttime: int) -> str:
     """get sha256 of process executable from /proc/pid/exe"""
     try:
         sha256 = hashlib.sha256()
         with open("/proc/%d/exe" % pid, "rb") as f:
+            if os.readlink("/proc/%d/exe" % pid) != exe or get_starttime(pid, True) != starttime:
+                return "!!! PID Recycled Error"
             data = f.read(1048576)
             while data:
                 sha256.update(data)
                 data = f.read(1048576)
         return sha256.hexdigest()
     except Exception:
-        return "!???????????????????????????????????????????????????????????????"
+        return "!!! Hash PID Read Error"
 
 
 def get_starttime(pid: int, unique_on_dead: bool) -> int:
@@ -443,38 +447,17 @@ def sql_subprocess_helper(snitch: dict, new_processes: typing.List[bytes], q_vt:
         proc = pickle.loads(proc)
         if type(proc) != dict:
             continue
-        starttime = get_starttime(proc["pid"], False)
-        sha256 = "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-        try:
-            if not starttime:
-                # the process that made the connection has died, must rely on cached fd
-                if os.path.islink(proc["fd"]) and os.readlink(proc["fd"]) == proc["exe"]:
-                    # make sure cached fd is for the same process (probably)
-                    sha256 = get_sha256_fd(proc["fd"], proc["exe"], proc["st"])
-                else:
-                    # too many different processes are making connections and FD_CACHE can't keep up
-                    q_error.put("Warning: FD_CACHE overflow and cannot hash dead process " + str(proc))
-            else:
-                # the process that made the connection is still alive, can fallback on get_sha256_pid if FD_CACHE overflow
-                if starttime == proc["st"]:
-                    # make sure pid hasn't been recycled
-                    if os.path.islink(proc["fd"]) and os.readlink(proc["fd"]) == proc["exe"]:
-                        # make sure cached fd is for the same process (probably)
-                        sha256 = get_sha256_fd(proc["fd"], proc["exe"], proc["st"])
-                    else:
-                        # too many different processes are making connections and FD_CACHE can't keep up
-                        q_error.put("Warning: FD_CACHE overflow, hash fallback to read directly " + str(proc))
-                        sha256 = get_sha256_pid(proc["pid"], starttime)
-                else:
-                    # pid was recycled, have to rely on cache
-                    q_error.put("Warning: PID recycled for " + str(proc))
-                    if os.path.islink(proc["fd"]) and os.readlink(proc["fd"]) == proc["exe"]:
-                        # make sure cached fd is for the same process (probably)
-                        sha256 = get_sha256_fd(proc["fd"], proc["exe"], proc["st"])
-        except Exception as e:
-            q_error.put("SQL helper %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+        sha_fd_error = ""
+        sha256 = get_sha256_fd(proc["fd"], proc["pid"], proc["exe"], proc["st"])
         if sha256.startswith("!"):
-            q_error.put("Error: Could not get sha256 for " + str(proc))
+            # fallback on trying to read directly (if still alive) if fd_cache fails
+            sha_fd_error = sha256
+            sha256 = get_sha256_pid(proc["pid"], proc["exe"], proc["st"])
+            if sha256.startswith("!"):
+                # notify user with what went wrong (may be cause for suspicion)
+                sha256_error = sha_fd_error[4:] + " and " + sha256[4:]
+                sha256 = sha_fd_error + " " + sha256
+                q_error.put(sha256_error + " for " + str(proc))
         if proc["exe"] in snitch["SHA256"]:
             if sha256 not in snitch["SHA256"][proc["exe"]]:
                 snitch["SHA256"][proc["exe"]][sha256] = "VT Pending"
