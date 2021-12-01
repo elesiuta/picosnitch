@@ -22,7 +22,7 @@
 `picosnitch view`
 ## configuration
 - config is stored in `~/.config/picosnitch/snitch_config.json`
-- use `picosnitch restart` if daemon is currently running for any changes to take effect
+  - use `picosnitch restart` if daemon is currently running for any changes to take effect
 ```python
 {
   "DB write (sec)": 1, # Minimum time (seconds) between writing logs to snitch.db
@@ -34,7 +34,7 @@
   "Log remote address": True, # Log remote addresses for each executable
   "Log ignore": [80, "chrome", "firefox"], # List of process names (str) or ports (int)
   # will omit connections that match any of these from the connection log (snitch.db)
-  # the process and executable will still be recorded in snitch.json
+  # the process and executable will still be recorded in snitch_summary.json
   "NOFILE": None, # Set the maximum number of open file descriptors (int)
   # increasing it allows more processes to be cached (typical system default is 1024)
   # improving the performance and reliability of hashing processes (also caches hash)
@@ -45,6 +45,7 @@
 }
 ```
 - a short summary of seen processes is stored in `~/.config/picosnitch/snitch_summary.json`
+  - used for determining whether to create a notification
 ```python
 {
   "Latest Entries": [], # Log of entries by time
@@ -54,7 +55,9 @@
 }
 ```
 - the connection log is stored in `~/.config/picosnitch/snitch.db`
+  - used for `picosnitch view`
 - the error log is stored in `~/.config/picosnitch/error.log`
+  - may be caused by a bug in picosnitch, or maybe another program is doing something sketchy
 # building from source
 - install from source using python 3 with  
 `python setup.py install --user`
