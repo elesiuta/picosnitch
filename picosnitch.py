@@ -1173,14 +1173,29 @@ def start_daemon():
     are welcome to redistribute it under certain conditions. See the GNU General
     Public Licence for details.
 
-    usage: picosnitch start|stop|restart|status|view|version
-                       |     |    |       |      |    |--> {VERSION}
-                       |     |    |       |      |--> curses ui
+    usage: picosnitch start|stop|restart|status|systemd|view|version
+                       |     |    |       |      |       |    |--> {VERSION}
+                       |     |    |       |      |       |--> curses ui
+                       |     |    |       |      |--> create service
                        |     |    |       |--> daemon status
                        |_____|____|--> daemon controls
     """)
+    systemd_service = textwrap.dedent(f"""    [Unit]
+    Description=picosnitch, protect your privacy.
+
+    [Service]
+    Type=forking
+    Environment="SUDO_UID={os.getenv("SUDO_UID")}" "SUDO_USER={os.getenv("SUDO_USER")}"
+    ExecStart=/usr/bin/env python3 "{__file__}" start
+    ExecStop=/usr/bin/env python3 "{__file__}" stop
+    ExecReload=/usr/bin/env python3 "{__file__}" restart
+    PIDFile=/tmp/daemon-picosnitch.pid
+
+    [Install]
+    WantedBy=multi-user.target
+    """)
     if sys.prefix != sys.base_prefix:
-            print("Warning: picosnitch is running in a virtual environment, notifications may not function", file=sys.stderr)
+        print("Warning: picosnitch is running in a virtual environment, notifications may not function", file=sys.stderr)
     if os.name == "posix":
         if os.path.expanduser("~") == "/root":
             print("Warning: picosnitch was run as root without preserving environment", file=sys.stderr)
@@ -1194,7 +1209,7 @@ def start_daemon():
                 os.execvp("sudo", args)
             assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
             vt_api_key = ""
-            if sys.argv[1] in ["start", "restart"]:
+            if sys.argv[1] in ["start", "restart", "systemd"]:
                 try:
                     tmp_snitch = read_snitch()
                     if not tmp_snitch["Config"]["VT API key"] and "Template" in tmp_snitch:
@@ -1216,6 +1231,10 @@ def start_daemon():
                 daemon.restart()
             elif sys.argv[1] == "status":
                 daemon.status()
+            elif sys.argv[1] == "systemd":
+                with open("/usr/lib/systemd/system/picosnitch.service", "w") as f:
+                    f.write(systemd_service)
+                return 0
             elif sys.argv[1] == "view":
                 return start_ui()
             elif sys.argv[1] == "version":
