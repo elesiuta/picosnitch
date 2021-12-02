@@ -56,17 +56,6 @@ except Exception as e:
     print("Make sure dependency is installed, or environment is preserved if running with sudo", file=sys.stderr)
 
 try:
-    import dbus
-    os.seteuid(int(os.getenv("SUDO_UID")))
-    dbus_session_obj = dbus.SessionBus().get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications")
-    interface = dbus.Interface(dbus_session_obj, "org.freedesktop.Notifications")
-    system_notification = lambda title, message: interface.Notify("picosnitch", 0, "", title, message, [], [], 2000)
-except Exception:
-    system_notification = lambda title, message: print(message)
-finally:
-    os.seteuid(os.getuid())
-
-try:
     if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
         home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
     else:
@@ -240,6 +229,51 @@ class ProcessManager:
         return self.pp.memory_info().rss
 
 
+class NotificationManager:
+    """A singleton for creating system tray notifications, holds notifications in queue if fails, prints if disabled"""
+    __instance = None
+    dbus_notifications = False
+    notifications_ready = False
+    notification_queue = []
+    system_notification = lambda msg: print(msg)
+    def __new__(cls, *args, **kwargs):
+        if not cls.__instance:
+            cls.__instance = super(NotificationManager, cls).__new__(cls, *args, **kwargs)
+        return cls.__instance
+
+    def enable_notifications(self):
+        self.dbus_notifications = True
+        try:
+            import dbus
+            os.seteuid(int(os.getenv("SUDO_UID")))
+            dbus_session_obj = dbus.SessionBus().get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications")
+            interface = dbus.Interface(dbus_session_obj, "org.freedesktop.Notifications")
+            self.system_notification = lambda msg: interface.Notify("picosnitch", 0, "", "picosnitch", msg, [], [], 2000)
+            self.notifications_ready = True
+        except Exception:
+            pass
+        finally:
+            os.seteuid(os.getuid())
+
+    def toast(self, msg: str, file=sys.stdout) -> None:
+        try:
+            if self.notifications_ready:
+                self.system_notification(msg)
+            elif self.dbus_notifications:
+                self.notification_queue.append(msg)
+                self.enable_notifications()
+                if self.notifications_ready:
+                    for msg in self.notification_queue:
+                        self.system_notification(msg)
+                    self.notification_queue = []
+            else:
+                self.notification_queue.append(msg)
+        except Exception:
+            self.notification_queue.append(msg)
+            if self.dbus_notifications:
+                self.notifications_ready = False
+
+
 def read_snitch() -> dict:
     """read snitch_config.json and snitch_summary.json from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
@@ -250,6 +284,7 @@ def read_snitch() -> dict:
             "Log remote address": True,
             "Log ignore": [],
             "NOFILE": None,
+            "Notifications": True,
             "VT API key": "",
             "VT file upload": False,
             "VT limit request": 15
@@ -310,7 +345,7 @@ def write_snitch(snitch: dict, write_config: bool = False) -> None:
         snitch["Errors"] = []
     except Exception:
         snitch["Errors"] = []
-        toast("picosnitch write error", file=sys.stderr)
+        NotificationManager().toast("picosnitch write error", file=sys.stderr)
     snitch["Config"] = snitch_config
 
 
@@ -319,18 +354,10 @@ def write_snitch_and_exit(snitch: dict, q_error: multiprocessing.Queue, snitch_p
     while not q_error.empty():
         error = q_error.get()
         snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
-        toast(error, file=sys.stderr)
+        NotificationManager().toast(error, file=sys.stderr)
     write_snitch(snitch)
     snitch_pipe.close()
     sys.exit(0)
-
-
-def toast(msg: str, file=sys.stdout) -> None:
-    """create a system tray notification, tries printing as a fallback, requires -E if running with sudo"""
-    try:
-        system_notification(title="picosnitch", message=msg)
-    except Exception:
-        print("picosnitch (toast failed): " + msg, file=file)
 
 
 @functools.lru_cache(maxsize=None)
@@ -502,14 +529,14 @@ def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
         if proc["name"] in snitch["Names"]:
             if proc["exe"] not in snitch["Names"][proc["name"]]:
                 snitch["Names"][proc["name"]].append(proc["exe"])
-                toast("New executable detected for " + proc["name"] + ": " + proc["exe"])
+                NotificationManager().toast("New executable detected for " + proc["name"] + ": " + proc["exe"])
         else:
             snitch["Names"][proc["name"]] = [proc["exe"]]
-            toast("First network connection detected for " + proc["name"])
+            NotificationManager().toast("First network connection detected for " + proc["name"])
         if proc["exe"] in snitch["Processes"]:
             if proc["name"] not in snitch["Processes"][proc["exe"]]:
                 snitch["Processes"][proc["exe"]].append(proc["name"])
-                toast("New name detected for " + proc["exe"] + ": " + proc["name"])
+                NotificationManager().toast("New name detected for " + proc["exe"] + ": " + proc["name"])
         else:
             snitch["Processes"][proc["exe"]] = [proc["name"]]
             snitch["SHA256"][proc["exe"]] = {}
@@ -524,6 +551,11 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     snitch, initial_processes = pickle.loads(init_pickle)
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
+    # init notifications
+    if snitch["Config"]["Notifications"]:
+        NotificationManager().enable_notifications()
+    else:
+        NotificationManager().notifications_ready = True
     # init signal handlers
     signal.signal(signal.SIGTERM, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
     signal.signal(signal.SIGINT, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
@@ -536,14 +568,14 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     while True:
         if not parent_process.is_alive():
             snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " picosnitch has stopped")
-            toast("picosnitch has stopped", file=sys.stderr)
+            NotificationManager().toast("picosnitch has stopped", file=sys.stderr)
             write_snitch_and_exit(snitch, q_error, snitch_pipe)
         try:
             # check for errors
             while not q_error.empty():
                 error = q_error.get()
                 snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
-                toast(error, file=sys.stderr)
+                NotificationManager().toast(error, file=sys.stderr)
             # get list of new processes and connections since last update (might give this loop its own subprocess)
             snitch_pipe.poll(timeout=5)
             while snitch_pipe.poll():
@@ -565,18 +597,18 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                     if msg["exe"] in snitch["SHA256"]:
                         if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
                             snitch["SHA256"][msg["exe"]][msg["sha256"]] = "VT Pending"
-                            toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
+                            NotificationManager().toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
                     else:
                         snitch["SHA256"][msg["exe"]] = {msg["sha256"]: "VT Pending"}
                 elif msg["type"] == "vt":
                     if msg["exe"] in snitch["SHA256"]:
                         if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
-                            toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
+                            NotificationManager().toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
                         snitch["SHA256"][msg["exe"]][msg["sha256"]] = msg["result"]
                     else:
                         snitch["SHA256"][msg["exe"]] = {msg["sha256"]: msg["result"]}
                     if msg["suspicious"]:
-                        toast("Suspicious VT results for " + msg["name"])
+                        NotificationManager().toast("Suspicious VT results for " + msg["name"])
             # write snitch_summary.json and error.log (no more than once per 30 seconds, and at least once per 10 minutes, may need adjusting, eg no delay if snitch["Errors"])
             if time.time() - last_write > 30:
                 new_size = sys.getsizeof(pickle.dumps(snitch))
