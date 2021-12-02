@@ -235,7 +235,6 @@ class NotificationManager:
     dbus_notifications = False
     notifications_ready = False
     notification_queue = []
-    system_notification = lambda msg: print(msg)
     def __new__(cls, *args, **kwargs):
         if not cls.__instance:
             cls.__instance = super(NotificationManager, cls).__new__(cls, *args, **kwargs)
@@ -259,19 +258,21 @@ class NotificationManager:
         try:
             if self.notifications_ready:
                 self.system_notification(msg)
-            elif self.dbus_notifications:
-                self.notification_queue.append(msg)
-                self.enable_notifications()
-                if self.notifications_ready:
-                    for msg in self.notification_queue:
-                        self.system_notification(msg)
-                    self.notification_queue = []
             else:
+                print(msg, file=file)
                 self.notification_queue.append(msg)
+                if self.dbus_notifications:
+                    self.enable_notifications()
+                    if self.notifications_ready:
+                        for msg in self.notification_queue:
+                            try:
+                                self.system_notification(msg)
+                            except Exception:
+                                pass
+                        self.notification_queue = []
         except Exception:
             self.notification_queue.append(msg)
-            if self.dbus_notifications:
-                self.notifications_ready = False
+            self.notifications_ready = False
 
 
 def read_snitch() -> dict:
@@ -382,10 +383,8 @@ def get_sha256_fd(path: str, _pid: int, exe: str, _starttime: int) -> str:
         with open(path, "rb") as f:
             if os.readlink(path) != exe:
                 return "!!! FD_CACHE Overflow Error"
-            data = f.read(1048576)
-            while data:
+            while data := f.read(1048576):
                 sha256.update(data)
-                data = f.read(1048576)
         return sha256.hexdigest()
     except Exception:
         return "!!! Hash FD Read Error"
@@ -399,10 +398,8 @@ def get_sha256_pid(pid: int, exe: str, starttime: int) -> str:
         with open("/proc/%d/exe" % pid, "rb") as f:
             if os.readlink("/proc/%d/exe" % pid) != exe or get_starttime(pid, True) != starttime:
                 return "!!! PID Recycled Error"
-            data = f.read(1048576)
-            while data:
+            while data := f.read(1048576):
                 sha256.update(data)
-                data = f.read(1048576)
         return sha256.hexdigest()
     except Exception:
         return "!!! Hash PID Read Error"
@@ -554,8 +551,6 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     # init notifications
     if snitch["Config"]["Notifications"]:
         NotificationManager().enable_notifications()
-    else:
-        NotificationManager().notifications_ready = True
     # init signal handlers
     signal.signal(signal.SIGTERM, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
     signal.signal(signal.SIGINT, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
@@ -1215,7 +1210,7 @@ def start_daemon():
                        |_____|____|--> daemon controls
     """)
     systemd_service = textwrap.dedent(f"""    [Unit]
-    Description=picosnitch, protect your privacy.
+    Description=picosnitch, protect your privacy
 
     [Service]
     Type=forking
