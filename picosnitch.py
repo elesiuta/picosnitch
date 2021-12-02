@@ -34,6 +34,7 @@ import queue
 import resource
 import shlex
 import signal
+import site
 import socket
 import sqlite3
 import struct
@@ -42,6 +43,11 @@ import sys
 import textwrap
 import time
 import typing
+
+try:
+    site.addsitedir(os.getenv("PYTHON_USER_SITE"))
+except Exception:
+    pass
 
 try:
     import psutil
@@ -1185,11 +1191,10 @@ def start_daemon():
 
     [Service]
     Type=forking
-    Environment="SUDO_UID={os.getenv("SUDO_UID")}" "SUDO_USER={os.getenv("SUDO_USER")}"
+    Environment="SUDO_UID={os.getenv("SUDO_UID")}" "SUDO_USER={os.getenv("SUDO_USER")}" "DBUS_SESSION_BUS_ADDRESS={os.getenv("DBUS_SESSION_BUS_ADDRESS")}" "PYTHON_USER_SITE={site.USER_SITE}"
     ExecStart=/usr/bin/env python3 "{__file__}" start
     ExecStop=/usr/bin/env python3 "{__file__}" stop
-    ExecReload=/usr/bin/env python3 "{__file__}" restart
-    PIDFile=/tmp/daemon-picosnitch.pid
+    PIDFile=/run/picosnitch.pid
 
     [Install]
     WantedBy=multi-user.target
@@ -1220,7 +1225,7 @@ def start_daemon():
             class PicoDaemon(Daemon):
                 def run(self):
                     main(vt_api_key)
-            daemon = PicoDaemon("/tmp/daemon-picosnitch.pid")
+            daemon = PicoDaemon("/run/picosnitch.pid")
             if sys.argv[1] == "start":
                 print("starting picosnitch")
                 daemon.start()
