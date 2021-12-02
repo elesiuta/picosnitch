@@ -870,14 +870,10 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     return 0
 
 
-def main(vt_api_key: str = ""):
+def main():
     """init picosnitch"""
-    # read config and set VT API key if entered
+    # read config
     snitch = read_snitch()
-    if vt_api_key:
-        snitch["Config"]["VT API key"] = vt_api_key
-    if snitch.pop("Template", False):
-        write_snitch(snitch, write_config=True)
     # do initial poll of current network connections
     initial_processes = initial_poll(snitch)
     snitch_updater_pickle = pickle.dumps((snitch, initial_processes))
@@ -1219,12 +1215,16 @@ def start_daemon():
                     tmp_snitch = read_snitch()
                     if not tmp_snitch["Config"]["VT API key"] and "Template" in tmp_snitch:
                         vt_api_key = input("Enter your VirusTotal API key (optional)\n>>> ")
+                        if vt_api_key:
+                            tmp_snitch["Config"]["VT API key"] = vt_api_key
+                        _ = tmp_snitch.pop("Template", False)
+                        write_snitch(tmp_snitch, write_config=True)
                 except Exception as e:
                     print(type(e).__name__ + str(e.args), file=sys.stderr)
                     sys.exit(1)
             class PicoDaemon(Daemon):
                 def run(self):
-                    main(vt_api_key)
+                    main()
             daemon = PicoDaemon("/run/picosnitch.pid")
             if sys.argv[1] == "start":
                 print("starting picosnitch")
