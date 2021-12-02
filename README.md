@@ -50,6 +50,7 @@
   # increasing it allows more processes to be cached (typical system default is 1024)
   # improving the performance and reliability of hashing processes (also caches hash)
   # e.g. short lived processes that may terminate before they can be hashed will live in cache
+  "Notifications": True, # Try connecting to dbus for creating system notifications
   "VT API key": "", # API key for VirusTotal, leave blank to disable
   "VT file upload": False, # Only hashes are uploaded by default
   "VT limit request": 15 # Number of seconds between requests
