@@ -1265,6 +1265,12 @@ def start_daemon():
                 subprocess.run(["systemctl", "daemon-reload"])
                 return 0
             elif sys.argv[1] == "start-no-daemon":
+                assert not os.path.exists("/run/picosnitch.pid")
+                def delpid():
+                    os.remove("/run/picosnitch.pid")
+                atexit.register(delpid)
+                with open("/run/picosnitch.pid", "w") as f:
+                    f.write(str(os.getpid()) + "\n")
                 sys.exit(main())
             elif sys.argv[1] == "view":
                 return start_ui()
