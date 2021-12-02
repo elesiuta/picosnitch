@@ -893,8 +893,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
         args = ["python3", "-m", "picosnitch", "restart"]
     else:
         args = [sys.executable, sys.argv[0], "restart"]
-    subprocess.Popen(args)
-    return 0
+    return subprocess.run(args).returncode
 
 
 def main():
@@ -1214,6 +1213,8 @@ def start_daemon():
 
     [Service]
     Type=forking
+    Restart=on-failure
+    RestartSec=5
     Environment="SUDO_UID={os.getenv("SUDO_UID")}" "SUDO_USER={os.getenv("SUDO_USER")}" "DBUS_SESSION_BUS_ADDRESS={os.getenv("DBUS_SESSION_BUS_ADDRESS")}" "PYTHON_USER_SITE={site.USER_SITE}"
     ExecStart=/usr/bin/env python3 "{__file__}" start
     ExecStop=/usr/bin/env python3 "{__file__}" stop
@@ -1224,8 +1225,8 @@ def start_daemon():
     """)
     if sys.prefix != sys.base_prefix:
         print("Warning: picosnitch is running in a virtual environment, notifications may not function", file=sys.stderr)
-    if os.name == "posix":
-        if os.path.expanduser("~") == "/root":
+    if sys.platform.startswith("linux"):
+        if os.path.expanduser("~") == "/root" and not os.getenv("DBUS_SESSION_BUS_ADDRESS"):
             print("Warning: picosnitch was run as root without preserving environment", file=sys.stderr)
         if len(sys.argv) == 2:
             if os.getuid() != 0:
@@ -1236,19 +1237,12 @@ def start_daemon():
                     args = ["sudo", "-E", sys.executable] + sys.argv
                 os.execvp("sudo", args)
             assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
-            vt_api_key = ""
             if sys.argv[1] in ["start", "restart", "systemd"]:
-                try:
-                    tmp_snitch = read_snitch()
-                    if not tmp_snitch["Config"]["VT API key"] and "Template" in tmp_snitch:
-                        vt_api_key = input("Enter your VirusTotal API key (optional)\n>>> ")
-                        if vt_api_key:
-                            tmp_snitch["Config"]["VT API key"] = vt_api_key
-                        _ = tmp_snitch.pop("Template", False)
-                        write_snitch(tmp_snitch, write_config=True)
-                except Exception as e:
-                    print(type(e).__name__ + str(e.args), file=sys.stderr)
-                    sys.exit(1)
+                tmp_snitch = read_snitch()
+                if tmp_snitch.pop("Template", False):
+                    if sys.stdin.isatty():
+                        tmp_snitch["Config"]["VT API key"] = input("Enter your VirusTotal API key (optional, leave blank to disable)\n>>> ")
+                    write_snitch(tmp_snitch, write_config=True)
             class PicoDaemon(Daemon):
                 def run(self):
                     main()
@@ -1266,6 +1260,7 @@ def start_daemon():
             elif sys.argv[1] == "systemd":
                 with open("/usr/lib/systemd/system/picosnitch.service", "w") as f:
                     f.write(systemd_service)
+                subprocess.run(["systemctl", "daemon-reload"])
                 return 0
             elif sys.argv[1] == "view":
                 return start_ui()
@@ -1274,11 +1269,11 @@ def start_daemon():
                 return 0
             else:
                 print(readme)
-                return 0
+                return 2
             return 0
         else:
             print(readme)
-            return 0
+            return 2
     else:
         print("Did not detect a supported operating system", file=sys.stderr)
         return 1
