@@ -213,10 +213,10 @@ class ProcessManager:
     def terminate(self) -> None:
         if self.p.is_alive():
             self.p.terminate()
-        self.p.join(timeout=20)
+        self.p.join(timeout=5)
         if self.p.is_alive():
             self.p.kill()
-        self.p.join(timeout=20)
+        self.p.join(timeout=5)
         self.p.close()
 
     def is_alive(self) -> bool:
@@ -886,6 +886,8 @@ def picosnitch_master_process(config, snitch_updater_pickle):
             suspend_check_last = suspend_check_now
     except Exception as e:
         q_error.put("picosnitch subprocess exception: %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+    if sys.argv[1] == "start-no-daemon":
+        return 1
     # attempt to restart picosnitch (terminate by running `picosnitch stop`)
     time.sleep(5)
     _ = [p.terminate() for p in subprocesses]
@@ -893,7 +895,8 @@ def picosnitch_master_process(config, snitch_updater_pickle):
         args = ["python3", "-m", "picosnitch", "restart"]
     else:
         args = [sys.executable, sys.argv[0], "restart"]
-    return subprocess.run(args).returncode
+    subprocess.Popen(args)
+    return 0
 
 
 def main():
@@ -1212,12 +1215,11 @@ def start_daemon():
     Description=picosnitch, protect your privacy
 
     [Service]
-    Type=forking
+    Type=simple
     Restart=on-failure
     RestartSec=5
     Environment="SUDO_UID={os.getenv("SUDO_UID")}" "SUDO_USER={os.getenv("SUDO_USER")}" "DBUS_SESSION_BUS_ADDRESS={os.getenv("DBUS_SESSION_BUS_ADDRESS")}" "PYTHON_USER_SITE={site.USER_SITE}"
-    ExecStart=/usr/bin/env python3 "{__file__}" start
-    ExecStop=/usr/bin/env python3 "{__file__}" stop
+    ExecStart=/usr/bin/env python3 "{__file__}" start-no-daemon
     PIDFile=/run/picosnitch.pid
 
     [Install]
@@ -1262,6 +1264,8 @@ def start_daemon():
                     f.write(systemd_service)
                 subprocess.run(["systemctl", "daemon-reload"])
                 return 0
+            elif sys.argv[1] == "start-no-daemon":
+                sys.exit(main())
             elif sys.argv[1] == "view":
                 return start_ui()
             elif sys.argv[1] == "version":
