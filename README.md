@@ -14,15 +14,26 @@
 - depends on the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) (e.g. for Ubuntu)  
 `sudo apt install python3-bpfcc`
 ## usage
-- run daemon with  
-`picosnitch start`
-- stop daemon with  
-`picosnitch stop`
-- view past connections with  
-`picosnitch view`
+- you can run picosnitch either as a standalone daemon, or with systemd
+  - use the same method to stop picosnitch as you used to start it
+- standalone daemon
+  - start with `picosnitch start`
+  - stop with `picosnitch stop`
+  - restart with `picosnitch restart`
+- systemd integration
+  - setup with `picosnitch systemd`
+  - autostart on reboot with `systemctl enable picosnitch`
+  - start with `systemctl start picosnitch`
+  - stop with `systemctl stop picosnitch`
+  - restart with `systemctl restart picosnitch`
+  - view detailed status with `systemctl status picosnitch`
+- view basic status with
+  - `picosnitch status`
+- view past connections
+  - `picosnitch view`
 ## configuration
 - config is stored in `~/.config/picosnitch/snitch_config.json`
-  - use `picosnitch restart` if daemon is currently running for any changes to take effect
+  - restart picosnitch if it is currently running for any changes to take effect
 ```python
 {
   "DB write (sec)": 1, # Minimum time (seconds) between writing logs to snitch.db
