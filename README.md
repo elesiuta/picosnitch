@@ -3,7 +3,7 @@
   - It monitors your system and notifies you whenever it sees a new program that connects to the network
   - Or when the sha256 changes for one of those programs (can also check [VirusTotal](https://www.virustotal.com))
   - And features a curses based UI for browsing past connections
-- For advanced users who know what should be running on their system and can make network connections
+- For advanced users who know what should be running on their system and when they should be making network connections
   - Only you can decide which programs to trust, so picosnitch leaves this decision up to you and just focusses on doing one thing well
   - A program you can't trust to make network connections also can't be trusted not to negate any firewall rules, so blocking or sandboxing these programs is out of scope for picosnitch (also beware of programs running as root that may try to stop/modify picosnitch)
 - Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
@@ -43,7 +43,7 @@
   "Keep logs (days)": 365, # How many days to keep connection logs
   "Log command lines": True, # Log command line args for each executable
   "Log remote address": True, # Log remote addresses for each executable
-  "Log ignore": [80, "chrome", "firefox"], # List of process names (str) or ports (int)
+  "Log ignore": [], # List of process names (str) or ports (int)
   # will omit connections that match any of these from the connection log (snitch.db)
   # the process and executable will still be recorded in snitch_summary.json
   "NOFILE": None, # Set the maximum number of open file descriptors (int)
@@ -56,8 +56,9 @@
   "VT limit request": 15 # Number of seconds between requests
 }
 ```
+## logging
 - a short summary of seen processes is stored in `~/.config/picosnitch/snitch_summary.json`
-  - used for determining whether to create a notification
+  - this is used for determining whether to create a notification
 ```python
 {
   "Latest Entries": [], # Log of entries by time
@@ -66,10 +67,11 @@
   "SHA256": {} # Log of processes by executable containing sha256 hash(es) and VirusTotal results
 }
 ```
-- the connection log is stored in `~/.config/picosnitch/snitch.db`
-  - used for `picosnitch view`
+- the full connection log is stored in `~/.config/picosnitch/snitch.db`
+  - this is used for `picosnitch view`
 - the error log is stored in `~/.config/picosnitch/error.log`
-  - may be caused by a bug in picosnitch, or maybe another program is doing something sketchy
+  - errors will also trigger a notification and are usually caused by far too many processes/connections
+  - for most people in most cases, this should raise suspicion that some other program may be misbehaving
 # building from source
 - install from source using python 3 with  
 `python setup.py install --user`
