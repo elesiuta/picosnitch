@@ -921,19 +921,21 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     curses.noecho()
     curses.curs_set(0)
     curses.start_color()
-    curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLUE)
-    curses.init_pair(2, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-    curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_WHITE)
-    curses.init_pair(4, curses.COLOR_WHITE, curses.COLOR_MAGENTA)
+    if curses.can_change_color():
+        curses.init_color(curses.COLOR_MAGENTA, int(3.9*0x5e), int(3.9*0x60), int(3.9*0xce))
+    curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_CYAN)  # selection
+    curses.init_pair(2, curses.COLOR_YELLOW, curses.COLOR_BLACK)  # splash
+    curses.init_pair(3, curses.COLOR_WHITE, curses.COLOR_MAGENTA)  # header
+    curses.init_pair(4, curses.COLOR_WHITE, curses.COLOR_BLACK)  # base
     splash_lines = splash.splitlines()
     stdscr.clear()
     for i in range(len(splash_lines)):
         if "\u001b[33m" in splash_lines[i]:
             part1 = splash_lines[i].split("\u001b[33m")
             part2 = part1[1].split("\033[0m")
-            stdscr.addstr(i, 0, part1[0])
+            stdscr.addstr(i, 0, part1[0], curses.color_pair(4))
             stdscr.addstr(i, len(part1[0]), part2[0], curses.color_pair(2))
-            stdscr.addstr(i, len(part1[0]) + len(part2[0]), part2[1])
+            stdscr.addstr(i, len(part1[0]) + len(part2[0]), part2[1], curses.color_pair(4))
         else:
             stdscr.addstr(i, 0, splash_lines[i])
     stdscr.refresh()
@@ -1013,9 +1015,9 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                         if "\u001b[33m" in splash_lines[i]:
                             part1 = splash_lines[i].split("\u001b[33m")
                             part2 = part1[1].split("\033[0m")
-                            stdscr.addstr(i, 0, part1[0])
+                            stdscr.addstr(i, 0, part1[0], curses.color_pair(4))
                             stdscr.addstr(i, len(part1[0]), part2[0], curses.color_pair(2))
-                            stdscr.addstr(i, len(part1[0]) + len(part2[0]), part2[1])
+                            stdscr.addstr(i, len(part1[0]) + len(part2[0]), part2[1], curses.color_pair(4))
                         else:
                             stdscr.addstr(i, 0, splash_lines[i])
                     stdscr.refresh()
@@ -1024,20 +1026,20 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                     return 0
             current_screen = cur.fetchall()
             execute_query = False
-        status_bar = f"picosnitch {VERSION}  history: {time_history}  time range: {time_period[time_i]}  line: {cursor-first_line+1}/{len(current_screen)}{' ': <{curses.COLS}}"
         help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  r: refresh  q: quit {' ': <{curses.COLS}}"
+        status_bar = f"history: {time_history}  time range: {time_period[time_i]}  line: {cursor-first_line+1}/{len(current_screen)}{' ': <{curses.COLS}}"
         if is_subquery:
-            title_bar = f"<- {s_screens[sec_i-1]: <{curses.COLS//3 - 2}}{s_screens[sec_i]: ^{curses.COLS//3 - 2}}{s_screens[(sec_i+1) % len(s_screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
+            tab_bar = f"<- {s_screens[sec_i-1]: <{curses.COLS//3 - 2}}{s_screens[sec_i]: ^{curses.COLS//3 - 2}}{s_screens[(sec_i+1) % len(s_screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
             column_names = f"{f'{s_names[sec_i]} (where {p_names[pri_i].lower()} = {primary_value})': <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
         else:
-            title_bar = f"<- {p_screens[pri_i-1]: <{curses.COLS//3 - 2}}{p_screens[pri_i]: ^{curses.COLS//3 - 2}}{p_screens[(pri_i+1) % len(p_screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
+            tab_bar = f"<- {p_screens[pri_i-1]: <{curses.COLS//3 - 2}}{p_screens[pri_i]: ^{curses.COLS//3 - 2}}{p_screens[(pri_i+1) % len(p_screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
             column_names = f"{p_names[pri_i]: <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
         # display screen
         stdscr.clear()
-        stdscr.attrset(curses.color_pair(4) | curses.A_BOLD)
-        stdscr.addstr(0, 0, status_bar)
-        stdscr.addstr(1, 0, help_bar)
-        stdscr.addstr(2, 0, title_bar)
+        stdscr.attrset(curses.color_pair(3) | curses.A_BOLD)
+        stdscr.addstr(0, 0, help_bar)
+        stdscr.addstr(1, 0, status_bar)
+        stdscr.addstr(2, 0, tab_bar)
         stdscr.addstr(3, 0, column_names)
         line = first_line
         cursor = min(cursor, len(current_screen) + first_line - 1)
@@ -1055,7 +1057,7 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                     is_subquery = True
                     break
             else:
-                stdscr.attrset(curses.color_pair(0))
+                stdscr.attrset(curses.color_pair(4))
             if first_line <= line - offset < curses.LINES - 1:
                 # special cases (cmdline null chars, uid, maybe add sha256 and vt results or debsums lookup?)
                 if type(name) == str:
@@ -1185,6 +1187,13 @@ def start_ui() -> int:
         raise Exception(f"Table 'connections' does not exist in {file_path}")
     con.close()
     con = sqlite3.connect(file_path, timeout=1)
+    # set terminal title
+    try:
+        with open("/run/picosnitch.pid", "r") as f:
+            run_status = "pid: " + f.read().strip()
+    except Exception:
+        run_status = "not running"
+    print(f"\033]0;picosnitch v{VERSION} ({run_status})\a", end="", flush=True)
     # start curses
     for err_count in reversed(range(30)):
         try:
