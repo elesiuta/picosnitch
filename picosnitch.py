@@ -62,7 +62,7 @@ try:
         home_dir = os.path.expanduser("~")
     file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_config.json")
     with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
-        nofile = json.load(json_file)["Config"]["NOFILE"]
+        nofile = json.load(json_file)["Config"]["Set RLIMIT_NOFILE"]
     if type(nofile) == int:
         try:
             new_limit = (nofile, resource.getrlimit(resource.RLIMIT_NOFILE)[1])
@@ -279,16 +279,16 @@ def read_snitch() -> dict:
     """read snitch_config.json and snitch_summary.json from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
     template = {
         "Config": {
-            "DB write (sec)": 1,
-            "Keep logs (days)": 365,
-            "Log command lines": True,
-            "Log remote address": True,
+            "DB retention (days)": 365,
+            "DB write limit (seconds)": 1,
+            "Desktop notifications": True,
+            "Log addresses": True,
+            "Log commands": True,
             "Log ignore": [],
-            "NOFILE": None,
-            "Notifications": True,
+            "Set RLIMIT_NOFILE": None,
             "VT API key": "",
             "VT file upload": False,
-            "VT limit request": 15
+            "VT request limit (seconds)": 15
         },
         "Errors": [],
         "Latest Entries": [],
@@ -498,11 +498,11 @@ def sql_subprocess_helper(snitch: dict, new_processes: typing.List[bytes], q_vt:
             q_vt.put(pickle.dumps((proc, sha256)))
             q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
         # filter from logs
-        if snitch["Config"]["Log command lines"]:
+        if snitch["Config"]["Log commands"]:
             proc["cmdline"] = proc["cmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").replace("\0", "")
         else:
             proc["cmdline"] = ""
-        if snitch["Config"]["Log remote address"]:
+        if snitch["Config"]["Log addresses"]:
             domain = reverse_dns_lookup(proc["ip"])
         else:
             domain, proc["ip"] = "", ""
@@ -549,7 +549,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
     # init notifications
-    if snitch["Config"]["Notifications"]:
+    if snitch["Config"]["Desktop notifications"]:
         NotificationManager().enable_notifications()
     # init signal handlers
     signal.signal(signal.SIGTERM, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
@@ -634,7 +634,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
         cur.execute(''' CREATE TABLE connections
                         (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, events integer) ''')
     else:
-        cur.execute(''' DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") ''' % int(snitch["Config"]["Keep logs (days)"]))
+        cur.execute(''' DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") ''' % int(snitch["Config"]["DB retention (days)"]))
     con.commit()
     con.close()
     # process initial connections
@@ -706,7 +706,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
                 q_error.put("sync error between sql and updater on receive (did not receive all messages)")
             # process new connections
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
-            if time.time() - last_write > snitch["Config"]["DB write (sec)"]:
+            if time.time() - last_write > snitch["Config"]["DB write limit (seconds)"]:
                 transactions += sql_subprocess_helper(snitch, new_processes, p_virustotal.q_in, q_updater_in, q_error)
                 new_processes = []
                 con = sqlite3.connect(file_path)
@@ -810,7 +810,7 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
         try:
             if not parent_process.is_alive():
                 return 0
-            time.sleep(config["VT limit request"])
+            time.sleep(config["VT request limit (seconds)"])
             proc, sha256 = pickle.loads(q_vt_pending.get(block=True, timeout=15))
             suspicious = False
             if config["VT API key"] and vt_enabled:

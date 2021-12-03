@@ -44,24 +44,24 @@
   - restart picosnitch if it is currently running for any changes to take effect
 ```python
 {
-  "DB write (sec)": 1, # Minimum time (seconds) between writing logs to snitch.db
-  # increasing it decreases disk writes by grouping connections into larger time buckets
+  "DB retention (days)": 365, # How many days to keep connection logs
+  "DB write limit (seconds)": 1, # Minimum time between writing logs to snitch.db
+  # increasing it decreases disk writes by grouping connections into larger time windows
   # reducing time precision, decreasing database size, and increasing hash latency
   # values too large could cause processes to fall out of cache before hashing, see NOFILE
-  "Keep logs (days)": 365, # How many days to keep connection logs
-  "Log command lines": True, # Log command line args for each executable
-  "Log remote address": True, # Log remote addresses for each executable
+  "Desktop notifications": True, # Try connecting to dbus for creating system notifications
+  "Log addresses": True, # Log remote addresses for each executable
+  "Log commands": True, # Log command line args for each executable
   "Log ignore": [], # List of process names (str) or ports (int)
   # will omit connections that match any of these from the connection log (snitch.db)
   # the process and executable will still be recorded in snitch_summary.json
-  "NOFILE": None, # Set the maximum number of open file descriptors (int)
+  "Set RLIMIT_NOFILE": None, # Set the maximum number of open file descriptors (int)
   # increasing it allows more processes to be cached (typical system default is 1024)
   # improving the performance and reliability of hashing processes (also caches hash)
   # e.g. short lived processes that may terminate before they can be hashed will live in cache
-  "Notifications": True, # Try connecting to dbus for creating system notifications
-  "VT API key": "", # API key for VirusTotal, leave blank to disable
-  "VT file upload": False, # Only hashes are uploaded by default
-  "VT limit request": 15 # Number of seconds between requests
+  "VT API key": "", # API key for VirusTotal, leave blank to disable (str)
+  "VT file upload": False, # Upload file if hash not found, only hashes are used by default
+  "VT request limit (seconds)": 15 # Number of seconds between requests (free tier quota)
 }
 ```
 ## logging
