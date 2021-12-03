@@ -45,7 +45,7 @@
 
 ## configuration
 - config is stored in `~/.config/picosnitch/snitch_config.json`
-  - restart picosnitch if it is currently running for any changes to take effect
+  - restart picosnitch if it is currently running for any changes to take effect  
 ```python
 {
   "DB retention (days)": 365, # How many days to keep connection logs
@@ -71,7 +71,7 @@
 
 ## logging
 - a short summary of seen processes is stored in `~/.config/picosnitch/snitch_summary.json`
-  - this is used for determining whether to create a notification
+  - this is used for determining whether to create a notification  
 ```python
 {
   "Latest Entries": [], # Log of entries by time
