@@ -15,12 +15,15 @@
   - Only you can decide which programs to trust, so picosnitch leaves this decision up to you and just focusses on doing one thing well
   - A program you can't trust to make network connections also can't be trusted not to negate any firewall rules, so blocking or sandboxing these programs is out of scope for picosnitch (also beware of programs running as root that may try to stop/modify picosnitch)
 - Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
+
 # getting started
+
 ## installation
 - install from PyPI with  
 `pip3 install picosnitch[full] --upgrade --user`
 - depends on the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) (e.g. for Ubuntu)  
 `sudo apt install python3-bpfcc`
+
 ## usage
 - you can run picosnitch either as a standalone daemon, or with systemd
   - use the same method to stop picosnitch as you used to start it
@@ -39,6 +42,7 @@
   - `picosnitch status`
 - view past connections
   - `picosnitch view`
+
 ## configuration
 - config is stored in `~/.config/picosnitch/snitch_config.json`
   - restart picosnitch if it is currently running for any changes to take effect
@@ -64,6 +68,7 @@
   "VT request limit (seconds)": 15 # Number of seconds between requests (free tier quota)
 }
 ```
+
 ## logging
 - a short summary of seen processes is stored in `~/.config/picosnitch/snitch_summary.json`
   - this is used for determining whether to create a notification
@@ -80,6 +85,7 @@
 - the error log is stored in `~/.config/picosnitch/error.log`
   - errors will also trigger a notification and are usually caused by far too many processes/connections
   - for most people in most cases, this should raise suspicion that some other program may be misbehaving
+
 # building from source
 - install from source using python 3 with  
 `python setup.py install --user`

@@ -11,7 +11,7 @@ setuptools.setup(
     description="Protect your privacy, see which processes make remote network connections",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/elesiuta/picosnitch",
+    url="https://elesiuta.github.io/picosnitch",
     license="GPLv3",
     py_modules=["picosnitch"],
     entry_points={"console_scripts": ["picosnitch = picosnitch:start_daemon"]},
