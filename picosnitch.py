@@ -921,12 +921,11 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     curses.noecho()
     curses.curs_set(0)
     curses.start_color()
-    if curses.can_change_color():
-        curses.init_color(curses.COLOR_MAGENTA, int(3.9*0x5e), int(3.9*0x60), int(3.9*0xce))
+    curses.use_default_colors()
     curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_CYAN)  # selection
-    curses.init_pair(2, curses.COLOR_YELLOW, curses.COLOR_BLACK)  # splash
+    curses.init_pair(2, curses.COLOR_YELLOW, -1)  # splash
     curses.init_pair(3, curses.COLOR_WHITE, curses.COLOR_MAGENTA)  # header
-    curses.init_pair(4, curses.COLOR_WHITE, curses.COLOR_BLACK)  # base
+    curses.init_pair(4, curses.COLOR_WHITE, -1)  # splash
     splash_lines = splash.splitlines()
     stdscr.clear()
     for i in range(len(splash_lines)):
@@ -1057,7 +1056,7 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                     is_subquery = True
                     break
             else:
-                stdscr.attrset(curses.color_pair(4))
+                stdscr.attrset(curses.color_pair(0))
             if first_line <= line - offset < curses.LINES - 1:
                 # special cases (cmdline null chars, uid, maybe add sha256 and vt results or debsums lookup?)
                 if type(name) == str:
