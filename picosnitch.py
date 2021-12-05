@@ -44,22 +44,23 @@ import textwrap
 import time
 import typing
 
-# also look in user site for imports while running as root via systemd without turning their environment into https://xkcd.com/1987/
+# also look in user site for imports while running as root via systemd, this avoids https://xkcd.com/1987/
 try:
     site.addsitedir(os.getenv("PYTHON_USER_SITE"))
 except Exception:
     pass
 import psutil
 
+# set constants and RLIMIT_NOFILE if configured
 VERSION: typing.Final[str] = "0.5.1dev"
 PAGE_CNT: typing.Final[int] = 8
 if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
     home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
 else:
     home_dir = os.path.expanduser("~")
-HOME_DIR: typing.Final[str] = home_dir  # separate line to keep linter happy
+BASE_PATH: typing.Final[str] = os.path.join(home_dir, ".config", "picosnitch")
 try:
-    file_path = os.path.join(HOME_DIR, ".config", "picosnitch", "snitch_config.json")
+    file_path = os.path.join(BASE_PATH, "config.json")
     with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
         nofile = json.load(json_file)["Config"]["Set RLIMIT_NOFILE"]
     if type(nofile) == int:
@@ -69,7 +70,7 @@ try:
             time.sleep(0.5)
         except Exception as e:
             print(type(e).__name__ + str(e.args), file=sys.stderr)
-            print("Error: Set RLIMIT_NOFILE was found in snitch_config.json but could not be set", file=sys.stderr)
+            print("Error: Set RLIMIT_NOFILE was found in config.json but it could not be set", file=sys.stderr)
 except Exception:
     pass
 FD_CACHE: typing.Final[int] = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128
@@ -271,7 +272,7 @@ class NotificationManager:
 
 
 def read_snitch() -> dict:
-    """read snitch_config.json and snitch_summary.json from correct location (even if sudo is used without preserve-env), or init a new one if not found"""
+    """read data for the snitch dictionary from config.json and summary.json or init new files if not found"""
     template = {
         "Config": {
             "DB retention (days)": 365,
@@ -292,8 +293,8 @@ def read_snitch() -> dict:
         "SHA256": {}
     }
     data = template
-    config_path = os.path.join(HOME_DIR, ".config", "picosnitch", "snitch_config.json")
-    summary_path = os.path.join(HOME_DIR, ".config", "picosnitch", "snitch_summary.json")
+    config_path = os.path.join(BASE_PATH, "config.json")
+    summary_path = os.path.join(BASE_PATH, "summary.json")
     if os.path.exists(config_path):
         with open(config_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             data["Config"] = json.load(json_file)
@@ -301,19 +302,19 @@ def read_snitch() -> dict:
         data["Template"] = True
     if os.path.exists(summary_path):
         with open(summary_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
-            data_summary = json.load(json_file)
-        for key in data_summary:
-            data[key] = data_summary[key]
+            snitch_summary = json.load(json_file)
+        for key in snitch_summary:
+            data[key] = snitch_summary[key]
     assert all(key in data and type(data[key]) == type(template[key]) for key in template), "Invalid json files"
     assert all(key in data["Config"] and type(data["Config"][key]) == type(template["Config"][key]) for key in template["Config"]), "Invalid config"
     return data
 
 
 def write_snitch(snitch: dict, write_config: bool = False) -> None:
-    """write snitch_config.json, snitch_summary.json, and error.log to correct location (even if sudo is used without preserve-env)"""
-    config_path = os.path.join(HOME_DIR, ".config", "picosnitch", "snitch_config.json")
-    summary_path = os.path.join(HOME_DIR, ".config", "picosnitch", "snitch_summary.json")
-    error_log = os.path.join(HOME_DIR, ".config", "picosnitch", "error.log")
+    """write the snitch dictionary to config.json, summary.json, and error.log"""
+    config_path = os.path.join(BASE_PATH, "config.json")
+    summary_path = os.path.join(BASE_PATH, "summary.json")
+    error_log_path = os.path.join(BASE_PATH, "error.log")
     if snitch.pop("WRITELOCK", False):
         summary_path += "~"
     if not os.path.isdir(os.path.dirname(summary_path)):
@@ -324,7 +325,7 @@ def write_snitch(snitch: dict, write_config: bool = False) -> None:
             with open(config_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
                 json.dump(snitch_config, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
         if snitch["Errors"]:
-            with open(error_log, "a", encoding="utf-8", errors="surrogateescape") as text_file:
+            with open(error_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
                 text_file.write("\n".join(snitch["Errors"]) + "\n")
         del snitch["Errors"]
         del snitch["Config"]
@@ -338,7 +339,7 @@ def write_snitch(snitch: dict, write_config: bool = False) -> None:
 
 
 def write_snitch_and_exit(snitch: dict, q_error: multiprocessing.Queue, snitch_pipe):
-    """write snitch one last time"""
+    """write the snitch dictionary one last time"""
     while not q_error.empty():
         error = q_error.get()
         snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
@@ -528,7 +529,7 @@ def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
 
 
 def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
-    """coordinates connection data between subprocesses, updates snitch_summary.json with new connections and creates notifications"""
+    """coordinates connection data between subprocesses, updates summary.json with new connections and creates notifications"""
     os.nice(-20)
     # init variables for loop
     parent_process = multiprocessing.parent_process()
@@ -591,7 +592,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                         snitch["SHA256"][msg["exe"]] = {msg["sha256"]: msg["result"]}
                     if msg["suspicious"]:
                         NotificationManager().toast("Suspicious VT results for " + msg["name"])
-            # write snitch_summary.json and error.log (no more than once per 30 seconds, and at least once per 10 minutes, may need adjusting, eg no delay if snitch["Errors"])
+            # write summary.json and error.log (no more than once per 30 seconds, and at least once per 10 minutes, may need adjusting, eg no delay if snitch["Errors"])
             if time.time() - last_write > 30:
                 new_size = sys.getsizeof(pickle.dumps(snitch))
                 if new_size != sizeof_snitch or time.time() - last_write > 600:
@@ -603,13 +604,13 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
 
 
 def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
-    """updates sqlite db with new connections and reports back to updater_subprocess if needed"""
+    """updates the snitch sqlite3 db with new connections and reports back to updater_subprocess if needed"""
     parent_process = multiprocessing.parent_process()
-    # easier to update a copy of snitch here than trying to keep them in sync (just need to track sha256 and vt_results after this)
+    # maintain a separate copy of the snitch dictionary here and coordinate with the updater_subprocess (sha256 and vt_results)
     snitch, initial_processes = pickle.loads(init_pickle)
     get_vt_results(snitch, p_virustotal.q_in, q_updater_in, True)
     # init sql database
-    file_path = os.path.join(HOME_DIR, ".config", "picosnitch", "snitch.db")
+    file_path = os.path.join(BASE_PATH, "snitch.db")
     con = sqlite3.connect(file_path)
     cur = con.cursor()
     cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
@@ -803,7 +804,7 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
                 except Exception:
                     if config["VT file upload"]:
                         try:
-                            with open(proc["exe"], "rb") as f:
+                            with open(proc["fd"], "rb") as f:
                                 analysis = client.scan_file(f, wait_for_completion=True)
                         except Exception:
                             q_vt_results.put(pickle.dumps((proc, sha256, "Failed to read file for upload", suspicious)))
@@ -884,7 +885,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
 
 def main():
     """init picosnitch"""
-    # read config
+    # the snitch is used by most subprocessess, but only updated in the updater_subprocess
     snitch = read_snitch()
     # do initial poll of current network connections
     initial_processes = initial_poll(snitch)
@@ -1156,7 +1157,7 @@ def start_ui() -> int:
     Loading database ...
     """)
     # init sql connection
-    file_path = os.path.join(HOME_DIR, ".config", "picosnitch", "snitch.db")
+    file_path = os.path.join(BASE_PATH, "snitch.db")
     con = sqlite3.connect(file_path, timeout=15)
     # check for table
     cur = con.cursor()
@@ -1191,7 +1192,7 @@ def start_daemon():
     are welcome to redistribute it under certain conditions. See the GNU General
     Public Licence for details.
 
-    config and log files are in: {HOME_DIR}
+    config and log files are in: {BASE_PATH}
 
     usage: picosnitch start|stop|restart|status|systemd|view|version
                        |     |    |       |      |       |    |--> {VERSION}
@@ -1218,7 +1219,7 @@ def start_daemon():
         print("Warning: picosnitch is running in a virtual environment, notifications may not function", file=sys.stderr)
     if sys.platform.startswith("linux"):
         if os.path.expanduser("~") == "/root" and not os.getenv("DBUS_SESSION_BUS_ADDRESS"):
-            print("Warning: picosnitch was run as root without preserving environment", file=sys.stderr)
+            print("Warning: picosnitch was run as root without preserving environment, notifications won't work", file=sys.stderr)
         if len(sys.argv) == 2:
             if os.getuid() != 0:
                 print("Warning: picosnitch was run without root privileges, requesting root privileges", file=sys.stderr)
@@ -1234,27 +1235,22 @@ def start_daemon():
                     if sys.stdin.isatty():
                         tmp_snitch["Config"]["VT API key"] = input("Enter your VirusTotal API key (optional, leave blank to disable)\n>>> ")
                     write_snitch(tmp_snitch, write_config=True)
+            if sys.argv[1] in ["start", "stop", "restart", "status"]:
+                if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
+                    print("Warning: found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl, to use systemd, stop picosnitch then run `systemctl start|stop|restart|status picosnitch`", file=sys.stderr)
             class PicoDaemon(Daemon):
                 def run(self):
                     main()
             daemon = PicoDaemon("/run/picosnitch.pid")
             if sys.argv[1] == "start":
-                if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
-                    print("Warning: found systemd service, it is recommended to use `systemctl start picosnitch`", file=sys.stderr)
                 print("starting picosnitch")
                 daemon.start()
             elif sys.argv[1] == "stop":
-                if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
-                    print("Warning: found systemd service, if picosnitch was started with systemctl, you may need to run `systemctl stop picosnitch`", file=sys.stderr)
                 print("stopping picosnitch")
                 daemon.stop()
             elif sys.argv[1] == "restart":
-                if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
-                    print("Warning: found systemd service, restarting may not work correctly if picosnitch was started with systemctl", file=sys.stderr)
                 daemon.restart()
             elif sys.argv[1] == "status":
-                if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
-                    print("Warning: found systemd service, `systemctl status picosnitch` may be more useful", file=sys.stderr)
                 daemon.status()
             elif sys.argv[1] == "systemd":
                 with open("/usr/lib/systemd/system/picosnitch.service", "w") as f:

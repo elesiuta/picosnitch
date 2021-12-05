@@ -44,7 +44,7 @@
   - `picosnitch view`
 
 ## configuration
-- config is stored in `~/.config/picosnitch/snitch_config.json`
+- config is stored in `~/.config/picosnitch/config.json`
   - restart picosnitch if it is currently running for any changes to take effect
 
 ```python
@@ -59,7 +59,7 @@
   "Log commands": True, # Log command line args for each executable
   "Log ignore": [], # List of process names (str) or ports (int)
   # will omit connections that match any of these from the connection log (snitch.db)
-  # the process and executable will still be recorded in snitch_summary.json
+  # the process and executable will still be recorded in summary.json
   "Set RLIMIT_NOFILE": None, # Set the maximum number of open file descriptors (int)
   # increasing it allows more processes to be cached (typical system default is 1024)
   # improving the performance and reliability of hashing processes (also caches hash)
@@ -71,7 +71,7 @@
 ```
 
 ## logging
-- a short summary of seen processes is stored in `~/.config/picosnitch/snitch_summary.json`
+- a short summary of seen processes is stored in `~/.config/picosnitch/summary.json`
   - this is used for determining whether to create a notification
 
 ```python
