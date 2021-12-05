@@ -44,23 +44,22 @@ import textwrap
 import time
 import typing
 
+# also look in user site for imports while running as root via systemd without turning their environment into https://xkcd.com/1987/
 try:
     site.addsitedir(os.getenv("PYTHON_USER_SITE"))
 except Exception:
     pass
+import psutil
 
+VERSION: typing.Final[str] = "0.5.1dev"
+PAGE_CNT: typing.Final[int] = 8
+if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
+    home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
+else:
+    home_dir = os.path.expanduser("~")
+HOME_DIR: typing.Final[str] = home_dir  # separate line to keep linter happy
 try:
-    import psutil
-except Exception as e:
-    print(type(e).__name__ + str(e.args), file=sys.stderr)
-    print("Make sure dependency is installed, or environment is preserved if running with sudo", file=sys.stderr)
-
-try:
-    if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
-        home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
-    else:
-        home_dir = os.path.expanduser("~")
-    file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_config.json")
+    file_path = os.path.join(HOME_DIR, ".config", "picosnitch", "snitch_config.json")
     with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
         nofile = json.load(json_file)["Config"]["Set RLIMIT_NOFILE"]
     if type(nofile) == int:
@@ -70,15 +69,11 @@ try:
             time.sleep(0.5)
         except Exception as e:
             print(type(e).__name__ + str(e.args), file=sys.stderr)
-            print("Error: NOFILE was set in snitch_config.json but could not set RLIMIT_NOFILE", file=sys.stderr)
+            print("Error: Set RLIMIT_NOFILE was found in snitch_config.json but could not be set", file=sys.stderr)
 except Exception:
     pass
-
-VERSION = "0.5.1dev"
-
-FD_CACHE = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128
-PAGE_CNT = 8
-PID_CACHE = max(8192, 2*FD_CACHE)
+FD_CACHE: typing.Final[int] = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128
+PID_CACHE: typing.Final[int] = max(8192, 2*FD_CACHE)
 
 
 class Daemon:
@@ -297,12 +292,8 @@ def read_snitch() -> dict:
         "SHA256": {}
     }
     data = template
-    if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
-        home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
-    else:
-        home_dir = os.path.expanduser("~")
-    config_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_config.json")
-    summary_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_summary.json")
+    config_path = os.path.join(HOME_DIR, ".config", "picosnitch", "snitch_config.json")
+    summary_path = os.path.join(HOME_DIR, ".config", "picosnitch", "snitch_summary.json")
     if os.path.exists(config_path):
         with open(config_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             data["Config"] = json.load(json_file)
@@ -320,13 +311,9 @@ def read_snitch() -> dict:
 
 def write_snitch(snitch: dict, write_config: bool = False) -> None:
     """write snitch_config.json, snitch_summary.json, and error.log to correct location (even if sudo is used without preserve-env)"""
-    if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
-        home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
-    else:
-        home_dir = os.path.expanduser("~")
-    config_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_config.json")
-    summary_path = os.path.join(home_dir, ".config", "picosnitch", "snitch_summary.json")
-    error_log = os.path.join(home_dir, ".config", "picosnitch", "error.log")
+    config_path = os.path.join(HOME_DIR, ".config", "picosnitch", "snitch_config.json")
+    summary_path = os.path.join(HOME_DIR, ".config", "picosnitch", "snitch_summary.json")
+    error_log = os.path.join(HOME_DIR, ".config", "picosnitch", "error.log")
     if snitch.pop("WRITELOCK", False):
         summary_path += "~"
     if not os.path.isdir(os.path.dirname(summary_path)):
@@ -622,11 +609,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
     snitch, initial_processes = pickle.loads(init_pickle)
     get_vt_results(snitch, p_virustotal.q_in, q_updater_in, True)
     # init sql database
-    if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
-        home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
-    else:
-        home_dir = os.path.expanduser("~")
-    file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.db")
+    file_path = os.path.join(HOME_DIR, ".config", "picosnitch", "snitch.db")
     con = sqlite3.connect(file_path)
     cur = con.cursor()
     cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
@@ -1173,11 +1156,7 @@ def start_ui() -> int:
     Loading database ...
     """)
     # init sql connection
-    if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
-        home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
-    else:
-        home_dir = os.path.expanduser("~")
-    file_path = os.path.join(home_dir, ".config", "picosnitch", "snitch.db")
+    file_path = os.path.join(HOME_DIR, ".config", "picosnitch", "snitch.db")
     con = sqlite3.connect(file_path, timeout=15)
     # check for table
     cur = con.cursor()
@@ -1211,6 +1190,8 @@ def start_daemon():
     picosnitch comes with ABSOLUTELY NO WARRANTY. This is free software, and you
     are welcome to redistribute it under certain conditions. See the GNU General
     Public Licence for details.
+
+    config and log files are in: {HOME_DIR}
 
     usage: picosnitch start|stop|restart|status|systemd|view|version
                        |     |    |       |      |       |    |--> {VERSION}
@@ -1258,14 +1239,22 @@ def start_daemon():
                     main()
             daemon = PicoDaemon("/run/picosnitch.pid")
             if sys.argv[1] == "start":
+                if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
+                    print("Warning: found systemd service, it is recommended to use `systemctl start picosnitch`", file=sys.stderr)
                 print("starting picosnitch")
                 daemon.start()
             elif sys.argv[1] == "stop":
+                if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
+                    print("Warning: found systemd service, if picosnitch was started with systemctl, you may need to run `systemctl stop picosnitch`", file=sys.stderr)
                 print("stopping picosnitch")
                 daemon.stop()
             elif sys.argv[1] == "restart":
+                if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
+                    print("Warning: found systemd service, restarting may not work correctly if picosnitch was started with systemctl", file=sys.stderr)
                 daemon.restart()
             elif sys.argv[1] == "status":
+                if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
+                    print("Warning: found systemd service, `systemctl status picosnitch` may be more useful", file=sys.stderr)
                 daemon.status()
             elif sys.argv[1] == "systemd":
                 with open("/usr/lib/systemd/system/picosnitch.service", "w") as f:
