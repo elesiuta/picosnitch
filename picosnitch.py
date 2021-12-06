@@ -415,7 +415,7 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiproces
     if check_pending:
         for exe in snitch["SHA256"]:
             for sha256 in snitch["SHA256"][exe]:
-                if snitch["SHA256"][exe][sha256] == "VT Pending":
+                if snitch["SHA256"][exe][sha256] in ["VT Pending", "Failed to read process for upload", "", None]:
                     if exe in snitch["Processes"] and snitch["Processes"][exe]:
                         name = snitch["Processes"][exe][0]
                     else:
@@ -503,7 +503,7 @@ def sql_subprocess_helper(snitch: dict, new_processes: typing.List[bytes], q_vt:
 
 
 def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -> None:
-    """update the snitch with connection data and create a notification if new entry"""
+    """update the snitch with new processes seen in connection data and create a notification if new entry"""
     # Prevent overwriting the snitch before this function completes in the event of a termination signal
     snitch["WRITELOCK"] = True
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -529,7 +529,7 @@ def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
 
 
 def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
-    """coordinates connection data between subprocesses, updates summary.json with new connections and creates notifications"""
+    """coordinates connection data between subprocesses, updates the snitch dictionary (summary.json) with new processes and creates notifications"""
     os.nice(-20)
     # init variables for loop
     parent_process = multiprocessing.parent_process()
@@ -592,8 +592,8 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                         snitch["SHA256"][msg["exe"]] = {msg["sha256"]: msg["result"]}
                     if msg["suspicious"]:
                         NotificationManager().toast("Suspicious VT results for " + msg["name"])
-            # write summary.json and error.log (no more than once per 30 seconds, and at least once per 10 minutes, may need adjusting, eg no delay if snitch["Errors"])
-            if time.time() - last_write > 30:
+            # write the snitch dictionary to summary.json and error.log (limit writes to reduce disk wear)
+            if time.time() - last_write > 30 or (snitch["Errors"] and time.time() - last_write > 5):
                 new_size = sys.getsizeof(pickle.dumps(snitch))
                 if new_size != sizeof_snitch or time.time() - last_write > 600:
                     sizeof_snitch = new_size
@@ -604,7 +604,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
 
 
 def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
-    """updates the snitch sqlite3 db with new connections and reports back to updater_subprocess if needed"""
+    """updates the snitch sqlite3 db with new connections and reports sha256/vt_results back to updater_subprocess if needed"""
     parent_process = multiprocessing.parent_process()
     # maintain a separate copy of the snitch dictionary here and coordinate with the updater_subprocess (sha256 and vt_results)
     snitch, initial_processes = pickle.loads(init_pickle)
@@ -708,7 +708,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
 
 
 def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
-    """runs a bpf program to monitor the system for new connections and puts info into a pipe"""
+    """runs a bpf program to monitor the system for new connections and puts info into a pipe for updater_subprocess"""
     os.nice(-20)
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
@@ -805,10 +805,20 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
                     if config["VT file upload"]:
                         try:
                             with open(proc["fd"], "rb") as f:
+                                assert os.readlink(proc["fd"]) == proc["exe"]
                                 analysis = client.scan_file(f, wait_for_completion=True)
                         except Exception:
-                            q_vt_results.put(pickle.dumps((proc, sha256, "Failed to read file for upload", suspicious)))
-                            continue
+                            try:
+                                readlink_exe_sha256 = hashlib.sha256()
+                                with open(proc["exe"], "rb") as f:
+                                    while data := f.read(1048576):
+                                        readlink_exe_sha256.update(data)
+                                assert readlink_exe_sha256.hexdigest() == sha256
+                                with open(proc["exe"], "rb") as f:
+                                    analysis = client.scan_file(f, wait_for_completion=True)
+                            except Exception:
+                                q_vt_results.put(pickle.dumps((proc, sha256, "Failed to read process for upload", suspicious)))
+                                continue
                     else:
                         # could also be an invalid api key
                         q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (analysis not found)", suspicious)))
@@ -1256,6 +1266,7 @@ def start_daemon():
                 with open("/usr/lib/systemd/system/picosnitch.service", "w") as f:
                     f.write(systemd_service)
                 subprocess.run(["systemctl", "daemon-reload"])
+                print("Wrote /usr/lib/systemd/system/picosnitch.service\nYou can now run picosnitch using systemctl")
                 return 0
             elif sys.argv[1] == "start-no-daemon":
                 assert not os.path.exists("/run/picosnitch.pid")
