@@ -988,6 +988,12 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                 current_query = f"SELECT {p_col[pri_i]}, SUM(\"events\") as Sum FROM connections{time_query} GROUP BY {p_col[pri_i]}"
             update_query = False
         if execute_query:
+            try:
+                with open("/run/picosnitch.pid", "r") as f:
+                    run_status = "pid: " + f.read().strip()
+            except Exception:
+                run_status = "not running"
+            print(f"\033]0;picosnitch v{VERSION} ({run_status})\a", end="", flush=True)
             while True:
                 try:
                     cur.execute(current_query)
@@ -1167,13 +1173,6 @@ def start_ui() -> int:
         raise Exception(f"Table 'connections' does not exist in {file_path}")
     con.close()
     con = sqlite3.connect(file_path, timeout=1)
-    # set terminal title
-    try:
-        with open("/run/picosnitch.pid", "r") as f:
-            run_status = "pid: " + f.read().strip()
-    except Exception:
-        run_status = "not running"
-    print(f"\033]0;picosnitch v{VERSION} ({run_status})\a", end="", flush=True)
     # start curses
     for err_count in reversed(range(30)):
         try:
@@ -1216,6 +1215,8 @@ def start_daemon():
                        |     |    |       |      |--> create service
                        |     |    |       |--> daemon status
                        |_____|____|--> daemon controls
+
+    systemd: create service then use systemctl instead of these daemon controls
     """)
     systemd_service = textwrap.dedent(f"""    [Unit]
     Description=picosnitch, protect your privacy
@@ -1237,6 +1238,9 @@ def start_daemon():
         if os.path.expanduser("~") == "/root" and not os.getenv("DBUS_SESSION_BUS_ADDRESS"):
             print("Warning: picosnitch was run as root without preserving environment, notifications won't work", file=sys.stderr)
         if len(sys.argv) == 2:
+            if sys.argv[1] == "help":
+                print(readme)
+                return 0
             if os.getuid() != 0:
                 print("Warning: picosnitch was run without root privileges, requesting root privileges", file=sys.stderr)
                 if importlib.util.find_spec("picosnitch"):
@@ -1253,7 +1257,7 @@ def start_daemon():
                     write_snitch(tmp_snitch, write_config=True)
             if sys.argv[1] in ["start", "stop", "restart", "status"]:
                 if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
-                    print("Warning: found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl, to use systemd, stop picosnitch then run `systemctl start|stop|restart|status picosnitch`", file=sys.stderr)
+                    print("Warning: found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl", file=sys.stderr)
             class PicoDaemon(Daemon):
                 def run(self):
                     main()
