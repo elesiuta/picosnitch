@@ -27,24 +27,27 @@
 ## usage
 - you can run picosnitch either as a standalone daemon, or with systemd
   - use the same method to stop picosnitch as you used to start it
-- standalone daemon
+- run as standalone daemon
   - start with `picosnitch start`
   - stop with `picosnitch stop`
   - restart with `picosnitch restart`
-- systemd integration
+- run with systemd
   - setup with `picosnitch systemd`
   - autostart on reboot with `systemctl enable picosnitch`
   - start with `systemctl start picosnitch`
   - stop with `systemctl stop picosnitch`
   - restart with `systemctl restart picosnitch`
-  - view detailed status with `systemctl status picosnitch`
-- view basic status with
-  - `picosnitch status`
-- view past connections
-  - `picosnitch view`
+  - show detailed status with `systemctl status picosnitch`
+- user interface for browsing past connection
+  - start with `picosnitch view`
+  - `space/enter`: filter on entry `backspace`: remove filter `h/H`: cycle through history `t/T`: cycle time range `r`: refresh view `q`: quit
+- other commands
+  - show basic status `picosnitch status`
+  - show version info `picosnitch version`
+  - show help `picosnitch help`
 
 ## configuration
-- config is stored in `~/.config/picosnitch/snitch_config.json`
+- config is stored in `~/.config/picosnitch/config.json`
   - restart picosnitch if it is currently running for any changes to take effect
 
 ```python
@@ -59,7 +62,7 @@
   "Log commands": True, # Log command line args for each executable
   "Log ignore": [], # List of process names (str) or ports (int)
   # will omit connections that match any of these from the connection log (snitch.db)
-  # the process and executable will still be recorded in snitch_summary.json
+  # the process and executable will still be recorded in summary.json
   "Set RLIMIT_NOFILE": None, # Set the maximum number of open file descriptors (int)
   # increasing it allows more processes to be cached (typical system default is 1024)
   # improving the performance and reliability of hashing processes (also caches hash)
@@ -71,7 +74,7 @@
 ```
 
 ## logging
-- a short summary of seen processes is stored in `~/.config/picosnitch/snitch_summary.json`
+- a short summary of seen processes is stored in `~/.config/picosnitch/summary.json`
   - this is used for determining whether to create a notification
 
 ```python
