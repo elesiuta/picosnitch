@@ -1213,7 +1213,7 @@ def start_daemon():
                        |     |    |       |      |       |    |--> {VERSION}
                        |     |    |       |      |       |--> curses ui
                        |     |    |       |      |--> create service
-                       |     |    |       |--> daemon status
+                       |     |    |       |--> show pid
                        |_____|____|--> daemon controls
 
     systemd: create service then use systemctl instead of these daemon controls
