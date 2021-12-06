@@ -77,6 +77,7 @@ FD_CACHE: typing.Final[int] = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 12
 PID_CACHE: typing.Final[int] = max(8192, 2*FD_CACHE)
 
 
+### classes
 class Daemon:
     """A generic daemon class from http://www.jejik.com/files/examples/daemon3x.py"""
     def __init__(self, pidfile):
@@ -271,6 +272,7 @@ class NotificationManager:
             self.notifications_ready = False
 
 
+### functions
 def read_snitch() -> dict:
     """read data for the snitch dictionary from config.json and summary.json or init new files if not found"""
     template = {
@@ -426,7 +428,7 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiproces
         while not q_vt.empty():
             proc, sha256, result, suspicious = pickle.loads(q_vt.get())
             snitch["SHA256"][proc["exe"]][sha256] = result
-            q_out.put(pickle.dumps({"type": "vt", "name": proc["name"], "exe": proc["exe"], "sha256": sha256, "result": result, "suspicious": suspicious}))
+            q_out.put(pickle.dumps({"type": "vt_result", "name": proc["name"], "exe": proc["exe"], "sha256": sha256, "result": result, "suspicious": suspicious}))
 
 
 def initial_poll(snitch: dict) -> list:
@@ -457,7 +459,7 @@ def initial_poll(snitch: dict) -> list:
 
 
 def sql_subprocess_helper(snitch: dict, new_processes: typing.List[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> typing.List[tuple]:
-    """update the snitch with sha data, update sql with conns, return list of notifications"""
+    """iterate over the list of process/connection data and get sha256 to generate a list of transactions for the sql database"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     event_counter = collections.defaultdict(int)
     transactions = set()
@@ -503,7 +505,7 @@ def sql_subprocess_helper(snitch: dict, new_processes: typing.List[bytes], q_vt:
 
 
 def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -> None:
-    """update the snitch with new processes seen in connection data and create a notification if new entry"""
+    """iterate over the list of process/connection data to update the snitch dictionary (summary.json) and create notifications on new entries"""
     # Prevent overwriting the snitch before this function completes in the event of a termination signal
     snitch["WRITELOCK"] = True
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -528,8 +530,9 @@ def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
     _ = snitch.pop("WRITELOCK")
 
 
+### processes
 def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
-    """coordinates connection data between subprocesses, updates the snitch dictionary (summary.json) with new processes and creates notifications"""
+    """coordinates connection data between subprocesses, writes updates to the snitch dictionary (summary.json) and creates notifications"""
     os.nice(-20)
     # init variables for loop
     parent_process = multiprocessing.parent_process()
@@ -583,7 +586,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                             NotificationManager().toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
                     else:
                         snitch["SHA256"][msg["exe"]] = {msg["sha256"]: "VT Pending"}
-                elif msg["type"] == "vt":
+                elif msg["type"] == "vt_result":
                     if msg["exe"] in snitch["SHA256"]:
                         if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
                             NotificationManager().toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
@@ -893,22 +896,9 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     return 0
 
 
-def main():
-    """init picosnitch"""
-    # the snitch is used by most subprocessess, but only updated in the updater_subprocess
-    snitch = read_snitch()
-    # do initial poll of current network connections
-    initial_processes = initial_poll(snitch)
-    snitch_updater_pickle = pickle.dumps((snitch, initial_processes))
-    # start picosnitch process monitor
-    if __name__ == "__main__":
-        sys.exit(picosnitch_master_process(snitch["Config"], snitch_updater_pickle))
-    print("Snitch subprocess init failed, __name__ != __main__, try: sudo -E python -m picosnitch", file=sys.stderr)
-    sys.exit(1)
-
-
+### user interface
 def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
-    """for curses"""
+    """for curses wrapper"""
     # init and splash screen
     cur = con.cursor()
     curses.cbreak()
@@ -1149,6 +1139,7 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             con.close()
             return 0
 
+
 def start_ui() -> int:
     """start a curses ui"""
     splash = textwrap.dedent("""
@@ -1193,6 +1184,21 @@ def start_ui() -> int:
     return 1
 
 
+### startup
+def main():
+    """init picosnitch"""
+    # master copy of the snitch dictionary, all subprocesses only receive a static copy of it from this point in time
+    snitch = read_snitch()
+    # do initial poll of current network connections
+    initial_processes = initial_poll(snitch)
+    snitch_updater_pickle = pickle.dumps((snitch, initial_processes))
+    # start picosnitch process monitor
+    if __name__ == "__main__":
+        sys.exit(picosnitch_master_process(snitch["Config"], snitch_updater_pickle))
+    print("Snitch subprocess init failed, __name__ != __main__, try: sudo -E python3 -m picosnitch", file=sys.stderr)
+    sys.exit(1)
+
+
 def start_daemon():
     """startup picosnitch as a daemon and ensure only one instance is running"""
     readme = textwrap.dedent(f"""    picosnitch is a small program to monitor your system for processes that
@@ -1200,7 +1206,7 @@ def start_daemon():
 
     picosnitch comes with ABSOLUTELY NO WARRANTY. This is free software, and you
     are welcome to redistribute it under certain conditions. See the GNU General
-    Public Licence for details.
+    Public License for details.
 
     config and log files are in: {BASE_PATH}
 
@@ -1253,12 +1259,13 @@ def start_daemon():
                     main()
             daemon = PicoDaemon("/run/picosnitch.pid")
             if sys.argv[1] == "start":
-                print("starting picosnitch")
+                print("starting picosnitch daemon")
                 daemon.start()
             elif sys.argv[1] == "stop":
-                print("stopping picosnitch")
+                print("stopping picosnitch daemon")
                 daemon.stop()
             elif sys.argv[1] == "restart":
+                print("restarting picosnitch daemon")
                 daemon.restart()
             elif sys.argv[1] == "status":
                 daemon.status()
@@ -1275,6 +1282,7 @@ def start_daemon():
                 atexit.register(delpid)
                 with open("/run/picosnitch.pid", "w") as f:
                     f.write(str(os.getpid()) + "\n")
+                print("starting picosnitch in simple mode")
                 sys.exit(main())
             elif sys.argv[1] == "view":
                 return start_ui()
@@ -1293,6 +1301,7 @@ def start_daemon():
         return 1
 
 
+### bpf program
 bpf_text = """
 // This BPF program comes from the following source, licensed under the Apache License, Version 2.0
 // https://github.com/p-/socket-connect-bpf/blob/7f386e368759e53868a078570254348e73e73e22/securitySocketConnectSrc.bpf
