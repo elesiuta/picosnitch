@@ -793,11 +793,14 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
         vt_enabled = True
     except ImportError:
         vt_enabled = False
+    if not (config["VT API key"] and vt_enabled):
+        config["VT request limit (seconds)"] = 0
     while True:
         try:
             if not parent_process.is_alive():
                 return 0
             time.sleep(config["VT request limit (seconds)"])
+            proc, analysis = None, None
             proc, sha256 = pickle.loads(q_vt_pending.get(block=True, timeout=15))
             suspicious = False
             if config["VT API key"] and vt_enabled:
@@ -839,6 +842,11 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
             pass
         except Exception as e:
             q_error.put("VT %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+            try:
+                analysis = str(analysis)
+            except Exception:
+                analysis = "unknown analysis"
+            q_error.put("Last VT Exception on: %s with %s" % (str(proc), str(analysis)))
 
 
 def picosnitch_master_process(config, snitch_updater_pickle):
