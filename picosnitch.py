@@ -508,7 +508,7 @@ def sql_subprocess_helper(snitch: dict, new_processes: typing.List[bytes], q_vt:
             q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
         # filter from logs
         if snitch["Config"]["Log commands"]:
-            proc["cmdline"] = proc["cmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").replace("\0", "")
+            proc["cmdline"] = proc["cmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").replace("\0", "").strip()
         else:
             proc["cmdline"] = ""
         if snitch["Config"]["Log addresses"]:
