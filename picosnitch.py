@@ -751,7 +751,7 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
                 st_dev, st_ino = get_fstat(fd)
                 fd_dict[sig] = (fd, st_dev, st_ino)
                 try:
-                    os.close(fd_dict.popitem(last=False)[1])
+                    os.close(fd_dict.popitem(last=False)[1][0])
                 except Exception:
                     pass
                 return ("/proc/%d/fd/%d" % (self_pid, fd), st_dev, st_ino)
