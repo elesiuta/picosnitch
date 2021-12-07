@@ -749,10 +749,7 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
             try:
                 fd = os.open("/proc/%d/exe" % pid, os.O_RDONLY)
                 fd_path = "/proc/%d/fd/%d" % (self_pid, fd)
-                try:
-                    st_dev, st_ino = get_fstat(fd)
-                except Exception:
-                    st_dev, st_ino = 0, 0
+                st_dev, st_ino = get_fstat(fd)
             except Exception:
                 fd, fd_path, st_dev, st_ino = 0, "", 0, 0
             try:
@@ -766,8 +763,8 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
                 cmd = ""
             fd_dict[sig] = (fd, fd_path, st_dev, st_ino, exe, cmd)
             try:
-                if fd := fd_dict.popitem(last=False)[1][0]:
-                    os.close(fd)
+                if fd_old := fd_dict.popitem(last=False)[1][0]:
+                    os.close(fd_old)
             except Exception:
                 pass
             return (fd_path, st_dev, st_ino, exe, cmd)
