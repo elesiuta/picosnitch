@@ -25,7 +25,7 @@ import functools
 import ipaddress
 import json
 import hashlib
-import importlib
+import importlib.util
 import multiprocessing
 import os
 import pickle
