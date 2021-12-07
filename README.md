@@ -27,16 +27,12 @@
 ## usage
 - you can run picosnitch either as a standalone daemon, or with systemd
   - use the same method to stop picosnitch as you used to start it
-- run as standalone daemon
-  - start with `picosnitch start`
-  - stop with `picosnitch stop`
-  - restart with `picosnitch restart`
+- run as a standalone daemon
+  - start|stop|restart with `picosnitch start|stop|restart`
 - run with systemd
   - setup with `picosnitch systemd`
-  - autostart on reboot with `systemctl enable picosnitch`
-  - start with `systemctl start picosnitch`
-  - stop with `systemctl stop picosnitch`
-  - restart with `systemctl restart picosnitch`
+  - enable|disable autostart on reboot with `systemctl enable|disable picosnitch`
+  - start|stop|restart with `systemctl start|stop|restart picosnitch`
   - show detailed status with `systemctl status picosnitch`
 - user interface for browsing past connection
   - start with `picosnitch view`

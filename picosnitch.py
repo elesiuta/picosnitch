@@ -1228,13 +1228,15 @@ def main():
 def start_daemon():
     """startup picosnitch as a daemon and ensure only one instance is running"""
     readme = textwrap.dedent(f"""    picosnitch is a small program to monitor your system for processes that
-    make network connections - https://elesiuta.github.io/picosnitch
+    make network connections.
 
     picosnitch comes with ABSOLUTELY NO WARRANTY. This is free software, and you
     are welcome to redistribute it under certain conditions. See the GNU General
     Public License for details.
 
-    config and log files are in: {BASE_PATH}
+    website: https://elesiuta.github.io/picosnitch
+
+    config and log files: {BASE_PATH}
 
     usage: picosnitch start|stop|restart|status|systemd|view|version
                        |     |    |       |      |       |    |--> {VERSION}
