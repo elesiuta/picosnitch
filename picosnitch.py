@@ -739,37 +739,38 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
     for x in range(FD_CACHE):
         fd_dict["tmp%d" % x] = (os.open("/proc/self/exe", os.O_RDONLY), 0, 0)
     self_pid = os.getpid()
-    def get_fd(pid: int, starttime: int) -> typing.Tuple[str, int, int]:
+    def get_fd(pid: int, starttime: int) -> typing.Tuple[str, int, int, str, str]:
         sig = "%d %d" % (pid, starttime)
         try:
             fd_dict.move_to_end(sig)
-            fd, st_dev, st_ino = fd_dict[sig]
-            return ("/proc/%d/fd/%d" % (self_pid, fd), st_dev, st_ino)
+            fd, fd_path, st_dev, st_ino, exe, cmd = fd_dict[sig]
+            return (fd_path, st_dev, st_ino, exe, cmd)
         except Exception:
             try:
                 fd = os.open("/proc/%d/exe" % pid, os.O_RDONLY)
-                st_dev, st_ino = get_fstat(fd)
-                fd_dict[sig] = (fd, st_dev, st_ino)
+                fd_path = "/proc/%d/fd/%d" % (self_pid, fd)
                 try:
-                    os.close(fd_dict.popitem(last=False)[1][0])
+                    st_dev, st_ino = get_fstat(fd)
                 except Exception:
-                    pass
-                return ("/proc/%d/fd/%d" % (self_pid, fd), st_dev, st_ino)
+                    st_dev, st_ino = 0, 0
             except Exception:
-                return "", 0, 0
-    @functools.lru_cache(maxsize=PID_CACHE)
-    def get_exe(pid: int, _starttime: int) -> str:
-        try:
-            return os.readlink("/proc/%d/exe" % pid)
-        except Exception:
-            return ""
-    @functools.lru_cache(maxsize=PID_CACHE)
-    def get_cmd(pid: int, _starttime: int) -> str:
-        try:
-            with open("/proc/%d/cmdline" % pid, "r") as f:
-                return f.read()
-        except Exception:
-            return ""
+                fd, fd_path, st_dev, st_ino = 0, "", 0, 0
+            try:
+                exe = os.readlink("/proc/%d/exe" % pid)
+            except Exception:
+                exe = ""
+            try:
+                with open("/proc/%d/cmdline" % pid, "r") as f:
+                    cmd = f.read()
+            except Exception:
+                cmd = ""
+            fd_dict[sig] = (fd, fd_path, st_dev, st_ino, exe, cmd)
+            try:
+                if fd := fd_dict.popitem(last=False)[1][0]:
+                    os.close(fd)
+            except Exception:
+                pass
+            return (fd_path, st_dev, st_ino, exe, cmd)
     if os.getuid() == 0:
         b = BPF(text=bpf_text)
         b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
@@ -779,17 +780,17 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
         def queue_ipv4_event(cpu, data, size):
             event = b["ipv4_events"].event(data)
             starttime = get_starttime(event.pid, True)
-            fd, st_dev, st_ino, exe, cmd = *get_fd(event.pid, starttime), get_exe(event.pid, starttime), get_cmd(event.pid, starttime)
+            fd, st_dev, st_ino, exe, cmd = get_fd(event.pid, starttime)
             snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "st": starttime, "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
         def queue_ipv6_event(cpu, data, size):
             event = b["ipv6_events"].event(data)
             starttime = get_starttime(event.pid, True)
-            fd, st_dev, st_ino, exe, cmd = *get_fd(event.pid, starttime), get_exe(event.pid, starttime), get_cmd(event.pid, starttime)
+            fd, st_dev, st_ino, exe, cmd = get_fd(event.pid, starttime)
             snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "st": starttime, "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
         def queue_other_event(cpu, data, size):
             event = b["other_socket_events"].event(data)
             starttime = get_starttime(event.pid, True)
-            fd, st_dev, st_ino, exe, cmd = *get_fd(event.pid, starttime), get_exe(event.pid, starttime), get_cmd(event.pid, starttime)
+            fd, st_dev, st_ino, exe, cmd = get_fd(event.pid, starttime)
             snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "st": starttime, "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
         b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
         b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
