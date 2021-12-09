@@ -77,7 +77,7 @@ try:
             print("Error: Set RLIMIT_NOFILE was found in config.json but it could not be set", file=sys.stderr)
 except Exception:
     pass
-FD_CACHE: typing.Final[int] = min(8000, resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128)  # will add option to set FAN_UNLIMITED_MARKS later
+FD_CACHE: typing.Final[int] = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128
 PID_CACHE: typing.Final[int] = max(8192, 2*FD_CACHE)
 
 
@@ -754,10 +754,10 @@ def monitor_subprocess(fan_fd, snitch_pipe, q_error, q_in, _q_out):
     parent_process = multiprocessing.parent_process()
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
     libc = ctypes.CDLL(ctypes.util.find_library("c"))
-    _FAN_MARK_ADD = 1
-    _FAN_MARK_REMOVE = 2
-    _FAN_MARK_FLUSH = 128
-    _FAN_MODIFY = 2
+    _FAN_MARK_ADD = 0x1
+    _FAN_MARK_REMOVE = 0x2
+    _FAN_MARK_FLUSH = 0x80
+    _FAN_MODIFY = 0x2
     libc.fanotify_mark(fan_fd, _FAN_MARK_FLUSH, _FAN_MODIFY, -1, None)
     fd_dict = collections.OrderedDict()
     for x in range(FD_CACHE):
@@ -898,8 +898,10 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     """coordinates all picosnitch subprocesses"""
     # init fanotify
     libc = ctypes.CDLL(ctypes.util.find_library("c"))
-    _FAN_CLASS_CONTENT = 4
-    fan_fd = libc.fanotify_init(_FAN_CLASS_CONTENT, os.O_RDONLY)
+    _FAN_CLASS_CONTENT = 0x4
+    _FAN_UNLIMITED_MARKS = 0x20
+    flags = _FAN_CLASS_CONTENT if FD_CACHE < 8192 else _FAN_CLASS_CONTENT | _FAN_UNLIMITED_MARKS
+    fan_fd = libc.fanotify_init(flags, os.O_RDONLY)
     # start subprocesses
     snitch_updater_pipe, snitch_monitor_pipe = multiprocessing.Pipe(duplex=False)
     sql_recv_pipe, sql_send_pipe = multiprocessing.Pipe(duplex=False)
