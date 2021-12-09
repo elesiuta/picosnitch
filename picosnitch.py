@@ -19,8 +19,11 @@
 
 import atexit
 import collections
+import ctypes
+import ctypes.util
 import curses
 import datetime
+import fcntl
 import functools
 import ipaddress
 import json
@@ -40,6 +43,7 @@ import sqlite3
 import struct
 import subprocess
 import sys
+import termios
 import textwrap
 import time
 import typing
@@ -52,7 +56,7 @@ except Exception:
 import psutil
 
 # set constants and RLIMIT_NOFILE if configured
-VERSION: typing.Final[str] = "0.6.2"
+VERSION: typing.Final[str] = "0.6.3dev"
 PAGE_CNT: typing.Final[int] = 8
 if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
     home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
@@ -73,7 +77,7 @@ try:
             print("Error: Set RLIMIT_NOFILE was found in config.json but it could not be set", file=sys.stderr)
 except Exception:
     pass
-FD_CACHE: typing.Final[int] = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128
+FD_CACHE: typing.Final[int] = min(8000, resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128)  # will add option to set FAN_UNLIMITED_MARKS later
 PID_CACHE: typing.Final[int] = max(8192, 2*FD_CACHE)
 
 
@@ -272,6 +276,19 @@ class NotificationManager:
             self.notifications_ready = False
 
 
+class FanotifyEventMetadata(ctypes.Structure):
+    """https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/uapi/linux/fanotify.h"""
+    _fields_ = [
+        ("event_len", ctypes.c_uint32),
+        ("vers", ctypes.c_uint8),
+        ("reserved", ctypes.c_uint8),
+        ("metadata_len", ctypes.c_uint16),
+        ("mask", ctypes.c_uint64),
+        ("fd", ctypes.c_int32),
+        ("pid", ctypes.c_int32)
+    ]
+
+
 ### functions
 def read_snitch() -> dict:
     """read data for the snitch dictionary from config.json and summary.json or init new files if not found"""
@@ -366,7 +383,7 @@ def reverse_dns_lookup(ip: str) -> str:
 
 
 @functools.lru_cache(maxsize=PID_CACHE)
-def get_sha256_fd(path: str, _pid: int,  st_dev: int, st_ino: int, _starttime: int) -> str:
+def get_sha256_fd(path: str, st_dev: int, st_ino: int, _mod_cnt: int) -> str:
     """get sha256 of process executable from /proc/monitor_pid/fd/proc_exe_fd"""
     try:
         sha256 = hashlib.sha256()
@@ -430,6 +447,22 @@ def get_fstat(fd: int) -> typing.Tuple[int, int]:
         return 0, 0
 
 
+def get_fanotify_events(fan_fd: int, fan_mod_cnt: dict, q_error: multiprocessing.Queue) -> None:
+    sizeof_event = ctypes.sizeof(FanotifyEventMetadata)
+    bytes_avail = ctypes.c_int()
+    fcntl.ioctl(fan_fd, termios.FIONREAD, bytes_avail)
+    for i in range(0, bytes_avail.value, sizeof_event):
+        try:
+            fanotify_event_metadata = FanotifyEventMetadata()
+            buf = os.read(fan_fd, sizeof_event)
+            ctypes.memmove(ctypes.addressof(fanotify_event_metadata), buf, sizeof_event)
+            st_dev, st_ino = get_fstat(fanotify_event_metadata.fd)
+            fan_mod_cnt["%d %d" % (st_dev, st_ino)] += 1
+            os.close(fanotify_event_metadata.fd)
+        except Exception as e:
+            q_error.put("Fanotify Event %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+
+
 def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, check_pending: bool = False) -> None:
     """get virustotal results from subprocess and update snitch, q_vt = q_in if check_pending else q_out"""
     if check_pending:
@@ -477,7 +510,7 @@ def initial_poll(snitch: dict) -> list:
     return initial_processes
 
 
-def sql_subprocess_helper(snitch: dict, new_processes: typing.List[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> typing.List[tuple]:
+def sql_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing.List[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> typing.List[tuple]:
     """iterate over the list of process/connection data and get sha256 to generate a list of transactions for the sql database"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     event_counter = collections.defaultdict(int)
@@ -487,7 +520,7 @@ def sql_subprocess_helper(snitch: dict, new_processes: typing.List[bytes], q_vt:
         if type(proc) != dict:
             continue
         sha_fd_error = ""
-        sha256 = get_sha256_fd(proc["fd"], proc["pid"], proc["dev"], proc["ino"], proc["st"])
+        sha256 = get_sha256_fd(proc["fd"], proc["dev"], proc["ino"], fan_mod_cnt["%d %d" % (proc["dev"], proc["ino"])])
         if sha256.startswith("!"):
             # fallback on trying to read directly (if still alive) if fd_cache fails
             sha_fd_error = sha256
@@ -625,7 +658,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
             q_error.put("Updater %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
-def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
+def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
     """updates the snitch sqlite3 db with new connections and reports sha256/vt_results back to updater_subprocess if needed"""
     parent_process = multiprocessing.parent_process()
     # maintain a separate copy of the snitch dictionary here and coordinate with the updater_subprocess (sha256 and vt_results)
@@ -643,6 +676,8 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
         cur.execute(''' DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") ''' % int(snitch["Config"]["DB retention (days)"]))
     con.commit()
     con.close()
+    # init fanotify mod counter, {"st_dev st_ino": modify_count}
+    fan_mod_cnt = collections.defaultdict(int)
     # process initial connections
     initial_processes_fd = initial_processes[FD_CACHE:]
     temp_fd = []
@@ -656,7 +691,7 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
             initial_processes_fd.append(proc)
         except Exception:
             q_error.put("Process closed during init " + str(proc))
-    transactions = sql_subprocess_helper(snitch, [pickle.dumps(proc) for proc in initial_processes_fd], p_virustotal.q_in, q_updater_in, q_error)
+    transactions = sql_subprocess_helper(snitch, fan_mod_cnt, [pickle.dumps(proc) for proc in initial_processes_fd], p_virustotal.q_in, q_updater_in, q_error)
     for fd in temp_fd:
         try:
             os.close(fd)
@@ -712,8 +747,9 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
                 q_error.put("sync error between sql and updater on receive (did not receive all messages)")
             # process new connections
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
+            get_fanotify_events(fan_fd, fan_mod_cnt, q_error)
             if time.time() - last_write > snitch["Config"]["DB write limit (seconds)"]:
-                transactions += sql_subprocess_helper(snitch, new_processes, p_virustotal.q_in, q_updater_in, q_error)
+                transactions += sql_subprocess_helper(snitch, fan_mod_cnt, new_processes, p_virustotal.q_in, q_updater_in, q_error)
                 new_processes = []
                 con = sqlite3.connect(file_path)
                 try:
@@ -729,29 +765,36 @@ def sql_subprocess(init_pickle, p_virustotal: ProcessManager, sql_pipe, q_update
             q_error.put("SQL subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
-def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
+def monitor_subprocess(fan_fd, snitch_pipe, q_error, q_in, _q_out):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe for updater_subprocess"""
     os.nice(-20)
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
+    libc = ctypes.CDLL(ctypes.util.find_library("c"))
+    _FAN_MARK_ADD = 1
+    _FAN_MARK_REMOVE = 2
+    _FAN_MARK_FLUSH = 128
+    _FAN_MODIFY = 2
+    libc.fanotify_mark(fan_fd, _FAN_MARK_FLUSH, _FAN_MODIFY, -1, None)
     fd_dict = collections.OrderedDict()
     for x in range(FD_CACHE):
-        fd_dict["tmp%d" % x] = (os.open("/proc/self/exe", os.O_RDONLY), 0, 0)
+        fd_dict["tmp%d" % x] = (os.open("/proc/self/exe", os.O_RDONLY),)
     self_pid = os.getpid()
-    def get_fd(pid: int, starttime: int) -> typing.Tuple[str, int, int, str, str]:
-        sig = "%d %d" % (pid, starttime)
+    def get_fd(st_dev: int, st_ino: int, pid: int) -> typing.Tuple[str, str, str]:
+        sig = "%d %d" % (st_dev, st_ino)
         try:
             fd_dict.move_to_end(sig)
-            fd, fd_path, st_dev, st_ino, exe, cmd = fd_dict[sig]
-            return (fd_path, st_dev, st_ino, exe, cmd)
+            fd, fd_path, exe, cmd = fd_dict[sig]
+            return (fd_path, exe, cmd)
         except Exception:
             try:
                 fd = os.open("/proc/%d/exe" % pid, os.O_RDONLY)
+                libc.fanotify_mark(fan_fd, _FAN_MARK_ADD, _FAN_MODIFY, fd, None)
                 fd_path = "/proc/%d/fd/%d" % (self_pid, fd)
-                st_dev, st_ino = get_fstat(fd)
+                # assert (st_dev, st_ino) == get_fstat(fd), don't need to check here, if fails will trigger !!! FD_CACHE Overflow Error (or !!! FD Stat Error)
             except Exception:
-                fd, fd_path, st_dev, st_ino = 0, "", 0, 0
+                fd, fd_path = 0, ""
             try:
                 exe = os.readlink("/proc/%d/exe" % pid)
             except Exception:
@@ -761,13 +804,14 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
                     cmd = f.read()
             except Exception:
                 cmd = ""
-            fd_dict[sig] = (fd, fd_path, st_dev, st_ino, exe, cmd)
+            fd_dict[sig] = (fd, fd_path, exe, cmd)
             try:
                 if fd_old := fd_dict.popitem(last=False)[1][0]:
+                    libc.fanotify_mark(fan_fd, _FAN_MARK_REMOVE, _FAN_MODIFY, fd_old, None)
                     os.close(fd_old)
             except Exception:
                 pass
-            return (fd_path, st_dev, st_ino, exe, cmd)
+            return (fd_path, exe, cmd)
     if os.getuid() == 0:
         b = BPF(text=bpf_text)
         b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
@@ -776,18 +820,21 @@ def monitor_subprocess(snitch_pipe, q_error, q_in, _q_out):
             q_error.put("BPF callbacks not processing fast enough, may have lost data")
         def queue_ipv4_event(cpu, data, size):
             event = b["ipv4_events"].event(data)
+            st_dev, st_ino = get_stat("/proc/%d/exe" % event.pid)
+            fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
             starttime = get_starttime(event.pid, True)
-            fd, st_dev, st_ino, exe, cmd = get_fd(event.pid, starttime)
             snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "st": starttime, "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
         def queue_ipv6_event(cpu, data, size):
             event = b["ipv6_events"].event(data)
+            st_dev, st_ino = get_stat("/proc/%d/exe" % event.pid)
+            fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
             starttime = get_starttime(event.pid, True)
-            fd, st_dev, st_ino, exe, cmd = get_fd(event.pid, starttime)
             snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "st": starttime, "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
         def queue_other_event(cpu, data, size):
             event = b["other_socket_events"].event(data)
+            st_dev, st_ino = get_stat("/proc/%d/exe" % event.pid)
+            fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
             starttime = get_starttime(event.pid, True)
-            fd, st_dev, st_ino, exe, cmd = get_fd(event.pid, starttime)
             snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "ppid": event.ppid, "uid": event.uid, "name": event.task.decode(), "st": starttime, "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
         b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
         b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
@@ -870,17 +917,21 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
 
 def picosnitch_master_process(config, snitch_updater_pickle):
     """coordinates all picosnitch subprocesses"""
+    # init fanotify
+    libc = ctypes.CDLL(ctypes.util.find_library("c"))
+    _FAN_CLASS_CONTENT = 4
+    fan_fd = libc.fanotify_init(_FAN_CLASS_CONTENT, os.O_RDONLY)
     # start subprocesses
     snitch_updater_pipe, snitch_monitor_pipe = multiprocessing.Pipe(duplex=False)
     sql_recv_pipe, sql_send_pipe = multiprocessing.Pipe(duplex=False)
     q_error = multiprocessing.Queue()
-    p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess, init_args=(snitch_monitor_pipe, q_error,))
+    p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess, init_args=(fan_fd, snitch_monitor_pipe, q_error,))
     p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess, init_args=(config, q_error,))
     p_updater = ProcessManager(name="snitchupdater", target=updater_subprocess,
                                init_args=(snitch_updater_pickle, snitch_updater_pipe, sql_send_pipe, q_error,)
                               )
     p_sql = ProcessManager(name="snitchsql", target=sql_subprocess,
-                           init_args=(snitch_updater_pickle, p_virustotal, sql_recv_pipe, p_updater.q_in, q_error,)
+                           init_args=(fan_fd, snitch_updater_pickle, p_virustotal, sql_recv_pipe, p_updater.q_in, q_error,)
                           )
     del snitch_updater_pickle
     # set signals
