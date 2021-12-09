@@ -1277,7 +1277,7 @@ def main():
 
 
 def start_daemon():
-    """startup picosnitch as a daemon and ensure only one instance is running"""
+    """command line interface, pre-startup checks, and run"""
     readme = textwrap.dedent(f"""    picosnitch is a small program to monitor your system for processes that
     make network connections.
 
@@ -1328,6 +1328,11 @@ def start_daemon():
                 else:
                     args = ["sudo", "-E", sys.executable] + sys.argv
                 os.execvp("sudo", args)
+            with open("/proc/self/status", "r") as f:
+                proc_status = f.read()
+                capeff = int(proc_status[proc_status.find("CapEff:")+8:].splitlines()[0].strip(), base=16)
+                cap_sys_admin = 2**21
+                assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
             assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
             if sys.argv[1] in ["start", "restart", "systemd"]:
                 tmp_snitch = read_snitch()
