@@ -34,7 +34,7 @@
   - enable/disable autostart on reboot with `systemctl enable|disable picosnitch`
   - start/stop/restart with `systemctl start|stop|restart picosnitch`
   - show detailed status with `systemctl status picosnitch`
-- user interface for browsing past connection
+- user interface for browsing past connections
   - start with `picosnitch view`
   - `space/enter`: filter on entry `backspace`: remove filter `h/H`: cycle through history `t/T`: cycle time range `r`: refresh view `q`: quit
 - other commands

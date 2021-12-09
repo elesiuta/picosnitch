@@ -1257,7 +1257,7 @@ def main():
     sys.exit(1)
 
 
-def start_daemon():
+def start_picosnitch():
     """command line interface, pre-startup checks, and run"""
     readme = textwrap.dedent(f"""    picosnitch is a small program to monitor your system for processes that
     make network connections.
@@ -1483,4 +1483,4 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
 """
 
 if __name__ == "__main__":
-    sys.exit(start_daemon())
+    sys.exit(start_picosnitch())
