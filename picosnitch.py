@@ -761,7 +761,7 @@ def monitor_subprocess(fan_fd, snitch_pipe, q_error, q_in, _q_out):
     libc.fanotify_mark(fan_fd, _FAN_MARK_FLUSH, _FAN_MODIFY, -1, None)
     fd_dict = collections.OrderedDict()
     for x in range(FD_CACHE):
-        fd_dict["tmp%d" % x] = (os.open("/proc/self/exe", os.O_RDONLY),)
+        fd_dict["tmp%d" % x] = (0,)
     self_pid = os.getpid()
     def get_fd(st_dev: int, st_ino: int, pid: int) -> typing.Tuple[str, str, str]:
         sig = "%d %d" % (st_dev, st_ino)
