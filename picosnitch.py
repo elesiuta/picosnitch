@@ -500,6 +500,7 @@ def sql_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing
     for proc in new_processes:
         proc = pickle.loads(proc)
         if type(proc) != dict:
+            q_error.put("sync error between sql and updater, received '%s' in middle of transfer" % str(proc))
             continue
         sha_fd_error = ""
         sha256 = get_sha256_fd(proc["fd"], proc["dev"], proc["ino"], fan_mod_cnt["%d %d" % (proc["dev"], proc["ino"])])
@@ -700,10 +701,12 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
                 q_error.put("sync error between sql and updater on ready (pipe not empty)")
             else:
                 q_updater_in.put(pickle.dumps({"type": "ready"}))
-                sql_pipe.poll(timeout=None)
+                sql_pipe.poll(timeout=300)
+                if not sql_pipe.poll():
+                    q_error.put("sync error between sql and updater on ready (sql timed out waiting for first message)")
             # receive first message, should be transfer size
-            transfer_size = -1
-            if sql_pipe.poll(timeout=10):
+            transfer_size = 0
+            if sql_pipe.poll():
                 first_pickle = sql_pipe.recv_bytes()
                 if type(pickle.loads(first_pickle)) == int:
                     transfer_size = pickle.loads(first_pickle)
@@ -727,6 +730,8 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
                     q_error.put("sync error between sql and updater on receive (did not receive done)")
             if transfer_size > 0:
                 q_error.put("sync error between sql and updater on receive (did not receive all messages)")
+            elif transfer_size < 0:
+                q_error.put("sync error between sql and updater on receive (received extra messages)")
             # process new connections
             get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
             get_fanotify_events(fan_fd, fan_mod_cnt, q_error)
