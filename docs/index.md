@@ -6,7 +6,7 @@
 [![Monthly downloads (without mirrors)](https://img.shields.io/pypi/dm/picosnitch?color=00a0a0&label=downloads%20%28pypistats%29)](https://pypistats.org/packages/picosnitch)
 [![Total downloads](https://img.shields.io/badge/dynamic/json?color=00a0a0&label=downloads%20%28pepy%29&query=total_downloads&url=https%3A%2F%2Fapi.pepy.tech%2Fapi%2Fprojects%2Fpicosnitch)](https://pepy.tech/project/picosnitch)
 
-# picosnitch
+# [picosnitch](https://elesiuta.github.io/picosnitch/)
 - An extremely simple, reliable, and lightweight program for linux to help protect your privacy
   - It monitors your system and notifies you whenever it sees a new program that connects to the network
   - Or when the sha256 changes for one of those programs (can also check [VirusTotal](https://www.virustotal.com))
@@ -16,15 +16,20 @@
   - A program you can't trust to make network connections also can't be trusted not to negate any firewall rules, so blocking or sandboxing these programs is out of scope for picosnitch (also beware of programs running as root that may try to stop/modify picosnitch)
 - Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
 
-# getting started
+# [getting started](#getting-started)
 
-## installation
-- install from PyPI with  
-`pip3 install picosnitch[full] --upgrade --user`
-- depends on the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) (e.g. for Ubuntu)  
-`sudo apt install python3-bpfcc`
+## [installation](#installation)
+- install missing dependencies with your system's package manager
+  - `python3-pip` (may be `python-pip` in some distros)
+  - `python3-bpfcc` (for ubuntu) or `python-bcc` (for arch) or see [BPF Compiler Collection Installation](https://github.com/iovisor/bcc/blob/master/INSTALL.md)
+- install picosnitch from [PyPI](https://pypi.org/project/picosnitch/) with
+  - `pip3 install picosnitch --upgrade --user`
+- if you want to use [VirusTotal](https://www.virustotal.com)
+  - `pip3 install py-vt --upgrade --user`
+- if notifications aren't working
+  - look for a system package called `dbus-python`, `python-dbus`, or `python3-dbus` and make sure it's installed
 
-## usage
+## [usage](#usage)
 - you can run picosnitch either as a standalone daemon, or with systemd
   - use the same method to stop picosnitch as you used to start it
 - run as a standalone daemon
@@ -34,7 +39,7 @@
   - enable/disable autostart on reboot with `systemctl enable|disable picosnitch`
   - start/stop/restart with `systemctl start|stop|restart picosnitch`
   - show detailed status with `systemctl status picosnitch`
-- user interface for browsing past connection
+- user interface for browsing past connections
   - start with `picosnitch view`
   - `space/enter`: filter on entry `backspace`: remove filter `h/H`: cycle through history `t/T`: cycle time range `r`: refresh view `q`: quit
 - other commands
@@ -42,7 +47,7 @@
   - show version info `picosnitch version`
   - show help `picosnitch help`
 
-## configuration
+## [configuration](#configuration)
 - config is stored in `~/.config/picosnitch/config.json`
   - restart picosnitch if it is currently running for any changes to take effect
 
@@ -69,7 +74,7 @@
 }
 ```
 
-## logging
+## [logging](#logging)
 - a short summary of seen processes is stored in `~/.config/picosnitch/summary.json`
   - this is used for determining whether to create a notification
 
@@ -87,10 +92,7 @@
   - errors will also trigger a notification and are usually caused by far too many processes/connections
   - for most people in most cases, this should raise suspicion that some other program may be misbehaving
 
-# building from source
-- install from source using python 3 with  
-`python setup.py install --user`
-- dependencies installed automatically from PyPI on setup if not already present  
-`dbus-python psutil vt-py`
-- additional dependency, [requires manual installation](https://github.com/iovisor/bcc/blob/master/INSTALL.md)  
-`bcc`
+# [building from source](#building-from-source)
+- install dependencies listed under [installation](#installation)
+- install `python-setuptools`
+- install picosnitch with `python setup.py install --user`
