@@ -885,7 +885,7 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
             elif vt_enabled:
                 q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (no api key)", suspicious)))
             else:
-                q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (virustotal not enabled)", suspicious)))
+                q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (vt-py not found)", suspicious)))
         except queue.Empty:
             # have to timeout here to check whether to terminate otherwise this could stay hanging
             # daemon=True flag for multiprocessing.Process does not work after root privileges are dropped for parent
@@ -953,7 +953,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     time.sleep(5)
     _ = [p.terminate() for p in subprocesses]
     if importlib.util.find_spec("picosnitch"):
-        args = ["python3", "-m", "picosnitch", "restart"]
+        args = [sys.executable, "-m", "picosnitch", "restart"]
     else:
         args = [sys.executable, sys.argv[0], "restart"]
     subprocess.Popen(args)
@@ -1258,7 +1258,7 @@ def main():
     # start picosnitch process monitor
     if __name__ == "__main__":
         sys.exit(picosnitch_master_process(snitch["Config"], snitch_updater_pickle))
-    print("Snitch subprocess init failed, __name__ != __main__, try: sudo -E python3 -m picosnitch", file=sys.stderr)
+    print("Snitch subprocess init failed, __name__ != __main__", file=sys.stderr)
     sys.exit(1)
 
 
@@ -1292,14 +1292,14 @@ def start_picosnitch():
     Restart=on-failure
     RestartSec=5
     Environment="SUDO_UID={os.getenv("SUDO_UID")}" "SUDO_USER={os.getenv("SUDO_USER")}" "DBUS_SESSION_BUS_ADDRESS={os.getenv("DBUS_SESSION_BUS_ADDRESS")}" "PYTHON_USER_SITE={site.USER_SITE}"
-    ExecStart=/usr/bin/env python3 "{__file__}" start-no-daemon
+    ExecStart={sys.executable} "{__file__}" start-no-daemon
     PIDFile=/run/picosnitch.pid
 
     [Install]
     WantedBy=multi-user.target
     """)
-    if sys.prefix != sys.base_prefix:
-        print("Warning: picosnitch is running in a virtual environment, notifications may not function", file=sys.stderr)
+    # if sys.prefix != sys.base_prefix:
+    #     print("Warning: picosnitch is running in a virtual environment, notifications may not function", file=sys.stderr)
     if sys.platform.startswith("linux"):
         if os.path.expanduser("~") == "/root" and not os.getenv("DBUS_SESSION_BUS_ADDRESS"):
             print("Warning: picosnitch was run as root without preserving environment, notifications won't work", file=sys.stderr)
@@ -1310,7 +1310,7 @@ def start_picosnitch():
             if os.getuid() != 0:
                 print("Warning: picosnitch was run without root privileges, requesting root privileges", file=sys.stderr)
                 if importlib.util.find_spec("picosnitch"):
-                    args = ["sudo", "-E", "python3", "-m", "picosnitch", sys.argv[1]]
+                    args = ["sudo", "-E", sys.executable, "-m", "picosnitch", sys.argv[1]]
                 else:
                     args = ["sudo", "-E", sys.executable] + sys.argv
                 os.execvp("sudo", args)

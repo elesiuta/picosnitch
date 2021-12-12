@@ -1,0 +1,14 @@
+Source: picosnitch
+Section: net
+Priority: optional
+Maintainer: Eric Lesiuta <elesiuta@gmail.com>
+Build-Depends: debhelper (>= 10), python3 (>= 3.8), dh-virtualenv (>= 1.0)
+Standards-Version: 3.9.5
+Homepage: https://elesiuta.github.io/picosnitch/
+
+Package: picosnitch
+Architecture: any
+Pre-Depends: dpkg (>= 1.16.1), python3 (>= 3.8), ${misc:Pre-Depends}
+Depends: ${python:Depends}, ${misc:Depends}, python3-bpfcc, python3-dbus
+Description: Protect your privacy
+ See which processes make remote network connections
