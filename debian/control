@@ -2,7 +2,7 @@ Source: picosnitch
 Section: net
 Priority: optional
 Maintainer: Eric Lesiuta <elesiuta@gmail.com>
-Build-Depends: debhelper (>= 10), python3 (>= 3.8), dh-virtualenv (>= 1.0), python3-psutil
+Build-Depends: debhelper (>= 10), python3 (>= 3.8), dh-virtualenv (>= 1.0), python3-setuptools, python3-pip, python3-dev, libffi-dev, python3-psutil
 Standards-Version: 3.9.5
 Homepage: https://elesiuta.github.io/picosnitch/
 
