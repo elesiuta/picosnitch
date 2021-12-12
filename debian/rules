@@ -1,4 +1,4 @@
 #!/usr/bin/make -f
 
 %:
-	dh $@ --with python-virtualenv --preinstall psutil --preinstall vt-py --use-system-packages
+	dh $@ --with python-virtualenv --preinstall vt-py --use-system-packages
