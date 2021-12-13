@@ -56,10 +56,13 @@ except Exception:
 import psutil
 
 # set constants and RLIMIT_NOFILE if configured
-VERSION: typing.Final[str] = "0.6.3dev"
+VERSION: typing.Final[str] = "0.6.4dev"
 PAGE_CNT: typing.Final[int] = 8
-if sys.platform.startswith("linux") and os.getuid() == 0 and os.getenv("SUDO_USER") is not None:
-    home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
+if sys.platform.startswith("linux") and os.getuid() == 0 and (os.getenv("SUDO_UID") or os.getenv("SUDO_USER")):
+    if os.getenv("SUDO_USER"):
+        home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
+    else:
+        home_dir = pwd.getpwuid(int(os.getenv("SUDO_UID"))).pw_dir
 else:
     home_dir = os.path.expanduser("~")
 BASE_PATH: typing.Final[str] = os.path.join(home_dir, ".config", "picosnitch")
@@ -1285,17 +1288,24 @@ def start_picosnitch():
     Public License for details.
 
     website: https://elesiuta.github.io/picosnitch
-
+    version: {VERSION} ({__file__})
     config and log files: {BASE_PATH}
 
-    usage: picosnitch start|stop|restart|status|systemd|view|version
-                       |     |    |       |      |       |    |--> {VERSION}
-                       |     |    |       |      |       |--> curses ui
-                       |     |    |       |      |--> create service
-                       |     |    |       |--> show pid
-                       |_____|____|--> daemon controls
+    usage:
+        picosnitch status|view|version|help
+                    |      |    |       |--> this text
+                    |      |    |--> version info
+                    |      |--> curses ui
+                    |--> show pid
 
-    systemd: create service then use systemctl instead of these daemon controls
+        systemctl enable|disable|start|stop|restart|status picosnitch
+                   |      |       |     |    |       |--> show status with systemd
+                   |      |       |_____|____|--> start/stop/restart picosnitch
+                   |______|--> enable/disable autostart on reboot
+
+    * if systemctl isn't working, recreate the service with `picosnitch systemd`
+
+    * if you don't use systemd, you can use `picosnitch start|stop|restart` instead
     """)
     systemd_service = textwrap.dedent(f"""    [Unit]
     Description=picosnitch, protect your privacy
@@ -1333,13 +1343,13 @@ def start_picosnitch():
                 cap_sys_admin = 2**21
                 assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
             assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
+            tmp_snitch = read_snitch()
             if sys.argv[1] in ["start", "restart", "systemd"]:
-                tmp_snitch = read_snitch()
                 if tmp_snitch.pop("Template", False):
                     if sys.stdin.isatty():
                         tmp_snitch["Config"]["VT API key"] = input("Enter your VirusTotal API key (optional, leave blank to disable)\n>>> ")
                     write_snitch(tmp_snitch, write_config=True)
-            if sys.argv[1] in ["start", "stop", "restart", "status"]:
+            if sys.argv[1] in ["start", "stop", "restart"]:
                 if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
                     print("Warning: found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl", file=sys.stderr)
             class PicoDaemon(Daemon):

@@ -1,0 +1,13 @@
+[Unit]
+Description=picosnitch, protect your privacy
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=5
+Environment="SUDO_UID=1000" "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus"
+ExecStart=/usr/bin/picosnitch start-no-daemon
+PIDFile=/run/picosnitch.pid
+
+[Install]
+WantedBy=multi-user.target
