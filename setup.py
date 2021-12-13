@@ -18,8 +18,8 @@ setuptools.setup(
     install_requires=["psutil"],
     extras_require={
         "enable_notifications":  ["dbus-python"],
-        "enable_virustotal":  ["vt-py"],
-        "full":  ["dbus-python", "vt-py"]
+        "enable_virustotal":  ["requests"],
+        "full":  ["dbus-python", "requests"]
     },
     classifiers=[
         "Operating System :: POSIX :: Linux",
