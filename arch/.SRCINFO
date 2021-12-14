@@ -14,7 +14,7 @@ pkgbase = picosnitch
 	depends = python-requests
 	provides = picosnitch
 	conflicts = picosnitch
-	source = https://github.com/elesiuta/picosnitch/archive/refs/tags/v0.7.0.tar.gz
+	source = picosnitch::https://github.com/elesiuta/picosnitch/archive/refs/tags/v0.7.0.tar.gz
 	sha256sums = 2fa62aec9c911c57882bbe5fc709c44cbdc3210a6619a3d1cf520eb8c811380b
 
 pkgname = picosnitch

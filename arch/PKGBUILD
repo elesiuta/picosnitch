@@ -15,7 +15,7 @@ checkdepends=()
 provides=('picosnitch')
 conflicts=('picosnitch')
 BUILDENV=()
-source=("https://github.com/elesiuta/picosnitch/archive/refs/tags/v${pkgver}.tar.gz")
+source=("picosnitch::https://github.com/elesiuta/picosnitch/archive/refs/tags/v${pkgver}.tar.gz")
 sha256sums=('2fa62aec9c911c57882bbe5fc709c44cbdc3210a6619a3d1cf520eb8c811380b')
 
 build() {
@@ -26,5 +26,6 @@ build() {
 package() {
     cd "picosnitch-${pkgver}"
     python setup.py install --prefix='/usr' --root="$pkgdir" --skip-build --optimize='1'
-    install -D -m644 "${srcdir}/debian/picosnitch.service" "${pkgdir}/usr/lib/systemd/system/picosnitch.service"
+    install -D -m644 "${srcdir}/picosnitch-${pkgver}/debian/picosnitch.service" "${pkgdir}/usr/lib/systemd/system/picosnitch.service"
+    systemctl daemon-reload
 }
