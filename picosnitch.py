@@ -977,7 +977,7 @@ def picosnitch_master_process(config, snitch_updater_pickle):
 
 
 ### user interface
-def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
+def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     """for curses wrapper"""
     # init and splash screen
     cur = con.cursor()
@@ -1226,8 +1226,8 @@ def main_ui(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             return 0
 
 
-def start_ui() -> int:
-    """start a curses ui"""
+def ui_init() -> int:
+    """init curses ui"""
     splash = textwrap.dedent("""
         @@&@@                                                              @@@@,
       &&.,,. &&&&&&%&%&&&&&&&&(..                      ..&&%&%&&&&&&&&%&&&&  .,#&%
@@ -1256,7 +1256,7 @@ def start_ui() -> int:
     # start curses
     for err_count in reversed(range(30)):
         try:
-            return curses.wrapper(main_ui, splash, con)
+            return curses.wrapper(ui_loop, splash, con)
         except curses.error:
             print("CURSES DISPLAY ERROR: try resizing your terminal, ui will close in %s seconds" % (err_count + 1), file=sys.stderr)
             time.sleep(1)
@@ -1390,7 +1390,7 @@ def start_picosnitch():
                 print("starting picosnitch in simple mode")
                 sys.exit(main())
             elif sys.argv[1] == "view":
-                return start_ui()
+                return ui_init()
             elif sys.argv[1] == "version":
                 print(f"version: {VERSION} ({__file__})")
                 return 0
