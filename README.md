@@ -19,33 +19,30 @@
 # [getting started](#getting-started)
 
 ## [installation](#installation)
-- install missing dependencies with your system's package manager
-  - `python3-pip` (may be `python-pip` in some distros)
-  - `python3-bpfcc` (for ubuntu) or `python-bcc` (for arch) or see [BPF Compiler Collection Installation](https://github.com/iovisor/bcc/blob/master/INSTALL.md)
-- install picosnitch from [PyPI](https://pypi.org/project/picosnitch/) with
-  - `pip3 install picosnitch --upgrade --user`
-- if you want to use [VirusTotal](https://www.virustotal.com)
-  - `pip3 install py-vt --upgrade --user`
-- if notifications aren't working
-  - look for a system package called `dbus-python`, `python-dbus`, or `python3-dbus` and make sure it's installed
+- install via [PPA](https://launchpad.net/~elesiuta/+archive/ubuntu/picosnitch) for ubuntu and derivatives
+  - `sudo add-apt-repository ppa:elesiuta/picosnitch`
+  - `sudo apt-get update`
+  - `sudo apt-get install picosnitch`
+- install via [pip](https://pip.pypa.io/) for any linux distribution with python >= 3.8
+  - install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
+    - it should be called `python-bcc` or `python-bpfcc`
+  - install picosnitch from [PyPI](https://pypi.org/project/picosnitch/) with
+    - `pip3 install "picosnitch[full]" --upgrade --user`
+  - create a service file for systemd to run picosnitch (recommended)
+    - `picosnitch systemd`
+  - optional dependencies (should already be installed or install automatically)
+    - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro)
+    - for VirusTotal: `python-requests`
 
 ## [usage](#usage)
-- you can run picosnitch either as a standalone daemon, or with systemd
-  - use the same method to stop picosnitch as you used to start it
-- run as a standalone daemon
-  - start/stop/restart with `picosnitch start|stop|restart`
-- run with systemd
-  - setup with `picosnitch systemd`
+- running picosnitch
   - enable/disable autostart on reboot with `systemctl enable|disable picosnitch`
   - start/stop/restart with `systemctl start|stop|restart picosnitch`
-  - show detailed status with `systemctl status picosnitch`
+  - or if you don't use systemd `picosnitch start|stop|restart`
 - user interface for browsing past connections
   - start with `picosnitch view`
   - `space/enter`: filter on entry `backspace`: remove filter `h/H`: cycle through history `t/T`: cycle time range `r`: refresh view `q`: quit
-- other commands
-  - show basic status `picosnitch status`
-  - show version info `picosnitch version`
-  - show help `picosnitch help`
+- show usage with `picosnitch help`
 
 ## [configuration](#configuration)
 - config is stored in `~/.config/picosnitch/config.json`
@@ -96,3 +93,4 @@
 - install dependencies listed under [installation](#installation)
 - install `python-setuptools`
 - install picosnitch with `python setup.py install --user`
+- see other commands with `python setup.py [build|install] --help`
