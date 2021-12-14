@@ -19,14 +19,19 @@
 # [getting started](#getting-started)
 
 ## [installation](#installation)
-- install via [PPA](https://launchpad.net/~elesiuta/+archive/ubuntu/picosnitch) for ubuntu and derivatives
+- install from the [PPA](https://launchpad.net/~elesiuta/+archive/ubuntu/picosnitch) for ubuntu and derivatives
   - `sudo add-apt-repository ppa:elesiuta/picosnitch`
-  - `sudo apt-get update`
-  - `sudo apt-get install picosnitch`
-- install via [pip](https://pip.pypa.io/) for any linux distribution with python >= 3.8
+  - `sudo apt update`
+  - `sudo apt install picosnitch`
+- install using the PKGBUILD for arch and derivatives (will add to AUR soon)
+  - `git clone https://github.com/elesiuta/picosnitch.git`
+  - `cd arch`
+  - `makepkg`
+  - `sudo pacman -U picosnitch-*.pkg.tar.zst`
+- install from [PyPI](https://pypi.org/project/picosnitch/) for any linux distribution with python >= 3.8
   - install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
     - it should be called `python-bcc` or `python-bpfcc`
-  - install picosnitch from [PyPI](https://pypi.org/project/picosnitch/) with
+  - install picosnitch using [pip](https://pip.pypa.io/)
     - `pip3 install "picosnitch[full]" --upgrade --user`
   - create a service file for systemd to run picosnitch (recommended)
     - `picosnitch systemd`
@@ -54,7 +59,6 @@
   "DB write limit (seconds)": 1, # Minimum time between writing logs to snitch.db
   # increasing it decreases disk writes by grouping connections into larger time windows
   # reducing time precision, decreasing database size, and increasing hash latency
-  # values too large could cause processes to fall out of cache before hashing, see NOFILE
   "Desktop notifications": True, # Try connecting to dbus for creating system notifications
   "Log addresses": True, # Log remote addresses for each executable
   "Log commands": True, # Log command line args for each executable
@@ -63,8 +67,7 @@
   # the process and executable will still be recorded in summary.json
   "Set RLIMIT_NOFILE": None, # Set the maximum number of open file descriptors (int)
   # increasing it allows more processes to be cached (typical system default is 1024)
-  # improving the performance and reliability of hashing processes (also caches hash)
-  # e.g. short lived processes that may terminate before they can be hashed will live in cache
+  # this is good enough for most people since only one copy of each executable is cached
   "VT API key": "", # API key for VirusTotal, leave blank to disable (str)
   "VT file upload": False, # Upload file if hash not found, only hashes are used by default
   "VT request limit (seconds)": 15 # Number of seconds between requests (free tier quota)

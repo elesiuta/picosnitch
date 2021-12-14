@@ -1352,6 +1352,11 @@ def start_picosnitch():
             if sys.argv[1] in ["start", "stop", "restart"]:
                 if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
                     print("Warning: found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl", file=sys.stderr)
+                    if sys.stdin.isatty():
+                        confirm = input(f"Did you intend to run `systemctl {sys.argv[1]} picosnitch` (y/N)? ")
+                        if confirm.lower().startswith("y"):
+                            subprocess.run(["systemctl", sys.argv[1], "picosnitch"])
+                            return 0
             class PicoDaemon(Daemon):
                 def run(self):
                     main()

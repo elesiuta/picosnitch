@@ -19,33 +19,35 @@
 # [getting started](#getting-started)
 
 ## [installation](#installation)
-- install missing dependencies with your system's package manager
-  - `python3-pip` (may be `python-pip` in some distros)
-  - `python3-bpfcc` (for ubuntu) or `python-bcc` (for arch) or see [BPF Compiler Collection Installation](https://github.com/iovisor/bcc/blob/master/INSTALL.md)
-- install picosnitch from [PyPI](https://pypi.org/project/picosnitch/) with
-  - `pip3 install picosnitch --upgrade --user`
-- if you want to use [VirusTotal](https://www.virustotal.com)
-  - `pip3 install py-vt --upgrade --user`
-- if notifications aren't working
-  - look for a system package called `dbus-python`, `python-dbus`, or `python3-dbus` and make sure it's installed
+- install from the [PPA](https://launchpad.net/~elesiuta/+archive/ubuntu/picosnitch) for ubuntu and derivatives
+  - `sudo add-apt-repository ppa:elesiuta/picosnitch`
+  - `sudo apt update`
+  - `sudo apt install picosnitch`
+- install using the PKGBUILD for arch and derivatives (will add to AUR soon)
+  - `git clone https://github.com/elesiuta/picosnitch.git`
+  - `cd arch`
+  - `makepkg`
+  - `sudo pacman -U picosnitch-*.pkg.tar.zst`
+- install from [PyPI](https://pypi.org/project/picosnitch/) for any linux distribution with python >= 3.8
+  - install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
+    - it should be called `python-bcc` or `python-bpfcc`
+  - install picosnitch using [pip](https://pip.pypa.io/)
+    - `pip3 install "picosnitch[full]" --upgrade --user`
+  - create a service file for systemd to run picosnitch (recommended)
+    - `picosnitch systemd`
+  - optional dependencies (should already be installed or install automatically)
+    - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro)
+    - for VirusTotal: `python-requests`
 
 ## [usage](#usage)
-- you can run picosnitch either as a standalone daemon, or with systemd
-  - use the same method to stop picosnitch as you used to start it
-- run as a standalone daemon
-  - start/stop/restart with `picosnitch start|stop|restart`
-- run with systemd
-  - setup with `picosnitch systemd`
+- running picosnitch
   - enable/disable autostart on reboot with `systemctl enable|disable picosnitch`
   - start/stop/restart with `systemctl start|stop|restart picosnitch`
-  - show detailed status with `systemctl status picosnitch`
+  - or if you don't use systemd `picosnitch start|stop|restart`
 - user interface for browsing past connections
   - start with `picosnitch view`
   - `space/enter`: filter on entry `backspace`: remove filter `h/H`: cycle through history `t/T`: cycle time range `r`: refresh view `q`: quit
-- other commands
-  - show basic status `picosnitch status`
-  - show version info `picosnitch version`
-  - show help `picosnitch help`
+- show usage with `picosnitch help`
 
 ## [configuration](#configuration)
 - config is stored in `~/.config/picosnitch/config.json`
@@ -57,7 +59,6 @@
   "DB write limit (seconds)": 1, # Minimum time between writing logs to snitch.db
   # increasing it decreases disk writes by grouping connections into larger time windows
   # reducing time precision, decreasing database size, and increasing hash latency
-  # values too large could cause processes to fall out of cache before hashing, see NOFILE
   "Desktop notifications": True, # Try connecting to dbus for creating system notifications
   "Log addresses": True, # Log remote addresses for each executable
   "Log commands": True, # Log command line args for each executable
@@ -66,8 +67,7 @@
   # the process and executable will still be recorded in summary.json
   "Set RLIMIT_NOFILE": None, # Set the maximum number of open file descriptors (int)
   # increasing it allows more processes to be cached (typical system default is 1024)
-  # improving the performance and reliability of hashing processes (also caches hash)
-  # e.g. short lived processes that may terminate before they can be hashed will live in cache
+  # this is good enough for most people since only one copy of each executable is cached
   "VT API key": "", # API key for VirusTotal, leave blank to disable (str)
   "VT file upload": False, # Upload file if hash not found, only hashes are used by default
   "VT request limit (seconds)": 15 # Number of seconds between requests (free tier quota)
@@ -96,3 +96,4 @@
 - install dependencies listed under [installation](#installation)
 - install `python-setuptools`
 - install picosnitch with `python setup.py install --user`
+- see other commands with `python setup.py [build|install] --help`
