@@ -3,8 +3,8 @@
 [![GitHub commits since latest release](https://img.shields.io/github/commits-since/elesiuta/picosnitch/latest/master?color=00a0a0)](https://github.com/elesiuta/picosnitch/commits/master)
 [![GitHub contributors](https://img.shields.io/github/contributors/elesiuta/picosnitch?color=00a0a0)](https://github.com/elesiuta/picosnitch/graphs/contributors)
 [![File size](https://img.shields.io/github/size/elesiuta/picosnitch/picosnitch.py?color=00a0a0)](https://github.com/elesiuta/picosnitch/blob/master/picosnitch.py)
-[![Monthly downloads (without mirrors)](https://img.shields.io/pypi/dm/picosnitch?color=00a0a0&label=downloads%20%28pypistats%29)](https://pypistats.org/packages/picosnitch)
-[![Total downloads](https://img.shields.io/badge/dynamic/json?color=00a0a0&label=downloads%20%28pepy%29&query=total_downloads&url=https%3A%2F%2Fapi.pepy.tech%2Fapi%2Fprojects%2Fpicosnitch)](https://pepy.tech/project/picosnitch)
+[![PyPI monthly downloads (without mirrors)](https://img.shields.io/pypi/dm/picosnitch?color=00a0a0&label=downloads%20%28pypistats%29)](https://pypistats.org/packages/picosnitch)
+[![PyPI total downloads](https://img.shields.io/badge/dynamic/json?color=00a0a0&label=downloads%20%28pepy%29&query=total_downloads&url=https%3A%2F%2Fapi.pepy.tech%2Fapi%2Fprojects%2Fpicosnitch)](https://pepy.tech/project/picosnitch)
 
 # [picosnitch](https://elesiuta.github.io/picosnitch/)
 - An extremely simple, reliable, and lightweight program for linux to help protect your privacy
@@ -25,7 +25,7 @@
   - `sudo apt install picosnitch`
 - install using the PKGBUILD for arch and derivatives (will add to AUR soon)
   - `git clone https://github.com/elesiuta/picosnitch.git`
-  - `cd arch`
+  - `cd picosnitch/arch`
   - `makepkg`
   - `sudo pacman -U picosnitch-*.pkg.tar.zst`
 - install from [PyPI](https://pypi.org/project/picosnitch/) for any linux distribution with python >= 3.8

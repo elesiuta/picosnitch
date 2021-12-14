@@ -10,21 +10,21 @@ url='https://elesiuta.github.io/picosnitch/'
 license=('GPL3')
 depends=('python' 'python-bcc' 'dbus-python' 'python-psutil' 'python-requests')
 optdepends=()
-makedepends=('git' 'python-setuptools')
+makedepends=('python-setuptools')
 checkdepends=()
 provides=('picosnitch')
 conflicts=('picosnitch')
-BUILDENV=('!check')
-source=("git://github.com/elesiuta/picosnitch.git#tag=v${pkgver}")
-sha256sums=('SKIP')
+BUILDENV=()
+source=("https://github.com/elesiuta/picosnitch/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('3d4f6ab1613c4718038b8ad5aae66bfbe97eacbfebb890ecaece5c2c515273f1')
 
 build() {
-    cd picosnitch
+    cd "picosnitch-${pkgver}"
     python setup.py build
 }
 
 package() {
-    cd picosnitch
+    cd "picosnitch-${pkgver}"
     python setup.py install --prefix='/usr' --root="$pkgdir" --skip-build --optimize='1'
-    install -D -m644 "${srcdir}/picosnitch.service" "${pkgdir}/usr/lib/systemd/system/picosnitch.service"
+    install -D -m644 "${srcdir}/debian/picosnitch.service" "${pkgdir}/usr/lib/systemd/system/picosnitch.service"
 }
