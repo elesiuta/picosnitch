@@ -15,7 +15,7 @@ checkdepends=()
 provides=('picosnitch')
 conflicts=('picosnitch')
 BUILDENV=('!check')
-source=('git://github.com/elesiuta/picosnitch.git#tag=v0.6.2')
+source=("git://github.com/elesiuta/picosnitch.git#tag=v${pkgver}")
 sha256sums=('SKIP')
 
 build() {
@@ -26,4 +26,5 @@ build() {
 package() {
     cd picosnitch
     python setup.py install --prefix='/usr' --root="$pkgdir" --skip-build --optimize='1'
+    install -D -m644 "${srcdir}/picosnitch.service" "${pkgdir}/usr/lib/systemd/system/picosnitch.service"
 }

@@ -1308,7 +1308,7 @@ def start_picosnitch():
     * if you don't use systemd, you can use `picosnitch start|stop|restart` instead
     """)
     systemd_service = textwrap.dedent(f"""    [Unit]
-    Description=picosnitch, protect your privacy
+    Description=picosnitch
 
     [Service]
     Type=simple
