@@ -1272,6 +1272,8 @@ def main():
     initial_processes = initial_poll(snitch)
     snitch_updater_pickle = pickle.dumps((snitch, initial_processes))
     # start picosnitch process monitor
+    with open("/run/picosnitch.pid", "r") as f:
+        assert int(f.read().strip()) == os.getpid()
     if __name__ == "__main__" or sys.argv[1] == "start-no-daemon":
         sys.exit(picosnitch_master_process(snitch["Config"], snitch_updater_pickle))
     print("Snitch subprocess init failed, __name__ != __main__", file=sys.stderr)
