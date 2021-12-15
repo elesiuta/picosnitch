@@ -1,0 +1,22 @@
+name: Create tar
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Archive
+        run: tar --exclude=".git" --exclude="picosnitch.tar.gz" -czf - * > picosnitch.tar.gz
+      - name: Hash
+        run: sha256sum picosnitch.tar.gz
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: picosnitch.tar.gz
+
