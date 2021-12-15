@@ -3,19 +3,16 @@
 pkgname=picosnitch
 pkgver=0.7.1
 pkgrel=1
-epoch=1
 pkgdesc='Protect your privacy, see which processes make remote network connections'
 arch=('any')
 url='https://elesiuta.github.io/picosnitch/'
 license=('GPL3')
-depends=('python' 'python-bcc' 'dbus-python' 'python-psutil' 'python-requests')
-optdepends=()
+depends=('python-bcc' 'dbus-python' 'python-psutil' 'python-requests')
 makedepends=('python-setuptools')
-checkdepends=()
-provides=('picosnitch')
-conflicts=('picosnitch')
-BUILDENV=()
-source=("picosnitch::https://github.com/elesiuta/picosnitch/archive/refs/tags/v${pkgver}.tar.gz")
+optdepends=()
+provides=()
+conflicts=()
+source=("picosnitch-${pkgver}.tar.gz::https://github.com/elesiuta/picosnitch/archive/refs/tags/v${pkgver}.tar.gz")
 sha256sums=('10517cdc64623bebb91f78849888788e2d43732937201c758f0855277862b0f4')
 
 build() {
@@ -27,5 +24,4 @@ package() {
     cd "picosnitch-${pkgver}"
     python setup.py install --prefix='/usr' --root="$pkgdir" --skip-build --optimize='1'
     install -D -m644 "${srcdir}/picosnitch-${pkgver}/debian/picosnitch.service" "${pkgdir}/usr/lib/systemd/system/picosnitch.service"
-    systemctl daemon-reload
 }
