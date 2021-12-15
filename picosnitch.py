@@ -849,14 +849,14 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
     if not (config["VT API key"] and vt_enabled):
         config["VT request limit (seconds)"] = 0
     headers = {"x-apikey": config["VT API key"]}
-    def get_analysis(analysis_id: dict) -> dict:
+    def get_analysis(analysis_id: dict, sha256: str) -> dict:
         api_url = "https://www.virustotal.com/api/v3/analyses/" + analysis_id["data"]["id"]
-        for i in range(60):
+        for i in range(90):
             time.sleep(max(5, config["VT request limit (seconds)"]))
             response = requests.get(api_url, headers=headers).json()
             if response["data"]["attributes"]["status"] == "completed":
                 return response["data"]["attributes"]["stats"]
-        return {"timeout": api_url}
+        return {"timeout": api_url, "sha256": sha256}
     while True:
         try:
             if not parent_process.is_alive():
@@ -876,7 +876,7 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
                                 assert (proc["dev"], proc["ino"]) == get_fstat(f.fileno())
                                 files = {"file": (proc["exe"], f)}
                                 analysis_id = requests.post("https://www.virustotal.com/api/v3/files", headers=headers, files=files).json()
-                            analysis = get_analysis(analysis_id)
+                            analysis = get_analysis(analysis_id, sha256)
                         except Exception:
                             try:
                                 readlink_exe_sha256 = hashlib.sha256()
@@ -887,7 +887,7 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
                                 with open(proc["exe"], "rb") as f:
                                     files = {"file": (proc["exe"], f)}
                                     analysis_id = requests.post("https://www.virustotal.com/api/v3/files", headers=headers, files=files).json()
-                                analysis = get_analysis(analysis_id)
+                                analysis = get_analysis(analysis_id, sha256)
                             except Exception:
                                 q_vt_results.put(pickle.dumps((proc, sha256, "Failed to read process for upload", suspicious)))
                                 continue
@@ -895,7 +895,7 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
                         # could also be an invalid api key
                         q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (analysis not found)", suspicious)))
                         continue
-                if analysis["malicious"] != 0 or analysis["suspicious"] != 0:
+                if analysis["suspicious"] != 0 or analysis["malicious"] != 0:
                     suspicious = True
                 q_vt_results.put(pickle.dumps((proc, sha256, str(analysis), suspicious)))
             elif vt_enabled:
