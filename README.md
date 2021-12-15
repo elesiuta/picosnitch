@@ -1,10 +1,12 @@
 [![GitHub release](https://img.shields.io/github/v/release/elesiuta/picosnitch?color=00a0a0)](https://github.com/elesiuta/picosnitch/releases)
 [![PyPI release](https://img.shields.io/pypi/v/picosnitch?color=00a0a0)](https://pypi.org/project/picosnitch)
+[![AUR release](https://img.shields.io/aur/version/picosnitch?color=00a0a0)](https://aur.archlinux.org/packages/picosnitch/)
 [![GitHub commits since latest release](https://img.shields.io/github/commits-since/elesiuta/picosnitch/latest/master?color=00a0a0)](https://github.com/elesiuta/picosnitch/commits/master)
 [![GitHub contributors](https://img.shields.io/github/contributors/elesiuta/picosnitch?color=00a0a0)](https://github.com/elesiuta/picosnitch/graphs/contributors)
 [![File size](https://img.shields.io/github/size/elesiuta/picosnitch/picosnitch.py?color=00a0a0)](https://github.com/elesiuta/picosnitch/blob/master/picosnitch.py)
 [![PyPI monthly downloads (without mirrors)](https://img.shields.io/pypi/dm/picosnitch?color=00a0a0&label=downloads%20%28pypistats%29)](https://pypistats.org/packages/picosnitch)
 [![PyPI total downloads](https://img.shields.io/badge/dynamic/json?color=00a0a0&label=downloads%20%28pepy%29&query=total_downloads&url=https%3A%2F%2Fapi.pepy.tech%2Fapi%2Fprojects%2Fpicosnitch)](https://pepy.tech/project/picosnitch)
+[![GitHub downloads](https://img.shields.io/github/downloads/elesiuta/picosnitch/total?color=00a0a0&label=downloads%20%28github%29)](https://github.com/elesiuta/picosnitch/releases)
 
 # [picosnitch](https://elesiuta.github.io/picosnitch/)
 - An extremely simple, reliable, and lightweight program for linux to help protect your privacy
@@ -23,11 +25,8 @@
   - `sudo add-apt-repository ppa:elesiuta/picosnitch`
   - `sudo apt update`
   - `sudo apt install picosnitch`
-- install using the PKGBUILD for arch and derivatives (will add to AUR soon)
-  - `git clone https://github.com/elesiuta/picosnitch.git`
-  - `cd picosnitch/arch`
-  - `makepkg`
-  - `sudo pacman -U picosnitch-*.pkg.tar.zst`
+- install from the [AUR](https://aur.archlinux.org/packages/picosnitch/) for arch and derivatives
+  - install `picosnitch` [manually](https://wiki.archlinux.org/title/Arch_User_Repository#Installing_and_upgrading_packages) or using your preferred [AUR helper](https://wiki.archlinux.org/title/AUR_helpers)
 - install from [PyPI](https://pypi.org/project/picosnitch/) for any linux distribution with python >= 3.8
   - install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
     - it should be called `python-bcc` or `python-bpfcc`
@@ -96,4 +95,4 @@
 - install dependencies listed under [installation](#installation)
 - install `python-setuptools`
 - install picosnitch with `python setup.py install --user`
-- see other commands with `python setup.py [build|install] --help`
+- see other options with `python setup.py [build|install] --help`
