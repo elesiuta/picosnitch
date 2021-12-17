@@ -621,17 +621,20 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                     if msg["exe"] in snitch["SHA256"]:
                         if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
                             snitch["SHA256"][msg["exe"]][msg["sha256"]] = "VT Pending"
+                            snitch["Latest Entries"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"])
                             NotificationManager().toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
                     else:
                         snitch["SHA256"][msg["exe"]] = {msg["sha256"]: "VT Pending"}
                 elif msg["type"] == "vt_result":
                     if msg["exe"] in snitch["SHA256"]:
                         if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
+                            snitch["Latest Entries"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"])
                             NotificationManager().toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
                         snitch["SHA256"][msg["exe"]][msg["sha256"]] = msg["result"]
                     else:
                         snitch["SHA256"][msg["exe"]] = {msg["sha256"]: msg["result"]}
                     if msg["suspicious"]:
+                        snitch["Latest Entries"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"] + " (suspicious)")
                         NotificationManager().toast("Suspicious VT results for " + msg["name"])
             # write the snitch dictionary to summary.json and error.log (limit writes to reduce disk wear)
             if time.time() - last_write > 30 or (snitch["Errors"] and time.time() - last_write > 5):
