@@ -1346,11 +1346,10 @@ def start_picosnitch():
                 assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
             assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
             tmp_snitch = read_snitch()
-            if sys.argv[1] in ["start", "restart", "systemd"]:
-                if tmp_snitch.pop("Template", False):
-                    if sys.stdin.isatty():
-                        tmp_snitch["Config"]["VT API key"] = input("Enter your VirusTotal API key (optional, leave blank to disable)\n>>> ")
-                    write_snitch(tmp_snitch, write_config=True)
+            if tmp_snitch.pop("Template", False):
+                if sys.stdin.isatty() and sys.argv[1] != "start-no-daemon":
+                    tmp_snitch["Config"]["VT API key"] = input("Enter your VirusTotal API key (optional, leave blank to disable)\n>>> ").strip()
+                write_snitch(tmp_snitch, write_config=True)
             if sys.argv[1] in ["start", "stop", "restart"]:
                 if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
                     print("Warning: found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl", file=sys.stderr)
