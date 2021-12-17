@@ -327,8 +327,8 @@ def read_snitch() -> dict:
             snitch_summary = json.load(json_file)
         for key in snitch_summary:
             data[key] = snitch_summary[key]
-    assert all(key in data and type(data[key]) == type(template[key]) for key in template), "Invalid json files"
-    assert all(key in data["Config"] and type(data["Config"][key]) == type(template["Config"][key]) for key in template["Config"]), "Invalid config"
+    assert all(type(data[key]) == type(template[key]) for key in template), "Invalid json files"
+    assert all(key == "Set RLIMIT_NOFILE" or type(data["Config"][key]) == type(template["Config"][key]) for key in template["Config"]), "Invalid config"
     return data
 
 
