@@ -53,23 +53,23 @@
 - config is stored in `~/.config/picosnitch/config.json`
   - restart picosnitch if it is currently running for any changes to take effect
 
-```python
+```yaml
 {
   "DB retention (days)": 365, # How many days to keep connection logs
   "DB write limit (seconds)": 1, # Minimum time between writing logs to snitch.db
   # increasing it decreases disk writes by grouping connections into larger time windows
   # reducing time precision, decreasing database size, and increasing hash latency
-  "Desktop notifications": True, # Try connecting to dbus for creating system notifications
-  "Log addresses": True, # Log remote addresses for each executable
-  "Log commands": True, # Log command line args for each executable
+  "Desktop notifications": true, # Try connecting to dbus for creating system notifications
+  "Log addresses": true, # Log remote addresses for each executable
+  "Log commands": true, # Log command line args for each executable
   "Log ignore": [], # List of process names (str) or ports (int)
   # will omit connections that match any of these from the connection log (snitch.db)
   # the process and executable will still be recorded in summary.json
-  "Set RLIMIT_NOFILE": None, # Set the maximum number of open file descriptors (int)
+  "Set RLIMIT_NOFILE": null, # Set the maximum number of open file descriptors (int)
   # increasing it allows more processes to be cached (typical system default is 1024)
   # this is good enough for most people since only one copy of each executable is cached
   "VT API key": "", # API key for VirusTotal, leave blank to disable (str)
-  "VT file upload": False, # Upload file if hash not found, only hashes are used by default
+  "VT file upload": false, # Upload file if hash not found, only hashes are used by default
   "VT request limit (seconds)": 15 # Number of seconds between requests (free tier quota)
 }
 ```
@@ -78,7 +78,7 @@
 - a short summary of seen processes is stored in `~/.config/picosnitch/summary.json`
   - this is used for determining whether to create a notification
 
-```python
+```yaml
 {
   "Latest Entries": [], # Log of entries by time
   "Names": {}, # Log of processes by name containing respective executable(s)
