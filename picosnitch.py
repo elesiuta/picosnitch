@@ -69,7 +69,7 @@ BASE_PATH: typing.Final[str] = os.path.join(home_dir, ".config", "picosnitch")
 try:
     file_path = os.path.join(BASE_PATH, "config.json")
     with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
-        nofile = json.load(json_file)["Config"]["Set RLIMIT_NOFILE"]
+        nofile = json.load(json_file)["Set RLIMIT_NOFILE"]
     if type(nofile) == int:
         try:
             new_limit = (nofile, resource.getrlimit(resource.RLIMIT_NOFILE)[1])
