@@ -1297,11 +1297,12 @@ def start_picosnitch():
     config and log files: {BASE_PATH}
 
     usage:
-        picosnitch status|view|version|help
-                    |      |    |       |--> this text
-                    |      |    |--> version info
-                    |      |--> curses ui
-                    |--> show pid
+        picosnitch log|status|view|version|help
+                    |   |      |    |       |--> this text
+                    |   |      |    |--> version info
+                    |   |      |--> curses ui
+                    |   |--> show pid
+                    |--> show log
 
         systemctl enable|disable|start|stop|restart|status picosnitch
                    |      |       |     |    |       |--> show status with systemd
@@ -1391,6 +1392,10 @@ def start_picosnitch():
                     f.write(str(os.getpid()) + "\n")
                 print("starting picosnitch in simple mode")
                 sys.exit(main())
+            elif sys.argv[1] == "log":
+                for entry in tmp_snitch["Latest Entries"]:
+                    print(entry)
+                return 0
             elif sys.argv[1] == "view":
                 return ui_init()
             elif sys.argv[1] == "version":
