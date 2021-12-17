@@ -1327,8 +1327,6 @@ def start_picosnitch():
     [Install]
     WantedBy=multi-user.target
     """)
-    # if sys.prefix != sys.base_prefix:
-    #     print("Warning: picosnitch is running in a virtual environment, notifications may not function", file=sys.stderr)
     if sys.platform.startswith("linux"):
         if os.path.expanduser("~") == "/root" and not os.getenv("DBUS_SESSION_BUS_ADDRESS"):
             print("Warning: picosnitch was run as root without preserving environment, notifications won't work", file=sys.stderr)
@@ -1337,7 +1335,6 @@ def start_picosnitch():
                 print(readme)
                 return 0
             if os.getuid() != 0:
-                print("Warning: picosnitch was run without root privileges, requesting root privileges", file=sys.stderr)
                 if importlib.util.find_spec("picosnitch"):
                     args = ["sudo", "-E", sys.executable, "-m", "picosnitch", sys.argv[1]]
                 else:
@@ -1356,7 +1353,7 @@ def start_picosnitch():
                 write_snitch(tmp_snitch, write_config=True)
             if sys.argv[1] in ["start", "stop", "restart"]:
                 if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
-                    print("Warning: found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl", file=sys.stderr)
+                    print("Found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl")
                     if sys.stdin.isatty():
                         confirm = input(f"Did you intend to run `systemctl {sys.argv[1]} picosnitch` (y/N)? ")
                         if confirm.lower().startswith("y"):
