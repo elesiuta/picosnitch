@@ -21,26 +21,23 @@
 # [installation](#installation)
 
 ### [PPA](https://launchpad.net/~elesiuta/+archive/ubuntu/picosnitch) for Ubuntu and derivatives
-
-  - `sudo add-apt-repository ppa:elesiuta/picosnitch`
-  - `sudo apt update`
-  - `sudo apt install picosnitch`
+- `sudo add-apt-repository ppa:elesiuta/picosnitch`
+- `sudo apt update`
+- `sudo apt install picosnitch`
 
 ### [AUR](https://aur.archlinux.org/packages/picosnitch/) for Arch and derivatives
-
-  - install `picosnitch` [manually](https://wiki.archlinux.org/title/Arch_User_Repository#Installing_and_upgrading_packages) or using your preferred [AUR helper](https://wiki.archlinux.org/title/AUR_helpers)
+- install `picosnitch` [manually](https://wiki.archlinux.org/title/Arch_User_Repository#Installing_and_upgrading_packages) or using your preferred [AUR helper](https://wiki.archlinux.org/title/AUR_helpers)
 
 ### [PyPI](https://pypi.org/project/picosnitch/) for any Linux distribution with Python >= 3.8
-
-  - install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
-    - it should be called `python-bcc` or `python-bpfcc`
-  - install picosnitch using [pip](https://pip.pypa.io/)
-    - `pip3 install "picosnitch[full]" --upgrade --user`
-  - create a service file for systemd to run picosnitch (recommended)
-    - `picosnitch systemd`
-  - optional dependencies (should already be installed or install automatically)
-    - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro)
-    - for VirusTotal: `python-requests`
+- install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
+  - it should be called `python-bcc` or `python-bpfcc`
+- install picosnitch using [pip](https://pip.pypa.io/)
+  - `pip3 install "picosnitch[full]" --upgrade --user`
+- create a service file for systemd to run picosnitch (recommended)
+  - `picosnitch systemd`
+- optional dependencies (should already be installed or install automatically)
+  - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro)
+  - for VirusTotal: `python-requests`
 
 # [usage](#usage)
 - running picosnitch

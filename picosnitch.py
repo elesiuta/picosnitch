@@ -192,9 +192,9 @@ class Daemon:
             if "picosnitch" in cmdline:
                 print(f"picosnitch is currently running with pid {pid}.")
             else:
-                print(f"pidfile exists however picosnitch was not detected.")
+                print("pidfile exists however picosnitch was not detected.")
         else:
-            print(f"picosnitch does not appear to be running.")
+            print("picosnitch does not appear to be running.")
 
     def run(self):
         """Subclass Daemon and override this method"""
