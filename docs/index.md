@@ -18,16 +18,20 @@
   - A program you can't trust to make network connections also can't be trusted not to negate any firewall rules, so blocking or sandboxing these programs is out of scope for picosnitch (also beware of programs running as root that may try to stop/modify picosnitch)
 - Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
 
-# [getting started](#getting-started)
+# [installation](#installation)
 
-## [installation](#installation)
-- install from the [PPA](https://launchpad.net/~elesiuta/+archive/ubuntu/picosnitch) for ubuntu and derivatives
+### [PPA](https://launchpad.net/~elesiuta/+archive/ubuntu/picosnitch) for Ubuntu and derivatives
+
   - `sudo add-apt-repository ppa:elesiuta/picosnitch`
   - `sudo apt update`
   - `sudo apt install picosnitch`
-- install from the [AUR](https://aur.archlinux.org/packages/picosnitch/) for arch and derivatives
+
+### [AUR](https://aur.archlinux.org/packages/picosnitch/) for Arch and derivatives
+
   - install `picosnitch` [manually](https://wiki.archlinux.org/title/Arch_User_Repository#Installing_and_upgrading_packages) or using your preferred [AUR helper](https://wiki.archlinux.org/title/AUR_helpers)
-- install from [PyPI](https://pypi.org/project/picosnitch/) for any linux distribution with python >= 3.8
+
+### [PyPI](https://pypi.org/project/picosnitch/) for any Linux distribution with Python >= 3.8
+
   - install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
     - it should be called `python-bcc` or `python-bpfcc`
   - install picosnitch using [pip](https://pip.pypa.io/)
@@ -38,7 +42,7 @@
     - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro)
     - for VirusTotal: `python-requests`
 
-## [usage](#usage)
+# [usage](#usage)
 - running picosnitch
   - enable/disable autostart on reboot with `systemctl enable|disable picosnitch`
   - start/stop/restart with `systemctl start|stop|restart picosnitch`
@@ -48,7 +52,7 @@
   - `space/enter`: filter on entry `backspace`: remove filter `h/H`: cycle through history `t/T`: cycle time range `r`: refresh view `q`: quit
 - show usage with `picosnitch help`
 
-## [configuration](#configuration)
+# [configuration](#configuration)
 - config is stored in `~/.config/picosnitch/config.json`
   - restart picosnitch if it is currently running for any changes to take effect
 
@@ -73,7 +77,7 @@
 }
 ```
 
-## [logging](#logging)
+# [logging](#logging)
 - a short summary of seen processes is stored in `~/.config/picosnitch/summary.json`
   - this is used for determining whether to create a notification
 
