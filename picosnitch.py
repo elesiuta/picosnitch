@@ -299,6 +299,7 @@ def read_snitch() -> dict:
         "Config": {
             "DB retention (days)": 365,
             "DB write limit (seconds)": 1,
+            "DB write text log": False,
             "Desktop notifications": True,
             "Log addresses": True,
             "Log commands": True,
@@ -320,22 +321,27 @@ def read_snitch() -> dict:
     if os.path.exists(config_path):
         with open(config_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             data["Config"] = json.load(json_file)
+        for key in template["Config"]:
+            if key not in data["Config"]:
+                data["Config"][key] = template["Config"][key]
     else:
         data["Template"] = True
     if os.path.exists(summary_path):
         with open(summary_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             snitch_summary = json.load(json_file)
-        for key in snitch_summary:
-            data[key] = snitch_summary[key]
+        for key in ["Names", "Processes", "SHA256"]:
+            if key in snitch_summary:
+                data[key] = snitch_summary[key]
     assert all(type(data[key]) == type(template[key]) for key in template), "Invalid json files"
     assert all(key == "Set RLIMIT_NOFILE" or type(data["Config"][key]) == type(template["Config"][key]) for key in template["Config"]), "Invalid config"
     return data
 
 
 def write_snitch(snitch: dict, write_config: bool = False) -> None:
-    """write the snitch dictionary to config.json, summary.json, and error.log"""
+    """write the snitch dictionary to config.json, summary.json, notification.log, and error.log"""
     config_path = os.path.join(BASE_PATH, "config.json")
     summary_path = os.path.join(BASE_PATH, "summary.json")
+    notification_log_path = os.path.join(BASE_PATH, "notification.log")
     error_log_path = os.path.join(BASE_PATH, "error.log")
     if snitch.pop("WRITELOCK", False):
         summary_path += "~"
@@ -346,18 +352,22 @@ def write_snitch(snitch: dict, write_config: bool = False) -> None:
         if write_config:
             with open(config_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
                 json.dump(snitch_config, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
+        del snitch["Config"]
         if snitch["Errors"]:
             with open(error_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
                 text_file.write("\n".join(snitch["Errors"]) + "\n")
         del snitch["Errors"]
-        del snitch["Config"]
+        if snitch["Latest Entries"]:
+            with open(notification_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
+                text_file.write("\n".join(snitch["Latest Entries"]) + "\n")
+        del snitch["Latest Entries"]
         with open(summary_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
             json.dump(snitch, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
-        snitch["Errors"] = []
     except Exception:
-        snitch["Errors"] = []
         NotificationManager().toast("picosnitch write error", file=sys.stderr)
     snitch["Config"] = snitch_config
+    snitch["Errors"] = []
+    snitch["Latest Entries"] = []
 
 
 def write_snitch_and_exit(snitch: dict, q_error: multiprocessing.Queue, snitch_pipe):
@@ -655,6 +665,7 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
     get_vt_results(snitch, p_virustotal.q_in, q_updater_in, True)
     # init sql database
     file_path = os.path.join(BASE_PATH, "snitch.db")
+    text_path = os.path.join(BASE_PATH, "connection.log")
     con = sqlite3.connect(file_path)
     cur = con.cursor()
     cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
@@ -694,6 +705,10 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
         # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], event_counter[str(event)])
         con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
     con.close()
+    if snitch["Config"]["DB write text log"]:
+        with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
+            for entry in transactions:
+                text_file.write("\0".join(entry) + "\n")
     # main loop
     transactions = []
     new_processes = []
@@ -749,6 +764,10 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
                     with con:
                         # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], event_counter[str(event)])
                         con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
+                    if snitch["Config"]["DB write text log"]:
+                        with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
+                            for entry in transactions:
+                                text_file.write("\0".join(entry) + "\n")
                     transactions = []
                     last_write = time.time()
                 except Exception as e:
@@ -1297,12 +1316,11 @@ def start_picosnitch():
     config and log files: {BASE_PATH}
 
     usage:
-        picosnitch log|status|view|version|help
-                    |   |      |    |       |--> this text
-                    |   |      |    |--> version info
-                    |   |      |--> curses ui
-                    |   |--> show pid
-                    |--> show log
+        picosnitch status|view|version|help
+                    |      |    |       |--> this text
+                    |      |    |--> version info
+                    |      |--> curses ui
+                    |--> show pid
 
         systemctl enable|disable|start|stop|restart|status picosnitch
                    |      |       |     |    |       |--> show status with systemd
@@ -1389,10 +1407,6 @@ def start_picosnitch():
                     f.write(str(os.getpid()) + "\n")
                 print("starting picosnitch in simple mode")
                 sys.exit(main())
-            elif sys.argv[1] == "log":
-                for entry in tmp_snitch["Latest Entries"]:
-                    print(entry)
-                return 0
             elif sys.argv[1] == "view":
                 return ui_init()
             elif sys.argv[1] == "version":
