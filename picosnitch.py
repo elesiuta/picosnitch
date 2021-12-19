@@ -348,8 +348,6 @@ def write_snitch(snitch: dict, write_config: bool = False) -> None:
     summary_path = os.path.join(BASE_PATH, "summary.json")
     notification_log_path = os.path.join(BASE_PATH, "notification.log")
     error_log_path = os.path.join(BASE_PATH, "error.log")
-    if snitch.pop("WRITELOCK", False):
-        summary_path += "~"
     if not os.path.isdir(os.path.dirname(summary_path)):
         os.makedirs(os.path.dirname(summary_path))
     snitch_config = snitch["Config"]
@@ -559,8 +557,6 @@ def sql_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing
 
 def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -> None:
     """iterate over the list of process/connection data to update the snitch dictionary (summary.json) and create notifications on new entries"""
-    # Prevent overwriting the snitch before this function completes in the event of a termination signal
-    snitch["WRITELOCK"] = True
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     for proc in new_processes:
         proc = pickle.loads(proc)
@@ -580,7 +576,6 @@ def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
         else:
             snitch["Processes"][proc["exe"]] = [proc["name"]]
             snitch["SHA256"][proc["exe"]] = {}
-    _ = snitch.pop("WRITELOCK")
 
 
 ### processes
