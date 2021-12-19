@@ -310,10 +310,10 @@ def read_snitch() -> dict:
             "VT file upload": False,
             "VT request limit (seconds)": 15
         },
-        "Errors": [],
-        "Latest Entries": [],
+        "Error Log": [],
+        "Exe Log": [],
+        "Executables": {},
         "Names": {},
-        "Processes": {},
         "SHA256": {}
     }
     data = template
@@ -332,7 +332,7 @@ def read_snitch() -> dict:
     if os.path.exists(summary_path):
         with open(summary_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             snitch_summary = json.load(json_file)
-        for key in ["Names", "Processes", "SHA256"]:
+        for key in ["Executables", "Names", "SHA256"]:
             if key in snitch_summary:
                 data[key] = snitch_summary[key]
     assert all(type(data[key]) == type(template[key]) for key in template), "Invalid json files"
@@ -343,41 +343,41 @@ def read_snitch() -> dict:
 
 
 def write_snitch(snitch: dict, write_config: bool = False) -> None:
-    """write the snitch dictionary to config.json, summary.json, notification.log, and error.log"""
+    """write the snitch dictionary to config.json, summary.json, executable.log, and error.log"""
     config_path = os.path.join(BASE_PATH, "config.json")
     summary_path = os.path.join(BASE_PATH, "summary.json")
-    notification_log_path = os.path.join(BASE_PATH, "notification.log")
+    executable_log_path = os.path.join(BASE_PATH, "executable.log")
     error_log_path = os.path.join(BASE_PATH, "error.log")
-    if not os.path.isdir(os.path.dirname(summary_path)):
-        os.makedirs(os.path.dirname(summary_path))
+    if not os.path.isdir(BASE_PATH):
+        os.makedirs(BASE_PATH)
     snitch_config = snitch["Config"]
     try:
         if write_config:
             with open(config_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
                 json.dump(snitch_config, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
         del snitch["Config"]
-        if snitch["Errors"]:
+        if snitch["Error Log"]:
             with open(error_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
-                text_file.write("\n".join(snitch["Errors"]) + "\n")
-        del snitch["Errors"]
-        if snitch["Latest Entries"]:
-            with open(notification_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
-                text_file.write("\n".join(snitch["Latest Entries"]) + "\n")
-        del snitch["Latest Entries"]
+                text_file.write("\n".join(snitch["Error Log"]) + "\n")
+        del snitch["Error Log"]
+        if snitch["Exe Log"]:
+            with open(executable_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
+                text_file.write("\n".join(snitch["Exe Log"]) + "\n")
+        del snitch["Exe Log"]
         with open(summary_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
             json.dump(snitch, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
     except Exception:
         NotificationManager().toast("picosnitch write error", file=sys.stderr)
     snitch["Config"] = snitch_config
-    snitch["Errors"] = []
-    snitch["Latest Entries"] = []
+    snitch["Error Log"] = []
+    snitch["Exe Log"] = []
 
 
 def write_snitch_and_exit(snitch: dict, q_error: multiprocessing.Queue, snitch_pipe):
     """write the snitch dictionary one last time"""
     while not q_error.empty():
         error = q_error.get()
-        snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
+        snitch["Error Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
         NotificationManager().toast(error, file=sys.stderr)
     write_snitch(snitch)
     snitch_pipe.close()
@@ -468,8 +468,8 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiproces
         for exe in snitch["SHA256"]:
             for sha256 in snitch["SHA256"][exe]:
                 if snitch["SHA256"][exe][sha256] in ["VT Pending", "Failed to read process for upload", "", None]:
-                    if exe in snitch["Processes"] and snitch["Processes"][exe]:
-                        name = snitch["Processes"][exe][0]
+                    if exe in snitch["Executables"] and snitch["Executables"][exe]:
+                        name = snitch["Executables"][exe][0]
                     else:
                         name = exe
                     proc = {"exe": exe, "name": name}
@@ -504,7 +504,7 @@ def initial_poll(snitch: dict) -> list:
                 error += str(proc)
             else:
                 error += "{process no longer exists}"
-            snitch["Errors"].append(datetime_now + " " + error)
+            snitch["Error Log"].append(datetime_now + " " + error)
     return initial_processes
 
 
@@ -560,8 +560,8 @@ def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     for proc in new_processes:
         proc = pickle.loads(proc)
-        if proc["exe"] not in snitch["Processes"] or proc["name"] not in snitch["Names"]:
-            snitch["Latest Entries"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"])
+        if proc["exe"] not in snitch["Executables"] or proc["name"] not in snitch["Names"]:
+            snitch["Exe Log"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"])
         if proc["name"] in snitch["Names"]:
             if proc["exe"] not in snitch["Names"][proc["name"]]:
                 snitch["Names"][proc["name"]].append(proc["exe"])
@@ -569,12 +569,12 @@ def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
         else:
             snitch["Names"][proc["name"]] = [proc["exe"]]
             NotificationManager().toast("First network connection detected for " + proc["name"])
-        if proc["exe"] in snitch["Processes"]:
-            if proc["name"] not in snitch["Processes"][proc["exe"]]:
-                snitch["Processes"][proc["exe"]].append(proc["name"])
+        if proc["exe"] in snitch["Executables"]:
+            if proc["name"] not in snitch["Executables"][proc["exe"]]:
+                snitch["Executables"][proc["exe"]].append(proc["name"])
                 NotificationManager().toast("New name detected for " + proc["exe"] + ": " + proc["name"])
         else:
-            snitch["Processes"][proc["exe"]] = [proc["name"]]
+            snitch["Executables"][proc["exe"]] = [proc["name"]]
             snitch["SHA256"][proc["exe"]] = {}
 
 
@@ -601,14 +601,14 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     # snitch updater main loop
     while True:
         if not parent_process.is_alive():
-            snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " picosnitch has stopped")
+            snitch["Error Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " picosnitch has stopped")
             NotificationManager().toast("picosnitch has stopped", file=sys.stderr)
             write_snitch_and_exit(snitch, q_error, snitch_pipe)
         try:
             # check for errors
             while not q_error.empty():
                 error = q_error.get()
-                snitch["Errors"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
+                snitch["Error Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
                 NotificationManager().toast(error, file=sys.stderr)
             # get list of new processes and connections since last update (might give this loop its own subprocess)
             snitch_pipe.poll(timeout=5)
@@ -631,23 +631,23 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                     if msg["exe"] in snitch["SHA256"]:
                         if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
                             snitch["SHA256"][msg["exe"]][msg["sha256"]] = "VT Pending"
-                            snitch["Latest Entries"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"])
+                            snitch["Exe Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"])
                             NotificationManager().toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
                     else:
                         snitch["SHA256"][msg["exe"]] = {msg["sha256"]: "VT Pending"}
                 elif msg["type"] == "vt_result":
                     if msg["exe"] in snitch["SHA256"]:
                         if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
-                            snitch["Latest Entries"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"])
+                            snitch["Exe Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"])
                             NotificationManager().toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
                         snitch["SHA256"][msg["exe"]][msg["sha256"]] = msg["result"]
                     else:
                         snitch["SHA256"][msg["exe"]] = {msg["sha256"]: msg["result"]}
                     if msg["suspicious"]:
-                        snitch["Latest Entries"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"] + " (suspicious)")
+                        snitch["Exe Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"] + " (suspicious)")
                         NotificationManager().toast("Suspicious VT results for " + msg["name"])
             # write the snitch dictionary to summary.json and error.log (limit writes to reduce disk wear)
-            if time.time() - last_write > 30 or (snitch["Errors"] and time.time() - last_write > 5):
+            if time.time() - last_write > 30 or (snitch["Error Log"] and time.time() - last_write > 5):
                 new_size = sys.getsizeof(pickle.dumps(snitch))
                 if new_size != sizeof_snitch or time.time() - last_write > 600:
                     sizeof_snitch = new_size
