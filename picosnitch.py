@@ -298,6 +298,7 @@ def read_snitch() -> dict:
     template = {
         "Config": {
             "DB retention (days)": 365,
+            "DB SQL log": True,
             "DB text log": False,
             "DB write limit (seconds)": 1,
             "Desktop notifications": True,
@@ -705,10 +706,11 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
     del initial_processes_fd
     del temp_fd
     con = sqlite3.connect(file_path)
-    with con:
-        # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], event_counter[str(event)])
-        con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
-    con.close()
+    if snitch["Config"]["DB SQL log"]:
+        with con:
+            # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], event_counter[str(event)])
+            con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
+        con.close()
     if snitch["Config"]["DB text log"]:
         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
             for entry in transactions:
@@ -766,9 +768,10 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
                 new_processes = []
                 con = sqlite3.connect(file_path)
                 try:
-                    with con:
-                        # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], event_counter[str(event)])
-                        con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
+                    if snitch["Config"]["DB SQL log"]:
+                        with con:
+                            # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], event_counter[str(event)])
+                            con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
                     if snitch["Config"]["DB text log"]:
                         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
                             for entry in transactions:
