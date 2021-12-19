@@ -298,8 +298,8 @@ def read_snitch() -> dict:
     template = {
         "Config": {
             "DB retention (days)": 365,
+            "DB text log": False,
             "DB write limit (seconds)": 1,
-            "DB write text log": False,
             "Desktop notifications": True,
             "Log addresses": True,
             "Log commands": True,
@@ -316,6 +316,7 @@ def read_snitch() -> dict:
         "SHA256": {}
     }
     data = template
+    write_config = False
     config_path = os.path.join(BASE_PATH, "config.json")
     summary_path = os.path.join(BASE_PATH, "summary.json")
     if os.path.exists(config_path):
@@ -324,8 +325,9 @@ def read_snitch() -> dict:
         for key in template["Config"]:
             if key not in data["Config"]:
                 data["Config"][key] = template["Config"][key]
+                write_config = True
     else:
-        data["Template"] = True
+        write_config = True
     if os.path.exists(summary_path):
         with open(summary_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             snitch_summary = json.load(json_file)
@@ -334,6 +336,8 @@ def read_snitch() -> dict:
                 data[key] = snitch_summary[key]
     assert all(type(data[key]) == type(template[key]) for key in template), "Invalid json files"
     assert all(key == "Set RLIMIT_NOFILE" or type(data["Config"][key]) == type(template["Config"][key]) for key in template["Config"]), "Invalid config"
+    if write_config:
+        write_snitch(data, True)
     return data
 
 
@@ -705,10 +709,11 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
         # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], event_counter[str(event)])
         con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
     con.close()
-    if snitch["Config"]["DB write text log"]:
+    if snitch["Config"]["DB text log"]:
         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
             for entry in transactions:
-                text_file.write("\0".join(entry) + "\n")
+                clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in entry]
+                text_file.write(",".join(clean_entry) + "\n")
     # main loop
     transactions = []
     new_processes = []
@@ -764,10 +769,11 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
                     with con:
                         # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], event_counter[str(event)])
                         con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
-                    if snitch["Config"]["DB write text log"]:
+                    if snitch["Config"]["DB text log"]:
                         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
                             for entry in transactions:
-                                text_file.write("\0".join(entry) + "\n")
+                                clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in entry]
+                                text_file.write(",".join(clean_entry) + "\n")
                     transactions = []
                     last_write = time.time()
                 except Exception as e:
@@ -1364,11 +1370,7 @@ def start_picosnitch():
                 cap_sys_admin = 2**21
                 assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
             assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
-            tmp_snitch = read_snitch()
-            if tmp_snitch.pop("Template", False):
-                if sys.stdin.isatty() and sys.argv[1] != "start-no-daemon":
-                    tmp_snitch["Config"]["VT API key"] = input("Enter your VirusTotal API key (optional, leave blank to disable)\n>>> ").strip()
-                write_snitch(tmp_snitch, write_config=True)
+            test_read_snitch = read_snitch()
             if sys.argv[1] in ["start", "stop", "restart"]:
                 if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
                     print("Found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl")
