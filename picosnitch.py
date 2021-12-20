@@ -593,6 +593,21 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     # init signal handlers
     signal.signal(signal.SIGTERM, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
     signal.signal(signal.SIGINT, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
+    # init thread to receive new connection data over pipe
+    def snitch_pipe_thread(snitch_pipe, pipe_data: list, listen: threading.Event, ready: threading.Event):
+        while True:
+            listen.wait()
+            new_processes = pipe_data[0]
+            while listen.is_set():
+                snitch_pipe.poll(timeout=5)
+                while snitch_pipe.poll():
+                    new_processes.append(snitch_pipe.recv_bytes())
+            ready.set()
+    listen, ready = threading.Event(), threading.Event()
+    pipe_data = [[]]
+    thread = threading.Thread(target=snitch_pipe_thread, args=(snitch_pipe, pipe_data, listen, ready,), daemon=True)
+    thread.start()
+    listen.set()
     # update snitch with initial running processes and connections
     updater_subprocess_helper(snitch, [pickle.dumps(proc) for proc in initial_processes])
     del initial_processes
@@ -610,10 +625,15 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                 error = q_error.get()
                 snitch["Error Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
                 NotificationManager().toast(error, file=sys.stderr)
-            # get list of new processes and connections since last update (might give this loop its own subprocess)
-            snitch_pipe.poll(timeout=5)
-            while snitch_pipe.poll():
-                new_processes.append(snitch_pipe.recv_bytes())
+            # get list of new processes and connections since last update
+            listen.clear()
+            if not ready.wait(timeout=300):
+                q_error.put("thread timeout error for updater subprocess")
+                write_snitch_and_exit(snitch, q_error, snitch_pipe)
+            new_processes = pipe_data[0]
+            pipe_data[0] = []
+            ready.clear()
+            listen.set()
             # process the list and update snitch
             updater_subprocess_helper(snitch, new_processes)
             new_processes_q += new_processes
