@@ -345,10 +345,10 @@ def read_snitch() -> dict:
 
 
 def write_snitch(snitch: dict, write_config: bool = False) -> None:
-    """write the snitch dictionary to config.json, summary.json, executable.log, and error.log"""
+    """write the snitch dictionary to config.json, summary.json, exe.log, and error.log"""
     config_path = os.path.join(BASE_PATH, "config.json")
     summary_path = os.path.join(BASE_PATH, "summary.json")
-    executable_log_path = os.path.join(BASE_PATH, "executable.log")
+    exe_log_path = os.path.join(BASE_PATH, "exe.log")
     error_log_path = os.path.join(BASE_PATH, "error.log")
     if not os.path.isdir(BASE_PATH):
         os.makedirs(BASE_PATH)
@@ -363,7 +363,7 @@ def write_snitch(snitch: dict, write_config: bool = False) -> None:
                 text_file.write("\n".join(snitch["Error Log"]) + "\n")
         del snitch["Error Log"]
         if snitch["Exe Log"]:
-            with open(executable_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
+            with open(exe_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
                 text_file.write("\n".join(snitch["Exe Log"]) + "\n")
         del snitch["Exe Log"]
         with open(summary_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
@@ -547,7 +547,7 @@ def sql_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing
 
 
 def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -> None:
-    """iterate over the list of process/connection data to update the snitch dictionary (summary.json) and create notifications on new entries"""
+    """iterate over the list of process/connection data to update the snitch dictionary and create notifications on new entries"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     for proc in new_processes:
         proc = pickle.loads(proc)
@@ -571,7 +571,7 @@ def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
 
 ### processes
 def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
-    """coordinates connection data between subprocesses, writes updates to the snitch dictionary (summary.json) and creates notifications"""
+    """coordinates connection data between subprocesses, updates the snitch dictionary with new processes, and creates notifications"""
     os.nice(-20)
     # init variables for loop
     parent_process = multiprocessing.parent_process()
@@ -663,10 +663,10 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                     if msg["suspicious"]:
                         snitch["Exe Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"] + " (suspicious)")
                         NotificationManager().toast("Suspicious VT results for " + msg["name"])
-            # write the snitch dictionary to summary.json and error.log (limit writes to reduce disk wear)
+            # write the snitch dictionary to summary.json, error.log, and exe.log (limit writes to reduce disk wear)
             if time.time() - last_write > 30 or ((snitch["Error Log"] or snitch["Exe Log"]) and time.time() - last_write > 5):
                 new_size = sys.getsizeof(pickle.dumps(snitch))
-                if new_size != sizeof_snitch or time.time() - last_write > 600:
+                if snitch["Error Log"] or snitch["Exe Log"] or new_size != sizeof_snitch or time.time() - last_write > 600:
                     sizeof_snitch = new_size
                     last_write = time.time()
                     write_snitch(snitch)
@@ -682,7 +682,7 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
     get_vt_results(snitch, p_virustotal.q_in, q_updater_in, True)
     # init sql database
     file_path = os.path.join(BASE_PATH, "snitch.db")
-    text_path = os.path.join(BASE_PATH, "connection.log")
+    text_path = os.path.join(BASE_PATH, "conn.log")
     con = sqlite3.connect(file_path)
     cur = con.cursor()
     cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
