@@ -981,8 +981,11 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     del snitch_updater_pickle
     # set signals
     subprocesses = [p_monitor, p_virustotal, p_updater, p_sql]
-    signal.signal(signal.SIGINT, lambda *args: [p.terminate() for p in subprocesses])
-    signal.signal(signal.SIGTERM, lambda *args: [p.terminate() for p in subprocesses])
+    def clean_exit():
+        _ = [p.terminate() for p in subprocesses]
+        sys.exit(0)
+    signal.signal(signal.SIGINT, lambda *args: clean_exit())
+    signal.signal(signal.SIGTERM, lambda *args: clean_exit())
     # watch subprocesses
     suspend_check_last = time.time()
     try:
