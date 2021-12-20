@@ -609,8 +609,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     # update snitch with initial running processes and connections
     updater_subprocess_helper(snitch, [pickle.dumps(proc) for proc in initial_processes])
     del initial_processes
-    new_processes = []
-    new_processes_q = []
+    processes_to_send = []
     # snitch updater main loop
     while True:
         if not parent_process.is_alive():
@@ -632,18 +631,17 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
             pipe_data[0] = []
             ready.clear()
             listen.set()
-            # process the list and update snitch
+            # process the list and update snitch, send new process/connection data to sql subprocess if ready
             updater_subprocess_helper(snitch, new_processes)
-            new_processes_q += new_processes
-            new_processes = []
+            processes_to_send += new_processes
             while not q_in.empty():
                 msg: dict = pickle.loads(q_in.get())
                 if msg["type"] == "ready":
-                    sql_pipe.send_bytes(pickle.dumps(len(new_processes_q)))
-                    for proc in new_processes_q:
+                    sql_pipe.send_bytes(pickle.dumps(len(processes_to_send)))
+                    for proc in processes_to_send:
                         sql_pipe.send_bytes(proc)
                     sql_pipe.send_bytes(pickle.dumps("done"))
-                    new_processes_q = []
+                    processes_to_send = []
                     break
                 elif msg["type"] == "sha256":
                     if msg["exe"] in snitch["SHA256"]:
