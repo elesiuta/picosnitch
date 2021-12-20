@@ -45,6 +45,7 @@ import subprocess
 import sys
 import termios
 import textwrap
+import threading
 import time
 import typing
 
@@ -373,17 +374,6 @@ def write_snitch(snitch: dict, write_config: bool = False) -> None:
     snitch["Exe Log"] = []
 
 
-def write_snitch_and_exit(snitch: dict, q_error: multiprocessing.Queue, snitch_pipe):
-    """write the snitch dictionary one last time"""
-    while not q_error.empty():
-        error = q_error.get()
-        snitch["Error Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
-        NotificationManager().toast(error, file=sys.stderr)
-    write_snitch(snitch)
-    snitch_pipe.close()
-    sys.exit(0)
-
-
 @functools.lru_cache(maxsize=None)
 def reverse_dns_lookup(ip: str) -> str:
     """do a reverse dns lookup, return original ip if fails"""
@@ -591,6 +581,14 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     if snitch["Config"]["Desktop notifications"]:
         NotificationManager().enable_notifications()
     # init signal handlers
+    def write_snitch_and_exit(snitch: dict, q_error: multiprocessing.Queue, snitch_pipe):
+        while not q_error.empty():
+            error = q_error.get()
+            snitch["Error Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
+            NotificationManager().toast(error, file=sys.stderr)
+        write_snitch(snitch)
+        snitch_pipe.close()
+        sys.exit(0)
     signal.signal(signal.SIGTERM, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
     signal.signal(signal.SIGINT, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
     # init thread to receive new connection data over pipe
@@ -667,7 +665,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                         snitch["Exe Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"] + " (suspicious)")
                         NotificationManager().toast("Suspicious VT results for " + msg["name"])
             # write the snitch dictionary to summary.json and error.log (limit writes to reduce disk wear)
-            if time.time() - last_write > 30 or (snitch["Error Log"] and time.time() - last_write > 5):
+            if time.time() - last_write > 30 or ((snitch["Error Log"] or snitch["Exe Log"]) and time.time() - last_write > 5):
                 new_size = sys.getsizeof(pickle.dumps(snitch))
                 if new_size != sizeof_snitch or time.time() - last_write > 600:
                     sizeof_snitch = new_size
