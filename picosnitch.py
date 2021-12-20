@@ -551,18 +551,20 @@ def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     for proc in new_processes:
         proc = pickle.loads(proc)
-        if proc["exe"] not in snitch["Executables"] or proc["name"] not in snitch["Names"]:
+        if proc["exe"] not in snitch["Executables"] and proc["name"] not in snitch["Names"]:
             snitch["Exe Log"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"])
+            NotificationManager().toast("First network connection detected for " + proc["name"])
         if proc["name"] in snitch["Names"]:
             if proc["exe"] not in snitch["Names"][proc["name"]]:
                 snitch["Names"][proc["name"]].append(proc["exe"])
+                snitch["Exe Log"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"])
                 NotificationManager().toast("New executable detected for " + proc["name"] + ": " + proc["exe"])
         else:
             snitch["Names"][proc["name"]] = [proc["exe"]]
-            NotificationManager().toast("First network connection detected for " + proc["name"])
         if proc["exe"] in snitch["Executables"]:
             if proc["name"] not in snitch["Executables"][proc["exe"]]:
                 snitch["Executables"][proc["exe"]].append(proc["name"])
+                snitch["Exe Log"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"])
                 NotificationManager().toast("New name detected for " + proc["exe"] + ": " + proc["name"])
         else:
             snitch["Executables"][proc["exe"]] = [proc["name"]]
@@ -614,8 +616,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     # snitch updater main loop
     while True:
         if not parent_process.is_alive():
-            snitch["Error Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " picosnitch has stopped")
-            NotificationManager().toast("picosnitch has stopped", file=sys.stderr)
+            q_error.put("picosnitch has stopped")
             write_snitch_and_exit(snitch, q_error, snitch_pipe)
         try:
             # check for errors
