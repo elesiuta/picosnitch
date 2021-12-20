@@ -299,7 +299,7 @@ def read_snitch() -> dict:
     template = {
         "Config": {
             "DB retention (days)": 365,
-            "DB SQL log": True,
+            "DB sql log": True,
             "DB text log": False,
             "DB write limit (seconds)": 1,
             "Desktop notifications": True,
@@ -317,7 +317,8 @@ def read_snitch() -> dict:
         "Names": {},
         "SHA256": {}
     }
-    data = template
+    data = {k: v for k, v in template.items()}
+    data["Config"] = {k: v for k, v in template["Config"].items()}
     write_config = False
     config_path = os.path.join(BASE_PATH, "config.json")
     summary_path = os.path.join(BASE_PATH, "summary.json")
@@ -717,7 +718,7 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
     del initial_processes_fd
     del temp_fd
     con = sqlite3.connect(file_path)
-    if snitch["Config"]["DB SQL log"]:
+    if snitch["Config"]["DB sql log"]:
         with con:
             # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], event_counter[str(event)])
             con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
@@ -779,7 +780,7 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
                 new_processes = []
                 con = sqlite3.connect(file_path)
                 try:
-                    if snitch["Config"]["DB SQL log"]:
+                    if snitch["Config"]["DB sql log"]:
                         with con:
                             # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], event_counter[str(event)])
                             con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
