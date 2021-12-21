@@ -552,19 +552,19 @@ def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
     for proc in new_processes:
         proc = pickle.loads(proc)
         if proc["exe"] not in snitch["Executables"] and proc["name"] not in snitch["Names"]:
-            snitch["Exe Log"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"])
+            snitch["Exe Log"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"] + " (new)")
             NotificationManager().toast("First network connection detected for " + proc["name"])
         if proc["name"] in snitch["Names"]:
             if proc["exe"] not in snitch["Names"][proc["name"]]:
                 snitch["Names"][proc["name"]].append(proc["exe"])
-                snitch["Exe Log"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"])
+                snitch["Exe Log"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"] + " (exe)")
                 NotificationManager().toast("New executable detected for " + proc["name"] + ": " + proc["exe"])
         else:
             snitch["Names"][proc["name"]] = [proc["exe"]]
         if proc["exe"] in snitch["Executables"]:
             if proc["name"] not in snitch["Executables"][proc["exe"]]:
                 snitch["Executables"][proc["exe"]].append(proc["name"])
-                snitch["Exe Log"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"])
+                snitch["Exe Log"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"] + " (name)")
                 NotificationManager().toast("New name detected for " + proc["exe"] + ": " + proc["name"])
         else:
             snitch["Executables"][proc["exe"]] = [proc["name"]]
@@ -649,14 +649,14 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                     if msg["exe"] in snitch["SHA256"]:
                         if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
                             snitch["SHA256"][msg["exe"]][msg["sha256"]] = "VT Pending"
-                            snitch["Exe Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"])
+                            snitch["Exe Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"] + " (new)")
                             NotificationManager().toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
                     else:
                         snitch["SHA256"][msg["exe"]] = {msg["sha256"]: "VT Pending"}
                 elif msg["type"] == "vt_result":
                     if msg["exe"] in snitch["SHA256"]:
                         if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
-                            snitch["Exe Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"])
+                            snitch["Exe Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"] + " (new)")
                             NotificationManager().toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
                         snitch["SHA256"][msg["exe"]][msg["sha256"]] = msg["result"]
                     else:
