@@ -16,6 +16,7 @@
 - For advanced users who know what should be running on their system and when they should be making network connections
   - Only you can decide which programs to trust, so picosnitch leaves this decision up to you and just focusses on doing one thing well
   - A program you can't trust to make network connections also can't be trusted not to negate any firewall rules, so blocking or sandboxing these programs is out of scope for picosnitch (also beware of programs running as root that may try to stop/modify picosnitch)
+  - However, you can still watch picosnitch logs with another program to block connections once detected, picosnitch can be used with any other firewall tool and does not impact performance since it only monitors connections and does not intercept them
 - Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
 
 # [installation](#installation)
@@ -55,18 +56,20 @@
 
 ```yaml
 {
-  "DB retention (days)": 365, # How many days to keep connection logs
-  "DB write limit (seconds)": 1, # Minimum time between writing logs to snitch.db
+  "DB retention (days)": 365, # How many days to keep connection logs in snitch.db
+  "DB sql log": true, # Write connection logs to snitch.db
+  "DB text log": false, # Write connection logs to conn.log
+  "DB write limit (seconds)": 1, # Minimum time between writing connection logs
   # increasing it decreases disk writes by grouping connections into larger time windows
   # reducing time precision, decreasing database size, and increasing hash latency
-  "Desktop notifications": true, # Try connecting to dbus for creating system notifications
+  "Desktop notifications": true, # Try connecting to dbus to show notifications
   "Log addresses": true, # Log remote addresses for each executable
   "Log commands": true, # Log command line args for each executable
   "Log ignore": [], # List of process names (str) or ports (int)
-  # will omit connections that match any of these from the connection log (snitch.db)
-  # the process and executable will still be recorded in summary.json
+  # will omit connections that match any of these from the connection log
+  # the process name and executable will still be recorded in record.json
   "Set RLIMIT_NOFILE": null, # Set the maximum number of open file descriptors (int)
-  # increasing it allows more processes to be cached (typical system default is 1024)
+  # it is used for caching process executables (typical system default is 1024)
   # this is good enough for most people since only one copy of each executable is cached
   "VT API key": "", # API key for VirusTotal, leave blank to disable (str)
   "VT file upload": false, # Upload file if hash not found, only hashes are used by default
@@ -75,19 +78,18 @@
 ```
 
 # [logging](#logging)
-- a short summary of seen processes is stored in `~/.config/picosnitch/summary.json`
+- a log of seen executables is stored in `~/.config/picosnitch/exe.log`
+  - this is a history of your notifications
+- a record of seen executables is stored in `~/.config/picosnitch/record.json`
   - this is used for determining whether to create a notification
-
-```yaml
-{
-  "Latest Entries": [], # Log of entries by time
-  "Names": {}, # Log of processes by name containing respective executable(s)
-  "Processes": {}, # Log of processes by executable containing respective name(s)
-  "SHA256": {} # Log of processes by executable containing sha256 hash(es) and VirusTotal results
-}
-```
+  - it contains known process name(s) by executable, executable(s) by process name, and sha256 hash(es) with VirusTotal results by executable
 - the full connection log is stored in `~/.config/picosnitch/snitch.db`
   - this is used for `picosnitch view`
+  - note, connection times are approximate and may be off by a few seconds
+- if `DB text log` is enabled, the full connection log is also written to `~/.config/picosnitch/conn.log`
+  - this may be useful for watching with another program
+  - it contains the following fields, separated by commas (commas, newlines, and null characters are removed from values)
+  - `executable,name,cmdline,sha256,time,domain,ip,port,uid,count`
 - the error log is stored in `~/.config/picosnitch/error.log`
   - errors will also trigger a notification and are usually caused by far too many processes/connections
   - for most people in most cases, this should raise suspicion that some other program may be misbehaving
