@@ -1179,7 +1179,10 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                 if type(name) == str:
                     name = name.replace("\0", "")
                 elif (not is_subquery and p_col[pri_i] == "uid") or (is_subquery and s_col[sec_i] == "uid"):
-                    name = f"{pwd.getpwuid(name).pw_name} ({name})"
+                    try:
+                        name = f"{pwd.getpwuid(name).pw_name} ({name})"
+                    except Exception:
+                        name = f"??? ({name})"
                 stdscr.addstr(line - offset, 0, f"{name: <{curses.COLS*7//8}}{value: <{curses.COLS-(curses.COLS*7//8)}}")
             line += 1
         stdscr.refresh()
