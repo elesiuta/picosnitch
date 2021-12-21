@@ -82,19 +82,13 @@
   - this is a history of your notifications
 - a record of seen executables is stored in `~/.config/picosnitch/record.json`
   - this is used for determining whether to create a notification
-
-```yaml
-{
-  "Executables": {}, # Known process name(s) by executable
-  "Names": {}, # Known executable(s) by process name
-  "SHA256": {} # Known sha256 hash(es) and VirusTotal results by executable
-}
-```
+  - it contains known process name(s) by executable, executable(s) by process name, and sha256 hash(es) with VirusTotal results by executable
 - the full connection log is stored in `~/.config/picosnitch/snitch.db`
   - this is used for `picosnitch view`
   - note, connection times are approximate and may be off by a few seconds
 - if `DB text log` is enabled, the full connection log is also written to `~/.config/picosnitch/conn.log`
   - this may be useful for watching with another program
+  - it contains the following fields, separated by commas (commas, newlines, and null characters are removed from values)
   - `executable,name,cmdline,sha256,time,domain,ip,port,uid,count`
 - the error log is stored in `~/.config/picosnitch/error.log`
   - errors will also trigger a notification and are usually caused by far too many processes/connections
