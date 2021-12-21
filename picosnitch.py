@@ -295,7 +295,7 @@ class FanotifyEventMetadata(ctypes.Structure):
 
 ### functions
 def read_snitch() -> dict:
-    """read data for the snitch dictionary from config.json and summary.json or init new files if not found"""
+    """read data for the snitch dictionary from config.json and record.json or init new files if not found"""
     template = {
         "Config": {
             "DB retention (days)": 365,
@@ -321,7 +321,7 @@ def read_snitch() -> dict:
     data["Config"] = {k: v for k, v in template["Config"].items()}
     write_config = False
     config_path = os.path.join(BASE_PATH, "config.json")
-    summary_path = os.path.join(BASE_PATH, "summary.json")
+    record_path = os.path.join(BASE_PATH, "record.json")
     if os.path.exists(config_path):
         with open(config_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             data["Config"] = json.load(json_file)
@@ -331,12 +331,12 @@ def read_snitch() -> dict:
                 write_config = True
     else:
         write_config = True
-    if os.path.exists(summary_path):
-        with open(summary_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
-            snitch_summary = json.load(json_file)
+    if os.path.exists(record_path):
+        with open(record_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
+            snitch_record = json.load(json_file)
         for key in ["Executables", "Names", "SHA256"]:
-            if key in snitch_summary:
-                data[key] = snitch_summary[key]
+            if key in snitch_record:
+                data[key] = snitch_record[key]
     assert all(type(data[key]) == type(template[key]) for key in template), "Invalid json files"
     assert all(key == "Set RLIMIT_NOFILE" or type(data["Config"][key]) == type(template["Config"][key]) for key in template["Config"]), "Invalid config"
     if write_config:
@@ -345,9 +345,9 @@ def read_snitch() -> dict:
 
 
 def write_snitch(snitch: dict, write_config: bool = False) -> None:
-    """write the snitch dictionary to config.json, summary.json, exe.log, and error.log"""
+    """write the snitch dictionary to config.json, record.json, exe.log, and error.log"""
     config_path = os.path.join(BASE_PATH, "config.json")
-    summary_path = os.path.join(BASE_PATH, "summary.json")
+    record_path = os.path.join(BASE_PATH, "record.json")
     exe_log_path = os.path.join(BASE_PATH, "exe.log")
     error_log_path = os.path.join(BASE_PATH, "error.log")
     if not os.path.isdir(BASE_PATH):
@@ -366,7 +366,7 @@ def write_snitch(snitch: dict, write_config: bool = False) -> None:
             with open(exe_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
                 text_file.write("\n".join(snitch["Exe Log"]) + "\n")
         del snitch["Exe Log"]
-        with open(summary_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
+        with open(record_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
             json.dump(snitch, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
     except Exception:
         NotificationManager().toast("picosnitch write error", file=sys.stderr)
@@ -664,7 +664,7 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
                     if msg["suspicious"]:
                         snitch["Exe Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"] + " (suspicious)")
                         NotificationManager().toast("Suspicious VT results for " + msg["name"])
-            # write the snitch dictionary to summary.json, error.log, and exe.log (limit writes to reduce disk wear)
+            # write the snitch dictionary to record.json, error.log, and exe.log (limit writes to reduce disk wear)
             if time.time() - last_write > 30 or ((snitch["Error Log"] or snitch["Exe Log"]) and time.time() - last_write > 5):
                 new_size = sys.getsizeof(pickle.dumps(snitch))
                 if snitch["Error Log"] or snitch["Exe Log"] or new_size != sizeof_snitch or time.time() - last_write > 600:
