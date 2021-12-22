@@ -517,6 +517,8 @@ def sql_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing
                 sha256_error = sha_fd_error[4:] + " and " + sha256[4:]
                 sha256 = sha_fd_error + " " + sha256
                 q_error.put(sha256_error + " for " + str(proc))
+            else:
+                q_error.put(sha_fd_error[4:] + " for " + str(proc) + " (fallback pid hash successful)")
         if proc["exe"] in snitch["SHA256"]:
             if sha256 not in snitch["SHA256"][proc["exe"]]:
                 snitch["SHA256"][proc["exe"]][sha256] = "VT Pending"
