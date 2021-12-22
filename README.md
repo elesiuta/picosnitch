@@ -63,14 +63,15 @@
   # increasing it decreases disk writes by grouping connections into larger time windows
   # reducing time precision, decreasing database size, and increasing hash latency
   "Desktop notifications": true, # Try connecting to dbus to show notifications
-  "Log addresses": true, # Log remote addresses for each executable
+  "Log addresses": true, # Log remote addresses for each connection
   "Log commands": true, # Log command line args for each executable
   "Log ignore": [], # List of process names (str) or ports (int)
   # will omit connections that match any of these from the connection log
-  # the process name and executable will still be recorded in record.json
+  # the process name, executable, and hash will still be recorded in record.json
   "Set RLIMIT_NOFILE": null, # Set the maximum number of open file descriptors (int)
-  # it is used for caching process executables (typical system default is 1024)
-  # this is good enough for most people since only one copy of each executable is cached
+  # it is used for caching process executables and hashes (typical system default is 1024)
+  # this is good enough for most people since caching is based on executable device + inode
+  # fanotify is used to detect if a cached executable is modified to trigger a hash update
   "VT API key": "", # API key for VirusTotal, leave blank to disable (str)
   "VT file upload": false, # Upload file if hash not found, only hashes are used by default
   "VT request limit (seconds)": 15 # Number of seconds between requests (free tier quota)
@@ -85,7 +86,8 @@
   - it contains known process name(s) by executable, executable(s) by process name, and sha256 hash(es) with VirusTotal results by executable
 - the full connection log is stored in `~/.config/picosnitch/snitch.db`
   - this is used for `picosnitch view`
-  - note, connection times are approximate and may be off by a few seconds
+  - note, connection times are based on when the group is processed, so they are accurate to within `DB write limit (seconds)` at best, and could be delayed if the previous group is slow to hash
+  - notifications are handled by a separate subprocess, so they are not subject to the same delays as the connection log
 - if `DB text log` is enabled, the full connection log is also written to `~/.config/picosnitch/conn.log`
   - this may be useful for watching with another program
   - it contains the following fields, separated by commas (commas, newlines, and null characters are removed from values)
