@@ -697,26 +697,27 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
     # init fanotify mod counter, {"st_dev st_ino": modify_count}
     fan_mod_cnt = collections.defaultdict(int)
     # process initial connections
-    initial_processes_fd = initial_processes[FD_CACHE:]
-    temp_fd = []
-    if len(initial_processes) > FD_CACHE:
-        q_error.put("Warning: too many preexisting connections to open file descriptors for hashing in time, may result in unknown hashes/errors if any terminate")
-    for proc in initial_processes[:FD_CACHE]:
-        try:
-            fd = os.open(proc["fd"], os.O_RDONLY)
-            temp_fd.append(fd)
-            proc["fd"] = f"/proc/self/fd/{fd}"
-            initial_processes_fd.append(proc)
-        except Exception:
-            q_error.put("Process closed during init " + str(proc))
-    transactions = sql_subprocess_helper(snitch, fan_mod_cnt, [pickle.dumps(proc) for proc in initial_processes_fd], p_virustotal.q_in, q_updater_in, q_error)
-    for fd in temp_fd:
+    temp_fd = {} 
+    for proc in initial_processes:
+        if proc["pid"] in temp_fd:
+            proc["fd"] = "/proc/self/fd/%d" % temp_fd[proc["pid"]]
+        else:
+            if len(temp_fd) >= FD_CACHE:
+                q_error.put("Warning: too many preexisting connections to open file descriptors for hashing in time, may result in unknown hashes/errors if any terminate")
+                break
+            try:
+                fd = os.open("/proc/%d/exe" % proc["pid"], os.O_RDONLY)
+                temp_fd[proc["pid"]] = fd
+                proc["fd"] = "/proc/self/fd/%d" % fd
+            except Exception:
+                q_error.put("Process closed during init " + str(proc))
+    transactions = sql_subprocess_helper(snitch, fan_mod_cnt, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in, q_error)
+    for fd in temp_fd.values():
         try:
             os.close(fd)
         except Exception:
             pass
     del initial_processes
-    del initial_processes_fd
     del temp_fd
     con = sqlite3.connect(file_path)
     if snitch["Config"]["DB sql log"]:
