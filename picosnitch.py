@@ -759,7 +759,7 @@ def sql_subprocess(fan_fd, snitch, p_virustotal: ProcessManager, sql_pipe, q_upd
             q_error.put("SQL subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
-def monitor_subprocess(fan_fd, initital_pickle, snitch_pipe, q_error, q_in, _q_out):
+def monitor_subprocess(fan_fd, snitch_pipe, q_error, q_in, _q_out):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe for updater_subprocess"""
     # initialization
     os.nice(-20)
@@ -809,7 +809,12 @@ def monitor_subprocess(fan_fd, initital_pickle, snitch_pipe, q_error, q_in, _q_o
                 pass
             return (fd_path, exe, cmd)
     # process initial connections
-    initial_processes = pickle.loads(initital_pickle)
+    try:
+        with open(os.path.join(BASE_PATH, "init.pickle~"), "rb") as f:
+            initial_processes = pickle.load(f)
+        os.remove(os.path.join(BASE_PATH, "init.pickle~"))
+    except Exception:
+        initial_processes = []
     for proc in initial_processes:
         st_dev, st_ino = get_stat(f"/proc/{proc['pid']}/exe")
         fd, exe, cmd = get_fd(st_dev, st_ino, proc['pid'])
@@ -925,7 +930,7 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
             q_error.put("Last VT Exception on: %s with %s" % (str(proc), str(analysis)))
 
 
-def picosnitch_master_process(snitch: dict, initial_pickle: bytes):
+def picosnitch_master_process(snitch: dict):
     """coordinates all picosnitch subprocesses"""
     # init fanotify
     libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -938,14 +943,13 @@ def picosnitch_master_process(snitch: dict, initial_pickle: bytes):
     sql_recv_pipe, sql_send_pipe = multiprocessing.Pipe(duplex=False)
     q_error = multiprocessing.Queue()
     p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess,
-                               init_args=(fan_fd, initial_pickle, snitch_monitor_pipe, q_error,))
+                               init_args=(fan_fd, snitch_monitor_pipe, q_error,))
     p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess,
                                   init_args=(snitch["Config"], q_error,))
     p_updater = ProcessManager(name="snitchupdater", target=updater_subprocess,
                                init_args=(snitch, snitch_updater_pipe, sql_send_pipe, q_error,))
     p_sql = ProcessManager(name="snitchsql", target=sql_subprocess,
                            init_args=(fan_fd, snitch, p_virustotal, sql_recv_pipe, p_updater.q_in, q_error,))
-    del initial_pickle
     # set signals
     subprocesses = [p_monitor, p_virustotal, p_updater, p_sql]
     def clean_exit():
@@ -1286,12 +1290,13 @@ def main():
     snitch = read_snitch()
     # do initial poll of current network connections
     initial_processes = initial_poll(snitch)
-    initial_pickle = pickle.dumps(initial_processes)
+    with open(os.path.join(BASE_PATH, "init.pickle~"), "wb") as f:
+        pickle.dump(initial_processes, f)
     # start picosnitch process monitor
     with open("/run/picosnitch.pid", "r") as f:
         assert int(f.read().strip()) == os.getpid()
     if __name__ == "__main__" or sys.argv[1] == "start-no-daemon":
-        sys.exit(picosnitch_master_process(snitch, initial_pickle))
+        sys.exit(picosnitch_master_process(snitch))
     print("Snitch subprocess init failed, __name__ != __main__", file=sys.stderr)
     sys.exit(1)
 
