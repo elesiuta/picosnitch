@@ -467,7 +467,6 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiproces
     else:
         while not q_vt.empty():
             proc, sha256, result, suspicious = pickle.loads(q_vt.get())
-            snitch["SHA256"][proc["exe"]][sha256] = result
             q_out.put(pickle.dumps({"type": "vt_result", "name": proc["name"], "exe": proc["exe"], "sha256": sha256, "result": result, "suspicious": suspicious}))
 
 
@@ -520,11 +519,14 @@ def sql_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing
                 q_error.put(sha_fd_error[4:] + " for " + str(proc) + " (fallback pid hash successful)")
         if proc["exe"] in snitch["SHA256"]:
             if sha256 not in snitch["SHA256"][proc["exe"]]:
-                snitch["SHA256"][proc["exe"]][sha256] = "VT Pending"
+                snitch["SHA256"][proc["exe"]][sha256] = "SUBMITTED"
                 q_vt.put(pickle.dumps((proc, sha256)))
                 q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
+            elif snitch["SHA256"][proc["exe"]][sha256] == "Failed to read process for upload":
+                snitch["SHA256"][proc["exe"]][sha256] = "RETRY"
+                q_vt.put(pickle.dumps((proc, sha256)))
         else:
-            snitch["SHA256"][proc["exe"]] = {sha256: "VT Pending"}
+            snitch["SHA256"][proc["exe"]] = {sha256: "SUBMITTED"}
             q_vt.put(pickle.dumps((proc, sha256)))
             q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
         # filter from logs
