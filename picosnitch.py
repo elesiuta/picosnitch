@@ -785,7 +785,8 @@ def monitor_subprocess(fan_fd, initital_pickle, snitch_pipe, q_error, q_in, _q_o
                 fd = os.open(f"/proc/{pid}/exe", os.O_RDONLY)
                 libc.fanotify_mark(fan_fd, _FAN_MARK_ADD, _FAN_MODIFY, fd, None)
                 fd_path = f"/proc/{self_pid}/fd/{fd}"
-                # assert (st_dev, st_ino) == get_fstat(fd), don't need to check here, if fails will trigger !!! FD_CACHE Overflow Error (or !!! FD Stat Error)
+                if (st_dev, st_ino) != get_fstat(fd):
+                    q_error.put(f"FD Inode Error for (fd: {fd} dev: {st_dev} ino: {st_ino}) this may trigger !!! FD_CACHE Overflow Error")
             except Exception:
                 fd, fd_path = 0, ""
             try:
