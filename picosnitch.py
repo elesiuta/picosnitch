@@ -762,6 +762,7 @@ def sql_subprocess(fan_fd, snitch, p_virustotal: ProcessManager, sql_pipe, q_upd
 
 def monitor_subprocess(fan_fd, initital_pickle, snitch_pipe, q_error, q_in, _q_out):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe for updater_subprocess"""
+    # initialization
     os.nice(-20)
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
@@ -808,49 +809,44 @@ def monitor_subprocess(fan_fd, initital_pickle, snitch_pipe, q_error, q_in, _q_o
             except Exception:
                 pass
             return (fd_path, exe, cmd)
+    # process initial connections
     initial_processes = pickle.loads(initital_pickle)
     for proc in initial_processes:
         st_dev, st_ino = get_stat(f"/proc/{proc['pid']}/exe")
-        # if (st_dev, st_ino) == (0, 0):
-        #     q_error.put("Process closed during init " + str(proc))
-        #     continue
         fd, exe, cmd = get_fd(st_dev, st_ino, proc['pid'])
         snitch_pipe.send_bytes(pickle.dumps({"pid": proc["pid"], "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": proc["port"], "ip": proc["ip"]}))
     del initial_processes
-    if os.getuid() == 0:
-        b = BPF(text=bpf_text)
-        b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
-        def queue_lost(*args):
-            # if you see this, try increasing priority with nice or increasing PAGE_CNT
-            q_error.put("BPF callbacks not processing fast enough, may have lost data")
-        def queue_ipv4_event(cpu, data, size):
-            event = b["ipv4_events"].event(data)
-            st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
-            fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
-            snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
-        def queue_ipv6_event(cpu, data, size):
-            event = b["ipv6_events"].event(data)
-            st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
-            fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
-            snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
-        def queue_other_event(cpu, data, size):
-            event = b["other_socket_events"].event(data)
-            st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
-            fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
-            snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
-        b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
-        b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
-        b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
-        while True:
-            if not parent_process.is_alive() or not q_in.empty():
-                return 0
-            try:
-                b.perf_buffer_poll(timeout=-1)
-            except Exception as e:
-                q_error.put("BPF %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
-    else:
-        q_error.put("Snitch subprocess permission error, requires root")
-    return 1
+    # run bpf program
+    b = BPF(text=bpf_text)
+    b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
+    def queue_lost(*args):
+        # if you see this, try increasing PAGE_CNT
+        q_error.put("BPF callbacks not processing fast enough, may have lost data")
+    def queue_ipv4_event(cpu, data, size):
+        event = b["ipv4_events"].event(data)
+        st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
+        fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
+        snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+    def queue_ipv6_event(cpu, data, size):
+        event = b["ipv6_events"].event(data)
+        st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
+        fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
+        snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
+    def queue_other_event(cpu, data, size):
+        event = b["other_socket_events"].event(data)
+        st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
+        fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
+        snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
+    b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+    b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+    b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+    while True:
+        if not parent_process.is_alive() or not q_in.empty():
+            return 0
+        try:
+            b.perf_buffer_poll(timeout=-1)
+        except Exception as e:
+            q_error.put("BPF %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
 def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
