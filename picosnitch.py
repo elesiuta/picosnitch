@@ -810,12 +810,12 @@ def monitor_subprocess(fan_fd, initital_pickle, snitch_pipe, q_error, q_in, _q_o
             return (fd_path, exe, cmd)
     initial_processes = pickle.loads(initital_pickle)
     for proc in initial_processes:
-        try:
-            st_dev, st_ino = get_stat(f"/proc/{proc['pid']}/exe")
-            fd, exe, cmd = get_fd(st_dev, st_ino, proc['pid'])
-            snitch_pipe.send_bytes(pickle.dumps({"pid": proc["pid"], "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": proc["port"], "ip": proc["ip"]}))
-        except Exception:
-            pass
+        st_dev, st_ino = get_stat(f"/proc/{proc['pid']}/exe")
+        # if (st_dev, st_ino) == (0, 0):
+        #     q_error.put("Process closed during init " + str(proc))
+        #     continue
+        fd, exe, cmd = get_fd(st_dev, st_ino, proc['pid'])
+        snitch_pipe.send_bytes(pickle.dumps({"pid": proc["pid"], "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": proc["port"], "ip": proc["ip"]}))
     del initial_processes
     if os.getuid() == 0:
         b = BPF(text=bpf_text)
