@@ -480,10 +480,7 @@ def initial_poll(snitch: dict) -> list:
     for conn in current_connections:
         try:
             if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
-                proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "cmdline", "pid", "uids"], ad_value="")
-                proc["cmdline"] = shlex.join(proc["cmdline"])
-                proc["fd"] = "/proc/%d/exe" % proc["pid"]  # default path so there is still a chance of hashing if not enough available file descriptors, without modifying code
-                proc["dev"], proc["ino"] = get_stat(proc["fd"])
+                proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "pid", "uids"], ad_value="")
                 proc["uid"] = proc["uids"][0]
                 proc["ip"] = conn.raddr.ip
                 proc["port"] = conn.raddr.port
@@ -572,14 +569,14 @@ def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
 
 
 ### processes
-def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
+def updater_subprocess(snitch, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
     """coordinates connection data between subprocesses, updates the snitch dictionary with new processes, and creates notifications"""
     os.nice(-20)
     # init variables for loop
     parent_process = multiprocessing.parent_process()
-    snitch, initial_processes = pickle.loads(init_pickle)
     sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
     last_write = 0
+    processes_to_send = []
     # init notifications
     if snitch["Config"]["Desktop notifications"]:
         NotificationManager().enable_notifications()
@@ -609,10 +606,6 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
     thread = threading.Thread(target=snitch_pipe_thread, args=(snitch_pipe, pipe_data, listen, ready,), daemon=True)
     thread.start()
     listen.set()
-    # update snitch with initial running processes and connections
-    updater_subprocess_helper(snitch, [pickle.dumps(proc) for proc in initial_processes])
-    del initial_processes
-    processes_to_send = []
     # snitch updater main loop
     while True:
         if not parent_process.is_alive():
@@ -675,11 +668,10 @@ def updater_subprocess(init_pickle, snitch_pipe, sql_pipe, q_error, q_in, _q_out
             q_error.put("Updater %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
-def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
+def sql_subprocess(fan_fd, snitch, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
     """updates the snitch sqlite3 db with new connections and reports sha256/vt_results back to updater_subprocess if needed"""
     parent_process = multiprocessing.parent_process()
     # maintain a separate copy of the snitch dictionary here and coordinate with the updater_subprocess (sha256 and vt_results)
-    snitch, initial_processes = pickle.loads(init_pickle)
     get_vt_results(snitch, p_virustotal.q_in, q_updater_in, True)
     # init sql database
     file_path = os.path.join(BASE_PATH, "snitch.db")
@@ -696,40 +688,6 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
     con.close()
     # init fanotify mod counter, {"st_dev st_ino": modify_count}
     fan_mod_cnt = collections.defaultdict(int)
-    # process initial connections
-    temp_fd = {} 
-    for proc in initial_processes:
-        if proc["pid"] in temp_fd:
-            proc["fd"] = "/proc/self/fd/%d" % temp_fd[proc["pid"]]
-        else:
-            if len(temp_fd) >= FD_CACHE:
-                q_error.put("Warning: too many preexisting connections to open file descriptors for hashing in time, may result in unknown hashes/errors if any terminate")
-                break
-            try:
-                fd = os.open("/proc/%d/exe" % proc["pid"], os.O_RDONLY)
-                temp_fd[proc["pid"]] = fd
-                proc["fd"] = "/proc/self/fd/%d" % fd
-            except Exception:
-                q_error.put("Process closed during init " + str(proc))
-    transactions = sql_subprocess_helper(snitch, fan_mod_cnt, [pickle.dumps(proc) for proc in initial_processes], p_virustotal.q_in, q_updater_in, q_error)
-    for fd in temp_fd.values():
-        try:
-            os.close(fd)
-        except Exception:
-            pass
-    del initial_processes
-    del temp_fd
-    con = sqlite3.connect(file_path)
-    if snitch["Config"]["DB sql log"]:
-        with con:
-            # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], event_counter[str(event)])
-            con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
-        con.close()
-    if snitch["Config"]["DB text log"]:
-        with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
-            for entry in transactions:
-                clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in entry]
-                text_file.write(",".join(clean_entry) + "\n")
     # main loop
     transactions = []
     new_processes = []
@@ -800,7 +758,7 @@ def sql_subprocess(fan_fd, init_pickle, p_virustotal: ProcessManager, sql_pipe, 
             q_error.put("SQL subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
-def monitor_subprocess(fan_fd, snitch_pipe, q_error, q_in, _q_out):
+def monitor_subprocess(fan_fd, initital_pickle, snitch_pipe, q_error, q_in, _q_out):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe for updater_subprocess"""
     os.nice(-20)
     from bcc import BPF
@@ -847,6 +805,15 @@ def monitor_subprocess(fan_fd, snitch_pipe, q_error, q_in, _q_out):
             except Exception:
                 pass
             return (fd_path, exe, cmd)
+    initial_processes = pickle.loads(initital_pickle)
+    for proc in initial_processes:
+        try:
+            st_dev, st_ino = get_stat(f"/proc/{proc['pid']}/exe")
+            fd, exe, cmd = get_fd(st_dev, st_ino, proc['pid'])
+            snitch_pipe.send_bytes(pickle.dumps({"pid": proc["pid"], "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": proc["port"], "ip": proc["ip"]}))
+        except Exception:
+            pass
+    del initial_processes
     if os.getuid() == 0:
         b = BPF(text=bpf_text)
         b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
@@ -960,7 +927,7 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
             q_error.put("Last VT Exception on: %s with %s" % (str(proc), str(analysis)))
 
 
-def picosnitch_master_process(config, snitch_updater_pickle):
+def picosnitch_master_process(snitch: dict, initial_pickle: bytes):
     """coordinates all picosnitch subprocesses"""
     # init fanotify
     libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -972,15 +939,15 @@ def picosnitch_master_process(config, snitch_updater_pickle):
     snitch_updater_pipe, snitch_monitor_pipe = multiprocessing.Pipe(duplex=False)
     sql_recv_pipe, sql_send_pipe = multiprocessing.Pipe(duplex=False)
     q_error = multiprocessing.Queue()
-    p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess, init_args=(fan_fd, snitch_monitor_pipe, q_error,))
-    p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess, init_args=(config, q_error,))
+    p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess,
+                               init_args=(fan_fd, initial_pickle, snitch_monitor_pipe, q_error,))
+    p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess,
+                                  init_args=(snitch["Config"], q_error,))
     p_updater = ProcessManager(name="snitchupdater", target=updater_subprocess,
-                               init_args=(snitch_updater_pickle, snitch_updater_pipe, sql_send_pipe, q_error,)
-                              )
+                               init_args=(snitch, snitch_updater_pipe, sql_send_pipe, q_error,))
     p_sql = ProcessManager(name="snitchsql", target=sql_subprocess,
-                           init_args=(fan_fd, snitch_updater_pickle, p_virustotal, sql_recv_pipe, p_updater.q_in, q_error,)
-                          )
-    del snitch_updater_pickle
+                           init_args=(fan_fd, snitch, p_virustotal, sql_recv_pipe, p_updater.q_in, q_error,))
+    del initial_pickle
     # set signals
     subprocesses = [p_monitor, p_virustotal, p_updater, p_sql]
     def clean_exit():
@@ -1321,12 +1288,12 @@ def main():
     snitch = read_snitch()
     # do initial poll of current network connections
     initial_processes = initial_poll(snitch)
-    snitch_updater_pickle = pickle.dumps((snitch, initial_processes))
+    initial_pickle = pickle.dumps(initial_processes)
     # start picosnitch process monitor
     with open("/run/picosnitch.pid", "r") as f:
         assert int(f.read().strip()) == os.getpid()
     if __name__ == "__main__" or sys.argv[1] == "start-no-daemon":
-        sys.exit(picosnitch_master_process(snitch["Config"], snitch_updater_pickle))
+        sys.exit(picosnitch_master_process(snitch, initial_pickle))
     print("Snitch subprocess init failed, __name__ != __main__", file=sys.stderr)
     sys.exit(1)
 
