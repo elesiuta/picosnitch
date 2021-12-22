@@ -457,7 +457,7 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiproces
     if check_pending:
         for exe in snitch["SHA256"]:
             for sha256 in snitch["SHA256"][exe]:
-                if snitch["SHA256"][exe][sha256] in ["VT Pending", "Failed to read process for upload", "", None]:
+                if snitch["SHA256"][exe][sha256] in ["VT Pending", "File not analyzed (no api key)", "", None]:
                     if exe in snitch["Executables"] and snitch["Executables"][exe]:
                         name = snitch["Executables"][exe][0]
                     else:
