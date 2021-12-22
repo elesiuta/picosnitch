@@ -35,7 +35,6 @@ import pickle
 import pwd
 import queue
 import resource
-import shlex
 import signal
 import site
 import socket
@@ -869,9 +868,9 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
                 return response["data"]["attributes"]["stats"]
         return {"timeout": api_url, "sha256": sha256}
     while True:
+        if not parent_process.is_alive():
+            return 0
         try:
-            if not parent_process.is_alive():
-                return 0
             time.sleep(config["VT request limit (seconds)"])
             proc, analysis = None, None
             proc, sha256 = pickle.loads(q_vt_pending.get(block=True, timeout=15))
