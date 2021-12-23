@@ -5,7 +5,6 @@ Description=picosnitch
 Type=simple
 Restart=always
 RestartSec=5
-Environment="SUDO_UID=1000" "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus"
 ExecStart=/usr/bin/picosnitch start-no-daemon
 PIDFile=/run/picosnitch.pid
 

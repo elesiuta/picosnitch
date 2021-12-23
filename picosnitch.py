@@ -58,11 +58,22 @@ import psutil
 # set constants and RLIMIT_NOFILE if configured
 VERSION: typing.Final[str] = "0.8.1"
 PAGE_CNT: typing.Final[int] = 8
-if sys.platform.startswith("linux") and os.getuid() == 0 and (os.getenv("SUDO_UID") or os.getenv("SUDO_USER")):
+if sys.platform.startswith("linux") and os.getuid() == 0:
     if os.getenv("SUDO_USER"):
         home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
-    else:
+    elif os.getenv("SUDO_UID"):
         home_dir = pwd.getpwuid(int(os.getenv("SUDO_UID"))).pw_dir
+    else:
+        for home_user in os.listdir("/home"):
+            try:
+                if pwd.getpwnam(home_user).pw_uid >= 1000:
+                    break
+            except Exception:
+                pass
+        home_dir = pwd.getpwnam(home_user).pw_dir
+        os.environ["SUDO_UID"] = str(pwd.getpwnam(home_user).pw_uid)
+    if not os.getenv("DBUS_SESSION_BUS_ADDRESS"):
+        os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{pwd.getpwnam(home_user).pw_uid}/bus"
 else:
     home_dir = os.path.expanduser("~")
 BASE_PATH: typing.Final[str] = os.path.join(home_dir, ".config", "picosnitch")
