@@ -56,7 +56,7 @@ except Exception:
 import psutil
 
 # set constants and RLIMIT_NOFILE if configured
-VERSION: typing.Final[str] = "0.8.1"
+VERSION: typing.Final[str] = "0.8.2"
 PAGE_CNT: typing.Final[int] = 8
 if sys.platform.startswith("linux") and os.getuid() == 0:
     if os.getenv("SUDO_USER"):
