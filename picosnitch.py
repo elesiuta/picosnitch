@@ -60,9 +60,9 @@ VERSION: typing.Final[str] = "0.8.1"
 PAGE_CNT: typing.Final[int] = 8
 if sys.platform.startswith("linux") and os.getuid() == 0:
     if os.getenv("SUDO_USER"):
-        home_dir = os.path.join("/home", os.getenv("SUDO_USER"))
+        home_user = os.getenv("SUDO_USER")
     elif os.getenv("SUDO_UID"):
-        home_dir = pwd.getpwuid(int(os.getenv("SUDO_UID"))).pw_dir
+        home_user = pwd.getpwuid(int(os.getenv("SUDO_UID"))).pw_name
     else:
         for home_user in os.listdir("/home"):
             try:
@@ -70,8 +70,8 @@ if sys.platform.startswith("linux") and os.getuid() == 0:
                     break
             except Exception:
                 pass
-        home_dir = pwd.getpwnam(home_user).pw_dir
-        os.environ["SUDO_UID"] = str(pwd.getpwnam(home_user).pw_uid)
+    home_dir = pwd.getpwnam(home_user).pw_dir
+    os.environ["SUDO_UID"] = str(pwd.getpwnam(home_user).pw_uid)
     if not os.getenv("DBUS_SESSION_BUS_ADDRESS"):
         os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{pwd.getpwnam(home_user).pw_uid}/bus"
 else:
@@ -1358,8 +1358,6 @@ def start_picosnitch():
     WantedBy=multi-user.target
     """)
     if sys.platform.startswith("linux"):
-        if os.path.expanduser("~") == "/root" and not os.getenv("DBUS_SESSION_BUS_ADDRESS"):
-            print("Warning: picosnitch was run as root without preserving environment, notifications won't work", file=sys.stderr)
         if len(sys.argv) == 2:
             if sys.argv[1] == "help":
                 print(readme)
