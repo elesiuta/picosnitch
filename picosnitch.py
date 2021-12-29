@@ -1350,7 +1350,6 @@ def start_picosnitch():
     Type=simple
     Restart=always
     RestartSec=5
-    Environment="SUDO_UID={os.getenv("SUDO_UID")}" "SUDO_USER={os.getenv("SUDO_USER")}" "DBUS_SESSION_BUS_ADDRESS={os.getenv("DBUS_SESSION_BUS_ADDRESS")}" "PYTHON_USER_SITE={site.USER_SITE}"
     ExecStart={sys.executable} "{__file__}" start-no-daemon
     PIDFile=/run/picosnitch.pid
 
