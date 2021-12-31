@@ -313,6 +313,7 @@ def read_snitch() -> dict:
             "DB text log": False,
             "DB write limit (seconds)": 1,
             "Desktop notifications": True,
+            "Execve events": False,
             "Log addresses": True,
             "Log commands": True,
             "Log ignore": [],
@@ -682,7 +683,7 @@ def updater_subprocess(snitch, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
             q_error.put("Updater %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
-def sql_subprocess(fan_fd, snitch, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
+def sql_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
     """updates the snitch sqlite3 db with new connections and reports sha256/vt_results back to updater_subprocess if needed"""
     parent_process = multiprocessing.parent_process()
     # maintain a separate copy of the snitch dictionary here and coordinate with the updater_subprocess (sha256 and vt_results)
@@ -772,7 +773,7 @@ def sql_subprocess(fan_fd, snitch, p_virustotal: ProcessManager, sql_pipe, q_upd
             q_error.put("SQL subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
-def monitor_subprocess(fan_fd, snitch_pipe, q_error, q_in, _q_out):
+def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe for updater_subprocess"""
     # initialization
     os.nice(-20)
@@ -836,6 +837,8 @@ def monitor_subprocess(fan_fd, snitch_pipe, q_error, q_in, _q_out):
     # run bpf program
     b = BPF(text=bpf_text)
     b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
+    if config["Execve events"]:
+        b.attach_kprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
     def queue_lost(*args):
         # if you see this, try increasing PAGE_CNT
         q_error.put("BPF callbacks not processing fast enough, may have lost data")
@@ -854,9 +857,16 @@ def monitor_subprocess(fan_fd, snitch_pipe, q_error, q_in, _q_out):
         st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
         fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
         snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
+    def queue_exec_event(cpu, data, size):
+        event = b["exec_events"].event(data)
+        st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
+        fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
+        snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": -1, "ip": ""}))
     b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+    if config["Execve events"]:
+        b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     while True:
         if not parent_process.is_alive() or not q_in.empty():
             return 0
@@ -956,13 +966,13 @@ def picosnitch_master_process(snitch: dict):
     sql_recv_pipe, sql_send_pipe = multiprocessing.Pipe(duplex=False)
     q_error = multiprocessing.Queue()
     p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess,
-                               init_args=(fan_fd, snitch_monitor_pipe, q_error,))
+                               init_args=(snitch["Config"], fan_fd, snitch_monitor_pipe, q_error,))
     p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess,
                                   init_args=(snitch["Config"], q_error,))
     p_updater = ProcessManager(name="snitchupdater", target=updater_subprocess,
                                init_args=(snitch, snitch_updater_pipe, sql_send_pipe, q_error,))
     p_sql = ProcessManager(name="snitchsql", target=sql_subprocess,
-                           init_args=(fan_fd, snitch, p_virustotal, sql_recv_pipe, p_updater.q_in, q_error,))
+                           init_args=(snitch, fan_fd, p_virustotal, sql_recv_pipe, p_updater.q_in, q_error,))
     # set signals
     subprocesses = [p_monitor, p_virustotal, p_updater, p_sql]
     def clean_exit():
@@ -1432,7 +1442,7 @@ def start_picosnitch():
 
 ### bpf program
 bpf_text = """
-// This BPF program comes from the following source, licensed under the Apache License, Version 2.0
+// This BPF program was based on the following source, licensed under the Apache License, Version 2.0
 // https://github.com/p-/socket-connect-bpf/blob/7f386e368759e53868a078570254348e73e73e22/securitySocketConnectSrc.bpf
 // Copyright 2019 Peter Stöckli
 
@@ -1450,6 +1460,7 @@ bpf_text = """
 
 #include <uapi/linux/ptrace.h>
 #include <linux/socket.h>
+#include <linux/sched.h>
 #include <linux/in.h>
 #include <linux/in6.h>
 #include <linux/ip.h>
@@ -1482,14 +1493,18 @@ struct other_socket_event_t {
 } __attribute__((packed));
 BPF_PERF_OUTPUT(other_socket_events);
 
+struct exec_event_t {
+    u32 pid;
+    u32 uid;
+    char comm[TASK_COMM_LEN];
+} __attribute__((packed));
+BPF_PERF_OUTPUT(exec_events);
+
 int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, struct sockaddr *address, int addrlen)
 {
-    struct task_struct *task;
     int ret = PT_REGS_RC(ctx);
 
-    u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 pid = pid_tgid >> 32;
-
+    u32 pid = bpf_get_current_pid_tgid() >> 32;
     u32 uid = bpf_get_current_uid_gid();
 
     struct sock *skp = sock->sk;
@@ -1537,6 +1552,15 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
         other_socket_events.perf_submit(ctx, &socket_event, sizeof(socket_event));
     }
 
+    return 0;
+}
+
+int exec_entry(struct pt_regs *ctx) {
+    struct exec_event_t data = {};
+    data.pid = bpf_get_current_pid_tgid() >> 32;
+    data.uid = bpf_get_current_uid_gid() & 0xffffffff;
+    bpf_get_current_comm(&data.comm, sizeof(data.comm));
+    exec_events.perf_submit(ctx, &data, sizeof(data));
     return 0;
 }
 """
