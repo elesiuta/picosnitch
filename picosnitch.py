@@ -1428,7 +1428,7 @@ def start_picosnitch():
             elif sys.argv[1] == "view":
                 return ui_init()
             elif sys.argv[1] == "version":
-                print(f"version: {VERSION} ({__file__})")
+                print(f"version: {VERSION} ({__file__})\nconfig and log files: {BASE_PATH}")
                 return 0
             else:
                 print(readme)
