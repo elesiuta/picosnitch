@@ -839,7 +839,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     b = BPF(text=bpf_text)
     b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
     if config["Execve events"]:
-        b.attach_kprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
+        b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
     def queue_lost(*args):
         # if you see this, try increasing PAGE_CNT
         q_error.put("BPF callbacks not processing fast enough, may have lost data")
@@ -860,9 +860,10 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
-        st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
-        fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": -1, "ip": ""}))
+        if event.retval == 0:
+            st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
+            fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
+            snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": -1, "ip": ""}))
     b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
@@ -1498,6 +1499,7 @@ struct exec_event_t {
     u32 pid;
     u32 uid;
     char comm[TASK_COMM_LEN];
+    int retval;
 } __attribute__((packed));
 BPF_PERF_OUTPUT(exec_events);
 
@@ -1561,6 +1563,7 @@ int exec_entry(struct pt_regs *ctx) {
     data.pid = bpf_get_current_pid_tgid() >> 32;
     data.uid = bpf_get_current_uid_gid() & 0xffffffff;
     bpf_get_current_comm(&data.comm, sizeof(data.comm));
+    data.retval = PT_REGS_RC(ctx);
     exec_events.perf_submit(ctx, &data, sizeof(data));
     return 0;
 }
