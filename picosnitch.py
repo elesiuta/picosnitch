@@ -551,8 +551,12 @@ def sql_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing
             domain = reverse_dns_lookup(proc["ip"])
         else:
             domain, proc["ip"] = "", ""
-        if proc["port"] in snitch["Config"]["Log ignore"] or proc["name"] in snitch["Config"]["Log ignore"]:
-            continue
+        for ignore in snitch["Config"]["Log ignore"]:
+            if ((proc["port"] == ignore) or
+                (sha256 == ignore) or
+                (type(ignore) == str and domain.startswith(ignore))
+               ):
+                continue
         event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"])
         event_counter[str(event)] += 1
         transactions.add(event)
