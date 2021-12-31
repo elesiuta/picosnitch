@@ -59,10 +59,10 @@ import psutil
 VERSION: typing.Final[str] = "0.8.2"
 PAGE_CNT: typing.Final[int] = 8
 if sys.platform.startswith("linux") and os.getuid() == 0:
-    if os.getenv("SUDO_USER"):
-        home_user = os.getenv("SUDO_USER")
-    elif os.getenv("SUDO_UID"):
+    if os.getenv("SUDO_UID"):
         home_user = pwd.getpwuid(int(os.getenv("SUDO_UID"))).pw_name
+    elif os.getenv("SUDO_USER"):
+        home_user = os.getenv("SUDO_USER")
     else:
         for home_user in os.listdir("/home"):
             try:
@@ -71,7 +71,8 @@ if sys.platform.startswith("linux") and os.getuid() == 0:
             except Exception:
                 pass
     home_dir = pwd.getpwnam(home_user).pw_dir
-    os.environ["SUDO_UID"] = str(pwd.getpwnam(home_user).pw_uid)
+    if not os.getenv("SUDO_UID"):
+        os.environ["SUDO_UID"] = str(pwd.getpwnam(home_user).pw_uid)
     if not os.getenv("DBUS_SESSION_BUS_ADDRESS"):
         os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{pwd.getpwnam(home_user).pw_uid}/bus"
 else:
