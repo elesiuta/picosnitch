@@ -314,7 +314,7 @@ def read_snitch() -> dict:
             "DB text log": False,
             "DB write limit (seconds)": 1,
             "Desktop notifications": True,
-            "Execve events": False,
+            "Every exe (not just conns)": False,
             "Log addresses": True,
             "Log commands": True,
             "Log ignore": [],
@@ -504,7 +504,7 @@ def initial_poll(snitch: dict) -> list:
             else:
                 error += "{process no longer exists}"
             snitch["Error Log"].append(datetime_now + " " + error)
-    if snitch["Config"]["Execve events"]:
+    if snitch["Config"]["Every exe (not just conns)"]:
         for pid in psutil.pids():
             try:
                 proc = psutil.Process(pid).as_dict(attrs=["name", "exe", "pid", "uids"], ad_value="")
@@ -580,7 +580,7 @@ def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
         proc = pickle.loads(proc)
         if proc["exe"] not in snitch["Executables"] and proc["name"] not in snitch["Names"]:
             snitch["Exe Log"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"] + " (new)")
-            NotificationManager().toast("First network connection detected for " + proc["name"])
+            NotificationManager().toast("First connection detected for " + proc["name"])
         if proc["name"] in snitch["Names"]:
             if proc["exe"] not in snitch["Names"][proc["name"]]:
                 snitch["Names"][proc["name"]].append(proc["exe"])
@@ -853,7 +853,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     # run bpf program
     b = BPF(text=bpf_text)
     b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
-    if config["Execve events"]:
+    if config["Every exe (not just conns)"]:
         b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
     def queue_lost(*args):
         # if you see this, try increasing PAGE_CNT
@@ -882,7 +882,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
-    if config["Execve events"]:
+    if config["Every exe (not just conns)"]:
         b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     while True:
         if not parent_process.is_alive() or not q_in.empty():
