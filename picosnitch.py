@@ -800,6 +800,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         try:
             fd_dict.move_to_end(sig)
             fd, fd_path, exe, cmd = fd_dict[sig]
+            assert fd, "previous attempt failed, probably due to process terminating too quickly, try again"
             return (fd_path, exe, cmd)
         except Exception:
             try:
