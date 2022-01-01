@@ -504,6 +504,16 @@ def initial_poll(snitch: dict) -> list:
             else:
                 error += "{process no longer exists}"
             snitch["Error Log"].append(datetime_now + " " + error)
+    if snitch["Config"]["Execve events"]:
+        for pid in psutil.pids():
+            try:
+                proc = psutil.Process(pid).as_dict(attrs=["name", "exe", "pid", "uids"], ad_value="")
+                proc["uid"] = proc["uids"][0]
+                proc["ip"] = ""
+                proc["port"] = -1
+                initial_processes.append(proc)
+            except Exception:
+                pass
     return initial_processes
 
 
