@@ -63,7 +63,7 @@
   # increasing it decreases disk writes by grouping connections into larger time windows
   # reducing time precision, decreasing database size, and increasing hash latency
   "Desktop notifications": true, # Try connecting to dbus to show notifications
-  "Every exe (not just conns)": False, # Check every running executable with picosnitch
+  "Every exe (not just conns)": false, # Check every running executable with picosnitch
   # these will be treated as "connections" with a port of -1
   # this feature is experimental but should work fairly well, errors should be expected as
   # picosnitch is unable to open file descriptors for some extremely short-lived processes
