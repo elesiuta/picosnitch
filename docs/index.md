@@ -63,10 +63,15 @@
   # increasing it decreases disk writes by grouping connections into larger time windows
   # reducing time precision, decreasing database size, and increasing hash latency
   "Desktop notifications": true, # Try connecting to dbus to show notifications
+  "Every exe (not just conns)": False, # Check every running executable with picosnitch
+  # these will be treated as "connections" with a port of -1
+  # this feature is experimental but should work fairly well, errors should be expected as
+  # picosnitch is unable to open file descriptors for some extremely short-lived processes
   "Log addresses": true, # Log remote addresses for each connection
   "Log commands": true, # Log command line args for each executable
-  "Log ignore": [], # List of process names (str) or ports (int)
+  "Log ignore": [], # List of hashes (str), domains (str), or ports (int)
   # will omit connections that match any of these from the connection log
+  # domains will match any that start with the provided string, hashes or ports are exact
   # the process name, executable, and hash will still be recorded in record.json
   "Set RLIMIT_NOFILE": null, # Set the maximum number of open file descriptors (int)
   # it is used for caching process executables and hashes (typical system default is 1024)
