@@ -352,11 +352,11 @@ def read_snitch() -> dict:
     assert all(type(data[key]) == type(template[key]) for key in template), "Invalid json files"
     assert all(key == "Set RLIMIT_NOFILE" or type(data["Config"][key]) == type(template["Config"][key]) for key in template["Config"]), "Invalid config"
     if write_config:
-        write_snitch(data, True)
+        write_snitch(data, write_config=True)
     return data
 
 
-def write_snitch(snitch: dict, write_config: bool = False) -> None:
+def write_snitch(snitch: dict, write_config: bool = False, write_record: bool = True) -> None:
     """write the snitch dictionary to config.json, record.json, exe.log, and error.log"""
     config_path = os.path.join(BASE_PATH, "config.json")
     record_path = os.path.join(BASE_PATH, "record.json")
@@ -378,8 +378,9 @@ def write_snitch(snitch: dict, write_config: bool = False) -> None:
             with open(exe_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
                 text_file.write("\n".join(snitch["Exe Log"]) + "\n")
         del snitch["Exe Log"]
-        with open(record_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
-            json.dump(snitch, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
+        if write_record:
+            with open(record_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
+                json.dump(snitch, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
     except Exception:
         NotificationManager().toast("picosnitch write error", file=sys.stderr)
     snitch["Config"] = snitch_config
@@ -604,8 +605,9 @@ def updater_subprocess(snitch, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
     os.nice(-20)
     # init variables for loop
     parent_process = multiprocessing.parent_process()
-    sizeof_snitch = sys.getsizeof(pickle.dumps(snitch))
+    snitch_record = pickle.dumps([snitch["Executables"], snitch["Names"], snitch["SHA256"]])
     last_write = 0
+    write_record = False
     processes_to_send = []
     # init notifications
     if snitch["Config"]["Desktop notifications"]:
@@ -688,12 +690,14 @@ def updater_subprocess(snitch, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
                         snitch["Exe Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"] + " (suspicious)")
                         NotificationManager().toast("Suspicious VT results for " + msg["name"])
             # write the snitch dictionary to record.json, error.log, and exe.log (limit writes to reduce disk wear)
-            if time.time() - last_write > 30 or ((snitch["Error Log"] or snitch["Exe Log"]) and time.time() - last_write > 5):
-                new_size = sys.getsizeof(pickle.dumps(snitch))
-                if snitch["Error Log"] or snitch["Exe Log"] or new_size != sizeof_snitch or time.time() - last_write > 600:
-                    sizeof_snitch = new_size
-                    last_write = time.time()
-                    write_snitch(snitch)
+            if snitch["Error Log"] or snitch["Exe Log"] or time.time() - last_write > 30:
+                new_record = pickle.dumps([snitch["Executables"], snitch["Names"], snitch["SHA256"]])
+                if new_record != snitch_record:
+                    snitch_record = new_record
+                    write_record = True
+                write_snitch(snitch, write_record=write_record)
+                last_write = time.time()
+                write_record = False
         except Exception as e:
             q_error.put("Updater %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
