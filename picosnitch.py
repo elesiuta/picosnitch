@@ -1446,6 +1446,8 @@ def start_picosnitch():
                 with open("/run/picosnitch.pid", "w") as f:
                     f.write(str(os.getpid()) + "\n")
                 print("starting picosnitch in simple mode")
+                print(f"using config and log files from: {BASE_PATH}")
+                print(f"using DBUS_SESSION_BUS_ADDRESS: {os.getenv('DBUS_SESSION_BUS_ADDRESS')}")
                 sys.exit(main())
             elif sys.argv[1] == "view":
                 return ui_init()
