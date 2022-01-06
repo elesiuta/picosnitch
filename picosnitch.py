@@ -1032,10 +1032,7 @@ def picosnitch_master_process(snitch: dict):
     # attempt to restart picosnitch (terminate by running `picosnitch stop`)
     time.sleep(5)
     _ = [p.terminate() for p in subprocesses]
-    if importlib.util.find_spec("picosnitch"):
-        args = [sys.executable, "-m", "picosnitch", "restart"]
-    else:
-        args = [sys.executable, sys.argv[0], "restart"]
+    args = [sys.executable, os.path.abspath(__file__), "restart"]
     subprocess.Popen(args)
     return 0
 
@@ -1358,7 +1355,7 @@ def start_picosnitch():
     Public License for details.
 
     website: https://elesiuta.github.io/picosnitch
-    version: {VERSION} ({__file__})
+    version: {VERSION} ({os.path.abspath(__file__)})
     config and log files: {BASE_PATH}
 
     usage:
@@ -1385,7 +1382,7 @@ def start_picosnitch():
     Restart=always
     RestartSec=5
     Environment="SUDO_UID={os.getenv("SUDO_UID")}" "SUDO_USER={os.getenv("SUDO_USER")}" "DBUS_SESSION_BUS_ADDRESS={os.getenv("DBUS_SESSION_BUS_ADDRESS")}" "PYTHON_USER_SITE={site.USER_SITE}"
-    ExecStart={sys.executable} "{__file__}" start-no-daemon
+    ExecStart={sys.executable} "{os.path.abspath(__file__)}" start-no-daemon
     PIDFile=/run/picosnitch.pid
 
     [Install]
@@ -1397,10 +1394,7 @@ def start_picosnitch():
                 print(readme)
                 return 0
             if os.getuid() != 0:
-                if importlib.util.find_spec("picosnitch"):
-                    args = ["sudo", "-E", sys.executable, "-m", "picosnitch", sys.argv[1]]
-                else:
-                    args = ["sudo", "-E", sys.executable] + sys.argv
+                args = ["sudo", "-E", sys.executable, os.path.abspath(__file__), sys.argv[1]]
                 os.execvp("sudo", args)
             with open("/proc/self/status", "r") as f:
                 proc_status = f.read()
@@ -1452,7 +1446,7 @@ def start_picosnitch():
             elif sys.argv[1] == "view":
                 return ui_init()
             elif sys.argv[1] == "version":
-                print(f"version: {VERSION} ({__file__})\nconfig and log files: {BASE_PATH}")
+                print(f"version: {VERSION} ({os.path.abspath(__file__)})\nconfig and log files: {BASE_PATH}")
                 return 0
             else:
                 print(readme)
