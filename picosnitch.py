@@ -505,16 +505,15 @@ def initial_poll(snitch: dict) -> list:
             else:
                 error += "{process no longer exists}"
             snitch["Error Log"].append(datetime_now + " " + error)
-    if snitch["Config"]["Every exe (not just conns)"]:
-        for pid in psutil.pids():
-            try:
-                proc = psutil.Process(pid).as_dict(attrs=["name", "exe", "pid", "uids"], ad_value="")
-                proc["uid"] = proc["uids"][0]
-                proc["ip"] = ""
-                proc["port"] = -1
-                initial_processes.append(proc)
-            except Exception:
-                pass
+    for pid in psutil.pids():
+        try:
+            proc = psutil.Process(pid).as_dict(attrs=["name", "exe", "pid", "uids"], ad_value="")
+            proc["uid"] = proc["uids"][0]
+            proc["ip"] = ""
+            proc["port"] = -1
+            initial_processes.append(proc)
+        except Exception:
+            pass
     return initial_processes
 
 
@@ -825,7 +824,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
                 libc.fanotify_mark(fan_fd, _FAN_MARK_ADD, _FAN_MODIFY, fd, None)
                 fd_path = f"/proc/{self_pid}/fd/{fd}"
                 if (st_dev, st_ino) != get_fstat(fd):
-                    q_error.put(f"FD Inode Error for (fd: {fd} dev: {st_dev} ino: {st_ino}) this may trigger !!! FD_CACHE Overflow Error")
+                    q_error.put(f"FD Inode Error for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino}) this may trigger !!! FD_CACHE Overflow Error")
             except Exception:
                 fd, fd_path = 0, ""
             try:
@@ -855,13 +854,13 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     for proc in initial_processes:
         st_dev, st_ino = get_stat(f"/proc/{proc['pid']}/exe")
         fd, exe, cmd = get_fd(st_dev, st_ino, proc['pid'])
-        snitch_pipe.send_bytes(pickle.dumps({"pid": proc["pid"], "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": proc["port"], "ip": proc["ip"]}))
+        if config["Every exe (not just conns)"] or proc["port"] != -1:
+            snitch_pipe.send_bytes(pickle.dumps({"pid": proc["pid"], "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": proc["port"], "ip": proc["ip"]}))
     del initial_processes
     # run bpf program
     b = BPF(text=bpf_text)
     b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
-    if config["Every exe (not just conns)"]:
-        b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
+    b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
     def queue_lost(*args):
         # if you see this, try increasing PAGE_CNT
         q_error.put("BPF callbacks not processing fast enough, may have lost data")
@@ -882,15 +881,14 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
-        if event.retval == 0:
-            st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
-            fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
+        st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
+        fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
+        if config["Every exe (not just conns)"]:
             snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": -1, "ip": ""}))
     b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
-    if config["Every exe (not just conns)"]:
-        b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+    b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     while True:
         if not parent_process.is_alive() or not q_in.empty():
             return 0
@@ -1517,7 +1515,6 @@ struct exec_event_t {
     u32 pid;
     u32 uid;
     char comm[TASK_COMM_LEN];
-    int retval;
 } __attribute__((packed));
 BPF_PERF_OUTPUT(exec_events);
 
@@ -1581,8 +1578,9 @@ int exec_entry(struct pt_regs *ctx) {
     data.pid = bpf_get_current_pid_tgid() >> 32;
     data.uid = bpf_get_current_uid_gid() & 0xffffffff;
     bpf_get_current_comm(&data.comm, sizeof(data.comm));
-    data.retval = PT_REGS_RC(ctx);
-    exec_events.perf_submit(ctx, &data, sizeof(data));
+    if (PT_REGS_RC(ctx) == 0) {
+        exec_events.perf_submit(ctx, &data, sizeof(data));
+    }
     return 0;
 }
 """
