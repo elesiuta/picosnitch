@@ -10,13 +10,18 @@
 
 # [picosnitch](https://elesiuta.github.io/picosnitch/)
 - An extremely simple, reliable, and lightweight program for linux to help protect your privacy
-  - It monitors your system and notifies you whenever it sees a new program that connects to the network
-  - Or when the sha256 changes for one of those programs (can also check [VirusTotal](https://www.virustotal.com))
-  - And features a curses based UI for browsing past connections
-- For advanced users who know what should be running on their system and when they should be making network connections
-  - Only you can decide which programs to trust, so picosnitch leaves this decision up to you and just focusses on doing one thing well
-  - A program you can't trust to make network connections also can't be trusted not to negate any firewall rules, so blocking or sandboxing these programs is out of scope for picosnitch (also beware of programs running as root that may try to stop/modify picosnitch)
-  - However, you can still watch picosnitch logs with another program to block connections once detected, picosnitch can be used with any other firewall tool and does not impact performance since it only monitors connections and does not intercept them
+- It monitors your system and notifies you whenever it sees a new program that connects to the network
+- Or when the sha256 changes for one of those programs (can also check [VirusTotal](https://www.virustotal.com))
+  - by hashing executables, picosnitch can provide more reliable intrusion detection since different executables can appear to be located on the same path
+  - for example, it can successfully identify whether curl being run from inside a docker container is the same or different from curl being run on your system, even if they both appear to be located at /usr/bin/curl (or if another program is masquerading as curl)
+  - to improve performance, hashes are cached based on the device and inode of the executable, and watched with fanotify to trigger a rehash if the executable is modified
+- Featuring a curses based UI for browsing past connections
+- For advanced users who know what should be running on their system, and when they should be making network connections
+  - only you can decide which programs to trust, and what actions to take for offending programs
+  - picosnitch is purely a monitoring and detection tool, focussing on doing one thing well, so blocking or sandboxing programs is out of scope
+  - running untrustworthy programs should only be done in an isolated environment and you should always have good backups in order to recover, picosnitch can only help you detect if your system becomes compromised or if something breaks your trust
+  - you may want to watch picosnitch logs with another program to automatically take actions such as blocking connections, terminating the offending program, and emailing the log if this is a server
+  - picosnitch can be used with any other firewall tool and does not impact performance since it only monitors connections and does not intercept them
 - Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
 
 # [installation](#installation)
