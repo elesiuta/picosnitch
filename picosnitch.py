@@ -434,14 +434,6 @@ def get_sha256_pid(pid: int, st_dev: int, st_ino: int) -> str:
         return "!!! Hash PID Read Error"
 
 
-def get_stat(path: str, follow_symlinks: bool = True) -> typing.Tuple[int, int]:
-    try:
-        stat = os.stat(path, follow_symlinks=follow_symlinks)
-        return stat.st_dev, stat.st_ino
-    except Exception:
-        return 0, 0
-
-
 def get_fstat(fd: int) -> typing.Tuple[int, int]:
     try:
         stat = os.fstat(fd)
@@ -809,10 +801,12 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     for x in range(FD_CACHE):
         fd_dict[f"tmp{x}"] = (0,)
     self_pid = os.getpid()
-    def get_fd(st_dev: int, st_ino: int, pid: int, ppid: int) -> typing.Tuple[int, int, int, str, str, str]:
-        if st_ino:
+    def get_fd(pid: int, ppid: int) -> typing.Tuple[int, int, int, str, str, str]:
+        try:
+            stat = os.stat(f"/proc/{pid}/exe")
+            st_dev, st_ino = stat.st_dev, stat.st_ino
             pid_dict[pid] = (st_dev, st_ino)
-        else:
+        except Exception:
             st_dev, st_ino = pid_dict[pid]
             if not st_ino:
                 st_dev, st_ino = pid_dict[ppid]
@@ -863,8 +857,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     except Exception:
         initial_processes = []
     for proc in initial_processes:
-        st_dev, st_ino = get_stat(f"/proc/{proc['pid']}/exe")
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(st_dev, st_ino, proc['pid'], proc['ppid'])
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(proc['pid'], proc['ppid'])
         if config["Every exe (not just conns)"] or proc["port"] != -1:
             snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": proc["port"], "ip": proc["ip"]}))
     del initial_processes
@@ -877,23 +870,19 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         q_error.put("BPF callbacks not processing fast enough, may have lost data")
     def queue_ipv4_event(cpu, data, size):
         event = b["ipv4_events"].event(data)
-        st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(st_dev, st_ino, event.pid, event.ppid)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.pid, event.ppid)
         snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
     def queue_ipv6_event(cpu, data, size):
         event = b["ipv6_events"].event(data)
-        st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(st_dev, st_ino, event.pid, event.ppid)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.pid, event.ppid)
         snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
     def queue_other_event(cpu, data, size):
         event = b["other_socket_events"].event(data)
-        st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(st_dev, st_ino, event.pid, event.ppid)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.pid, event.ppid)
         snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
-        st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(st_dev, st_ino, event.pid, event.ppid)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.pid, event.ppid)
         if config["Every exe (not just conns)"]:
             snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": -1, "ip": ""}))
     b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
