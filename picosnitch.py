@@ -492,7 +492,7 @@ def initial_poll(snitch: dict) -> list:
     for conn in current_connections:
         try:
             if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
-                proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "pid", "uids"], ad_value="")
+                proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "pid", "ppid", "uids"], ad_value="")
                 proc["uid"] = proc["uids"][0]
                 proc["ip"] = conn.raddr.ip
                 proc["port"] = conn.raddr.port
@@ -507,7 +507,7 @@ def initial_poll(snitch: dict) -> list:
             snitch["Error Log"].append(datetime_now + " " + error)
     for pid in psutil.pids():
         try:
-            proc = psutil.Process(pid).as_dict(attrs=["name", "exe", "pid", "uids"], ad_value="")
+            proc = psutil.Process(pid).as_dict(attrs=["name", "exe", "pid", "ppid", "uids"], ad_value="")
             proc["uid"] = proc["uids"][0]
             proc["ip"] = ""
             proc["port"] = -1
@@ -804,18 +804,22 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     _FAN_MARK_FLUSH = 0x80
     _FAN_MODIFY = 0x2
     libc.fanotify_mark(fan_fd, _FAN_MARK_FLUSH, _FAN_MODIFY, -1, None)
-    pid_dict = {}
+    pid_dict = collections.defaultdict(lambda: (0, 0))
     fd_dict = collections.OrderedDict()
     for x in range(FD_CACHE):
         fd_dict[f"tmp{x}"] = (0,)
     self_pid = os.getpid()
-    def get_fd(st_dev: int, st_ino: int, pid: int) -> typing.Tuple[int, int, str, str, str]:
-        if st_dev or st_ino:
-            sig = f"{st_dev} {st_ino}"
+    def get_fd(st_dev: int, st_ino: int, pid: int, ppid: int) -> typing.Tuple[int, int, int, str, str, str]:
+        if st_ino:
             pid_dict[pid] = (st_dev, st_ino)
         else:
-            st_dev, st_ino = pid_dict.pop(pid, (0, 0))
-            sig = f"{st_dev} {st_ino}"
+            st_dev, st_ino = pid_dict[pid]
+            if not st_ino:
+                st_dev, st_ino = pid_dict[ppid]
+                if st_ino:
+                    pid = ppid
+                    ppid = -1
+        sig = f"{st_dev} {st_ino}"
         try:
             fd_dict.move_to_end(sig)
             fd, fd_path, exe, cmd = fd_dict[sig]
@@ -823,7 +827,9 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
                 fd_dict[f"tmp{sig}"] = (0,)
                 fd_dict.move_to_end(f"tmp{sig}", last=False)
                 raise Exception("previous attempt failed, probably due to process terminating too quickly, try again")
-            return (st_dev, st_ino, fd_path, exe, cmd)
+            if ppid == -1:
+                exe += " (child)"
+            return (st_dev, st_ino, pid, fd_path, exe, cmd)
         except Exception:
             try:
                 fd = os.open(f"/proc/{pid}/exe", os.O_RDONLY)
@@ -849,7 +855,9 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
                     os.close(fd_old)
             except Exception:
                 pass
-            return (st_dev, st_ino, fd_path, exe, cmd)
+            if ppid == -1:
+                exe += " (child)"
+            return (st_dev, st_ino, pid, fd_path, exe, cmd)
     # process initial connections
     try:
         with open(os.path.join(BASE_PATH, "init.pickle~"), "rb") as f:
@@ -859,9 +867,9 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         initial_processes = []
     for proc in initial_processes:
         st_dev, st_ino = get_stat(f"/proc/{proc['pid']}/exe")
-        st_dev, st_ino, fd, exe, cmd = get_fd(st_dev, st_ino, proc['pid'])
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(st_dev, st_ino, proc['pid'], proc['ppid'])
         if config["Every exe (not just conns)"] or proc["port"] != -1:
-            snitch_pipe.send_bytes(pickle.dumps({"pid": proc["pid"], "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": proc["port"], "ip": proc["ip"]}))
+            snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": proc["port"], "ip": proc["ip"]}))
     del initial_processes
     # run bpf program
     b = BPF(text=bpf_text)
@@ -873,24 +881,24 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     def queue_ipv4_event(cpu, data, size):
         event = b["ipv4_events"].event(data)
         st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
-        st_dev, st_ino, fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(st_dev, st_ino, event.pid, event.ppid)
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
     def queue_ipv6_event(cpu, data, size):
         event = b["ipv6_events"].event(data)
         st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
-        st_dev, st_ino, fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(st_dev, st_ino, event.pid, event.ppid)
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
     def queue_other_event(cpu, data, size):
         event = b["other_socket_events"].event(data)
         st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
-        st_dev, st_ino, fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(st_dev, st_ino, event.pid, event.ppid)
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.task.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
         st_dev, st_ino = get_stat(f"/proc/{event.pid}/exe")
-        st_dev, st_ino, fd, exe, cmd = get_fd(st_dev, st_ino, event.pid)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(st_dev, st_ino, event.pid, event.ppid)
         if config["Every exe (not just conns)"]:
-            snitch_pipe.send_bytes(pickle.dumps({"pid": event.pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": -1, "ip": ""}))
+            snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": -1, "ip": ""}))
     b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
@@ -1491,6 +1499,7 @@ bpf_text = """
 
 struct ipv4_event_t {
     u32 pid;
+    u32 ppid;
     u32 uid;
     u32 af;
     char task[TASK_COMM_LEN];
@@ -1501,6 +1510,7 @@ BPF_PERF_OUTPUT(ipv4_events);
 
 struct ipv6_event_t {
     u32 pid;
+    u32 ppid;
     u32 uid;
     u32 af;
     char task[TASK_COMM_LEN];
@@ -1511,6 +1521,7 @@ BPF_PERF_OUTPUT(ipv6_events);
 
 struct other_socket_event_t {
     u32 pid;
+    u32 ppid;
     u32 uid;
     u32 af;
     char task[TASK_COMM_LEN];
@@ -1519,6 +1530,7 @@ BPF_PERF_OUTPUT(other_socket_events);
 
 struct exec_event_t {
     u32 pid;
+    u32 ppid;
     u32 uid;
     char comm[TASK_COMM_LEN];
 } __attribute__((packed));
@@ -1530,6 +1542,8 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
 
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     u32 uid = bpf_get_current_uid_gid();
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    u32 ppid = task->real_parent->tgid;
 
     struct sock *skp = sock->sk;
 
@@ -1537,7 +1551,7 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
 
     u32 address_family = address->sa_family;
     if (address_family == AF_INET) {
-        struct ipv4_event_t data4 = {.pid = pid, .uid = uid, .af = address_family};
+        struct ipv4_event_t data4 = {.pid = pid, .ppid = ppid, .uid = uid, .af = address_family};
 
         struct sockaddr_in *daddr = (struct sockaddr_in *)address;
 
@@ -1554,7 +1568,7 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
         }
     }
     else if (address_family == AF_INET6) {
-        struct ipv6_event_t data6 = {.pid = pid, .uid = uid, .af = address_family};
+        struct ipv6_event_t data6 = {.pid = pid, .ppid = ppid, .uid = uid, .af = address_family};
 
         struct sockaddr_in6 *daddr6 = (struct sockaddr_in6 *)address;
 
@@ -1571,7 +1585,7 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
         }
     }
     else if (address_family != AF_UNIX && address_family != AF_UNSPEC) { // other sockets, except UNIX and UNSPEC sockets
-        struct other_socket_event_t socket_event = {.pid = pid, .uid = uid, .af = address_family};
+        struct other_socket_event_t socket_event = {.pid = pid, .ppid = ppid, .uid = uid, .af = address_family};
         bpf_get_current_comm(&socket_event.task, sizeof(socket_event.task));
         other_socket_events.perf_submit(ctx, &socket_event, sizeof(socket_event));
     }
@@ -1580,11 +1594,13 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
 }
 
 int exec_entry(struct pt_regs *ctx) {
-    struct exec_event_t data = {};
-    data.pid = bpf_get_current_pid_tgid() >> 32;
-    data.uid = bpf_get_current_uid_gid() & 0xffffffff;
-    bpf_get_current_comm(&data.comm, sizeof(data.comm));
     if (PT_REGS_RC(ctx) == 0) {
+        struct exec_event_t data = {};
+        data.pid = bpf_get_current_pid_tgid() >> 32;
+        data.uid = bpf_get_current_uid_gid();
+        struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+        data.ppid = task->real_parent->tgid;
+        bpf_get_current_comm(&data.comm, sizeof(data.comm));
         exec_events.perf_submit(ctx, &data, sizeof(data));
     }
     return 0;
