@@ -478,25 +478,7 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiproces
 
 def initial_poll(snitch: dict) -> list:
     """poll initial processes and connections using psutil and queue for updater_subprocess"""
-    datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     initial_processes = []
-    current_connections = set(psutil.net_connections(kind="all"))
-    for conn in current_connections:
-        try:
-            if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
-                proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "pid", "ppid", "uids"], ad_value="")
-                proc["uid"] = proc["uids"][0]
-                proc["ip"] = conn.raddr.ip
-                proc["port"] = conn.raddr.port
-                initial_processes.append(proc)
-        except Exception as e:
-            # too late to grab process info (most likely) or some other error
-            error = "Init " + type(e).__name__ + str(e.args) + str(conn)
-            if conn.pid == proc["pid"]:
-                error += str(proc)
-            else:
-                error += "{process no longer exists}"
-            snitch["Error Log"].append(datetime_now + " " + error)
     for pid in psutil.pids():
         try:
             proc = psutil.Process(pid).as_dict(attrs=["name", "exe", "pid", "ppid", "uids"], ad_value="")
@@ -504,6 +486,16 @@ def initial_poll(snitch: dict) -> list:
             proc["ip"] = ""
             proc["port"] = -1
             initial_processes.append(proc)
+        except Exception:
+            pass
+    for conn in psutil.net_connections(kind="all"):
+        try:
+            if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
+                proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "pid", "ppid", "uids"], ad_value="")
+                proc["uid"] = proc["uids"][0]
+                proc["ip"] = conn.raddr.ip
+                proc["port"] = conn.raddr.port
+                initial_processes.append(proc)
         except Exception:
             pass
     return initial_processes
