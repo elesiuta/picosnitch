@@ -409,14 +409,14 @@ def get_sha256_fd(path: str, st_dev: int, st_ino: int, _mod_cnt: int) -> str:
         sha256 = hashlib.sha256()
         with open(path, "rb") as f:
             if not st_dev or not st_ino:
-                return "!!! FD Stat Error"
+                return "!!! FD Stat Error"  # process probably too short lived to open fd or stat in time
             if (st_dev, st_ino) != get_fstat(f.fileno()):
-                return "!!! FD_CACHE Overflow Error"
+                return "!!! FD_CACHE Overflow Error"  # too many executables on system, see Set RLIMIT_NOFILE
             while data := f.read(1048576):
                 sha256.update(data)
         return sha256.hexdigest()
     except Exception:
-        return "!!! Hash FD Read Error"
+        return "!!! Hash FD Read Error"  # process probably too short lived to open fd or stat in time
 
 
 @functools.lru_cache(maxsize=PID_CACHE)
@@ -514,7 +514,7 @@ def sql_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing
         sha_fd_error = ""
         sha256 = get_sha256_fd(proc["fd"], proc["dev"], proc["ino"], fan_mod_cnt["%d %d" % (proc["dev"], proc["ino"])])
         if sha256.startswith("!"):
-            # fallback on trying to read directly (if still alive) if fd_cache fails
+            # fallback on trying to read directly (if still alive) if fd_cache fails (probably only has a chance if overflow)
             sha_fd_error = sha256
             sha256 = get_sha256_pid(proc["pid"], proc["dev"], proc["ino"])
             if sha256.startswith("!"):
@@ -793,7 +793,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     for x in range(FD_CACHE):
         fd_dict[f"tmp{x}"] = (0,)
     self_pid = os.getpid()
-    def get_fd(pid: int, ppid: int) -> typing.Tuple[int, int, int, str, str, str]:
+    def get_fd(pid: int, ppid: int, port: int) -> typing.Tuple[int, int, int, str, str, str]:
         try:
             stat = os.stat(f"/proc/{pid}/exe")
             st_dev, st_ino = stat.st_dev, stat.st_ino
@@ -818,8 +818,6 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
                 fd = os.open(f"/proc/{pid}/exe", os.O_RDONLY)
                 libc.fanotify_mark(fan_fd, _FAN_MARK_ADD, _FAN_MODIFY, fd, None)
                 fd_path = f"/proc/{self_pid}/fd/{fd}"
-                if (st_dev, st_ino) != get_fstat(fd):
-                    q_error.put(f"FD Inode Error for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino}) this may trigger !!! FD_CACHE Overflow Error")
             except Exception:
                 fd, fd_path = 0, ""
             try:
@@ -831,6 +829,11 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
                     cmd = f.read()
             except Exception:
                 cmd = ""
+            if fd and (st_dev, st_ino) != get_fstat(fd):
+                q_error.put(f"Exe inode changed for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino}) before FD could be opened, using port: {port}")
+                st_dev, st_ino = get_fstat(fd)
+                sig = f"{st_dev} {st_ino}"
+                q_error.put(f"New inode for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino} exe: {exe})")
             fd_dict[sig] = (fd, fd_path, exe, cmd)
             try:
                 if fd_old := fd_dict.popitem(last=False)[1][0]:
@@ -843,7 +846,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         return (st_dev, st_ino, pid, fd_path, exe, cmd)
     # get current connections
     for proc in monitor_subprocess_initial_poll():
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(proc['pid'], proc['ppid'])
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(proc['pid'], proc['ppid'], proc["port"])
         if config["Every exe (not just conns)"] or proc["port"] != -1:
             snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": proc["port"], "ip": proc["ip"]}))
     # run bpf program
@@ -856,19 +859,19 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         q_error.put("BPF callbacks not processing fast enough, may have lost data")
     def queue_ipv4_event(cpu, data, size):
         event = b["ipv4_events"].event(data)
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.pid, event.ppid)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.pid, event.ppid, event.dport)
         snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
     def queue_ipv6_event(cpu, data, size):
         event = b["ipv6_events"].event(data)
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.pid, event.ppid)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.pid, event.ppid, event.dport)
         snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
     def queue_other_event(cpu, data, size):
         event = b["other_socket_events"].event(data)
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.pid, event.ppid)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.pid, event.ppid, 0)
         snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.pid, event.ppid)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.pid, event.ppid, -1)
         if config["Every exe (not just conns)"]:
             snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": -1, "ip": ""}))
     def queue_clone_event(cpu, data, size):
