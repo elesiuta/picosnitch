@@ -832,6 +832,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
             if fd and (st_dev, st_ino) != get_fstat(fd):
                 q_error.put(f"Exe inode changed for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino}) before FD could be opened, using port: {port}")
                 st_dev, st_ino = get_fstat(fd)
+                pid_dict[pid] = (st_dev, st_ino)
                 sig = f"{st_dev} {st_ino}"
                 q_error.put(f"New inode for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino} exe: {exe})")
             fd_dict[sig] = (fd, fd_path, exe, cmd)
