@@ -409,14 +409,14 @@ def get_sha256_fd(path: str, st_dev: int, st_ino: int, _mod_cnt: int) -> str:
         sha256 = hashlib.sha256()
         with open(path, "rb") as f:
             if not st_dev or not st_ino:
-                return "!!! FD Stat Error"  # process probably too short lived to open fd or stat in time
+                return "!!! FD Stat Error"
             if (st_dev, st_ino) != get_fstat(f.fileno()):
-                return "!!! FD_CACHE Overflow Error"  # too many executables on system, see Set RLIMIT_NOFILE
+                return "!!! FD Cache Error"
             while data := f.read(1048576):
                 sha256.update(data)
         return sha256.hexdigest()
     except Exception:
-        return "!!! Hash FD Read Error"  # process probably too short lived to open fd or stat in time
+        return "!!! FD Read Error"
 
 
 @functools.lru_cache(maxsize=PID_CACHE)
@@ -431,10 +431,11 @@ def get_sha256_pid(pid: int, st_dev: int, st_ino: int) -> str:
                 sha256.update(data)
         return sha256.hexdigest()
     except Exception:
-        return "!!! Hash PID Read Error"
+        return "!!! PID Read Error"
 
 
 def get_fstat(fd: int) -> typing.Tuple[int, int]:
+    """get (st_dev, st_ino) or (0, 0) if fails"""
     try:
         stat = os.fstat(fd)
         return stat.st_dev, stat.st_ino
@@ -443,6 +444,7 @@ def get_fstat(fd: int) -> typing.Tuple[int, int]:
 
 
 def get_fanotify_events(fan_fd: int, fan_mod_cnt: dict, q_error: multiprocessing.Queue) -> None:
+    """check if any watched executables were modified and increase count to trigger rehash"""
     sizeof_event = ctypes.sizeof(FanotifyEventMetadata)
     bytes_avail = ctypes.c_int()
     fcntl.ioctl(fan_fd, termios.FIONREAD, bytes_avail)
@@ -514,7 +516,10 @@ def sql_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing
         sha_fd_error = ""
         sha256 = get_sha256_fd(proc["fd"], proc["dev"], proc["ino"], fan_mod_cnt["%d %d" % (proc["dev"], proc["ino"])])
         if sha256.startswith("!"):
-            # fallback on trying to read directly (if still alive) if fd_cache fails (probably only has a chance if overflow)
+            # fallback on trying to read directly (if still alive) if fd_cache fails, probable causes include:
+            # system suspends in the middle of hashing (since cache is reset)
+            # process too short lived to open fd or stat in time (then fallback will fail too)
+            # too many executables on system (see Set RLIMIT_NOFILE)
             sha_fd_error = sha256
             sha256 = get_sha256_pid(proc["pid"], proc["dev"], proc["ino"])
             if sha256.startswith("!"):
