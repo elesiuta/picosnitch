@@ -850,6 +850,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     b = BPF(text=bpf_text)
     b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
     b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
+    b.attach_kretprobe(event=b.get_syscall_fnname("clone"), fn_name="clone_entry")
     def queue_lost(*args):
         # if you see this, try increasing PAGE_CNT
         q_error.put("BPF callbacks not processing fast enough, may have lost data")
@@ -870,10 +871,18 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.pid, event.ppid)
         if config["Every exe (not just conns)"]:
             snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": -1, "ip": ""}))
+    def queue_clone_event(cpu, data, size):
+        event = b["clone_events"].event(data)
+        try:
+            stat = os.stat(f"/proc/{event.pid}/exe")
+            pid_dict[pid] = (stat.st_dev, stat.st_ino)
+        except Exception:
+            pid_dict[pid] = (0, 0)
     b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+    b["clone_events"].open_perf_buffer(queue_clone_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     while True:
         if not parent_process.is_alive() or not q_in.empty():
             return 0
@@ -1500,6 +1509,11 @@ struct exec_event_t {
 } __attribute__((packed));
 BPF_PERF_OUTPUT(exec_events);
 
+struct clone_event_t {
+    u32 pid;
+} __attribute__((packed));
+BPF_PERF_OUTPUT(clone_events);
+
 int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, struct sockaddr *address, int addrlen)
 {
     u32 pid = bpf_get_current_pid_tgid() >> 32;
@@ -1548,6 +1562,15 @@ int exec_entry(struct pt_regs *ctx) {
         data.ppid = task->real_parent->tgid;
         bpf_get_current_comm(&data.comm, sizeof(data.comm));
         exec_events.perf_submit(ctx, &data, sizeof(data));
+    }
+    return 0;
+}
+
+int clone_entry(struct pt_regs *ctx) {
+    if (PT_REGS_RC(ctx) == 0) {
+        struct clone_event_t data = {};
+        data.pid = bpf_get_current_pid_tgid() >> 32;
+        clone_events.perf_submit(ctx, &data, sizeof(data));
     }
     return 0;
 }
