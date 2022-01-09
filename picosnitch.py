@@ -476,8 +476,8 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiproces
             q_out.put(pickle.dumps({"type": "vt_result", "name": proc["name"], "exe": proc["exe"], "sha256": sha256, "result": result, "suspicious": suspicious}))
 
 
-def initial_poll(snitch: dict) -> list:
-    """poll initial processes and connections using psutil and queue for updater_subprocess"""
+def monitor_subprocess_initial_poll() -> list:
+    """poll initial processes and connections using psutil"""
     initial_processes = []
     for pid in psutil.pids():
         try:
@@ -841,18 +841,11 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         if ppid == -1:
             exe += " (child)"
         return (st_dev, st_ino, pid, fd_path, exe, cmd)
-    # process initial connections
-    try:
-        with open(os.path.join(BASE_PATH, "init.pickle~"), "rb") as f:
-            initial_processes = pickle.load(f)
-        os.remove(os.path.join(BASE_PATH, "init.pickle~"))
-    except Exception:
-        initial_processes = []
-    for proc in initial_processes:
+    # get current connections
+    for proc in monitor_subprocess_initial_poll():
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(proc['pid'], proc['ppid'])
         if config["Every exe (not just conns)"] or proc["port"] != -1:
             snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": proc["port"], "ip": proc["ip"]}))
-    del initial_processes
     # run bpf program
     b = BPF(text=bpf_text)
     b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
@@ -1322,10 +1315,6 @@ def main():
     """init picosnitch"""
     # master copy of the snitch dictionary, all subprocesses only receive a static copy of it from this point in time
     snitch = read_snitch()
-    # do initial poll of current network connections
-    initial_processes = initial_poll(snitch)
-    with open(os.path.join(BASE_PATH, "init.pickle~"), "wb") as f:
-        pickle.dump(initial_processes, f)
     # start picosnitch process monitor
     with open("/run/picosnitch.pid", "r") as f:
         assert int(f.read().strip()) == os.getpid()
