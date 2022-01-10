@@ -882,11 +882,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
             snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": -1, "ip": ""}))
     def queue_clone_event(cpu, data, size):
         event = b["clone_events"].event(data)
-        try:
-            stat = os.stat(f"/proc/{event.pid}/exe")
-            pid_dict[pid] = (stat.st_dev, stat.st_ino)
-        except Exception:
-            pid_dict[pid] = (0, 0)
+        _ = get_fd(event.pid, event.ppid, -1)
     b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
@@ -1520,6 +1516,7 @@ BPF_PERF_OUTPUT(exec_events);
 
 struct clone_event_t {
     u32 pid;
+    u32 ppid;
 } __attribute__((packed));
 BPF_PERF_OUTPUT(clone_events);
 
@@ -1579,6 +1576,8 @@ int clone_entry(struct pt_regs *ctx) {
     if (PT_REGS_RC(ctx) == 0) {
         struct clone_event_t data = {};
         data.pid = bpf_get_current_pid_tgid() >> 32;
+        struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+        data.ppid = task->real_parent->tgid;
         clone_events.perf_submit(ctx, &data, sizeof(data));
     }
     return 0;
