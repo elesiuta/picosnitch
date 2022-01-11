@@ -416,7 +416,7 @@ def get_sha256_fd(path: str, st_dev: int, st_ino: int, _mod_cnt: int) -> str:
     try:
         sha256 = hashlib.sha256()
         with open(path, "rb") as f:
-            if not st_dev or not st_ino:
+            if not st_ino:
                 return "!!! FD Stat Error"
             if (st_dev, st_ino) != get_fstat(f.fileno()):
                 return "!!! FD Cache Error"
