@@ -55,10 +55,14 @@ except Exception:
     pass
 import psutil
 
-# set constants and RLIMIT_NOFILE if configured
+# picosnitch version and supported platform
 VERSION: typing.Final[str] = "0.9.0"
+assert sys.version_info >= (3, 8), "Python version >= 3.8 is required"
+assert sys.platform.startswith("linux"), "Did not detect a supported operating system"
+
+# set constants and RLIMIT_NOFILE if configured
 PAGE_CNT: typing.Final[int] = 8
-if sys.platform.startswith("linux") and os.getuid() == 0:
+if os.getuid() == 0:
     if os.getenv("SUDO_UID"):
         home_user = pwd.getpwuid(int(os.getenv("SUDO_UID"))).pw_name
     elif os.getenv("SUDO_USER"):
@@ -1388,76 +1392,72 @@ def start_picosnitch():
     [Install]
     WantedBy=multi-user.target
     """)
-    if sys.platform.startswith("linux"):
-        if len(sys.argv) == 2:
-            if sys.argv[1] == "help":
-                print(readme)
-                return 0
-            if os.getuid() != 0:
-                args = ["sudo", "-E", sys.executable, os.path.abspath(__file__), sys.argv[1]]
-                os.execvp("sudo", args)
-            with open("/proc/self/status", "r") as f:
-                proc_status = f.read()
-                capeff = int(proc_status[proc_status.find("CapEff:")+8:].splitlines()[0].strip(), base=16)
-                cap_sys_admin = 2**21
-                assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
-            assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
-            test_read_snitch = read_snitch()
-            if sys.argv[1] in ["start", "stop", "restart"]:
-                if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
-                    print("Found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl")
-                    if sys.stdin.isatty():
-                        confirm = input(f"Did you intend to run `systemctl {sys.argv[1]} picosnitch` (y/N)? ")
-                        if confirm.lower().startswith("y"):
-                            subprocess.run(["systemctl", sys.argv[1], "picosnitch"])
-                            return 0
-            class PicoDaemon(Daemon):
-                def run(self):
-                    main()
-            daemon = PicoDaemon("/run/picosnitch.pid")
-            if sys.argv[1] == "start":
-                print("starting picosnitch daemon")
-                daemon.start()
-            elif sys.argv[1] == "stop":
-                print("stopping picosnitch daemon")
-                daemon.stop()
-            elif sys.argv[1] == "restart":
-                print("restarting picosnitch daemon")
-                daemon.restart()
-            elif sys.argv[1] == "status":
-                daemon.status()
-            elif sys.argv[1] == "systemd":
-                with open("/usr/lib/systemd/system/picosnitch.service", "w") as f:
-                    f.write(systemd_service)
-                subprocess.run(["systemctl", "daemon-reload"])
-                print("Wrote /usr/lib/systemd/system/picosnitch.service\nYou can now run picosnitch using systemctl")
-                return 0
-            elif sys.argv[1] == "start-no-daemon":
-                assert not os.path.exists("/run/picosnitch.pid")
-                def delpid():
-                    os.remove("/run/picosnitch.pid")
-                atexit.register(delpid)
-                with open("/run/picosnitch.pid", "w") as f:
-                    f.write(str(os.getpid()) + "\n")
-                print("starting picosnitch in simple mode")
-                print(f"using config and log files from: {BASE_PATH}")
-                print(f"using DBUS_SESSION_BUS_ADDRESS: {os.getenv('DBUS_SESSION_BUS_ADDRESS')}")
-                sys.exit(main())
-            elif sys.argv[1] == "view":
-                return ui_init()
-            elif sys.argv[1] == "version":
-                print(f"version: {VERSION} ({os.path.abspath(__file__)})\nconfig and log files: {BASE_PATH}")
-                return 0
-            else:
-                print(readme)
-                return 2
+    if len(sys.argv) == 2:
+        if sys.argv[1] == "help":
+            print(readme)
+            return 0
+        if os.getuid() != 0:
+            args = ["sudo", "-E", sys.executable, os.path.abspath(__file__), sys.argv[1]]
+            os.execvp("sudo", args)
+        with open("/proc/self/status", "r") as f:
+            proc_status = f.read()
+            capeff = int(proc_status[proc_status.find("CapEff:")+8:].splitlines()[0].strip(), base=16)
+            cap_sys_admin = 2**21
+            assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
+        assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
+        test_read_snitch = read_snitch()
+        if sys.argv[1] in ["start", "stop", "restart"]:
+            if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
+                print("Found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl")
+                if sys.stdin.isatty():
+                    confirm = input(f"Did you intend to run `systemctl {sys.argv[1]} picosnitch` (y/N)? ")
+                    if confirm.lower().startswith("y"):
+                        subprocess.run(["systemctl", sys.argv[1], "picosnitch"])
+                        return 0
+        class PicoDaemon(Daemon):
+            def run(self):
+                main()
+        daemon = PicoDaemon("/run/picosnitch.pid")
+        if sys.argv[1] == "start":
+            print("starting picosnitch daemon")
+            daemon.start()
+        elif sys.argv[1] == "stop":
+            print("stopping picosnitch daemon")
+            daemon.stop()
+        elif sys.argv[1] == "restart":
+            print("restarting picosnitch daemon")
+            daemon.restart()
+        elif sys.argv[1] == "status":
+            daemon.status()
+        elif sys.argv[1] == "systemd":
+            with open("/usr/lib/systemd/system/picosnitch.service", "w") as f:
+                f.write(systemd_service)
+            subprocess.run(["systemctl", "daemon-reload"])
+            print("Wrote /usr/lib/systemd/system/picosnitch.service\nYou can now run picosnitch using systemctl")
+            return 0
+        elif sys.argv[1] == "start-no-daemon":
+            assert not os.path.exists("/run/picosnitch.pid")
+            def delpid():
+                os.remove("/run/picosnitch.pid")
+            atexit.register(delpid)
+            with open("/run/picosnitch.pid", "w") as f:
+                f.write(str(os.getpid()) + "\n")
+            print("starting picosnitch in simple mode")
+            print(f"using config and log files from: {BASE_PATH}")
+            print(f"using DBUS_SESSION_BUS_ADDRESS: {os.getenv('DBUS_SESSION_BUS_ADDRESS')}")
+            sys.exit(main())
+        elif sys.argv[1] == "view":
+            return ui_init()
+        elif sys.argv[1] == "version":
+            print(f"version: {VERSION} ({os.path.abspath(__file__)})\nconfig and log files: {BASE_PATH}")
             return 0
         else:
             print(readme)
             return 2
+        return 0
     else:
-        print("Did not detect a supported operating system", file=sys.stderr)
-        return 1
+        print(readme)
+        return 2
 
 
 ### bpf program
