@@ -834,11 +834,13 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
             except Exception:
                 cmd = ""
             if fd and (st_dev, st_ino) != get_fstat(fd):
-                q_error.put(f"Exe inode changed for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino}) before FD could be opened, using port: {port}")
+                if config["Every exe (not just conns)"] or proc["port"] != -1:
+                    q_error.put(f"Exe inode changed for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino}) before FD could be opened, using port: {port}")
                 st_dev, st_ino = get_fstat(fd)
                 pid_dict[pid] = (st_dev, st_ino)
                 sig = f"{st_dev} {st_ino}"
-                q_error.put(f"New inode for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino} exe: {exe})")
+                if config["Every exe (not just conns)"] or proc["port"] != -1:
+                    q_error.put(f"New inode for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino} exe: {exe})")
             fd_dict[sig] = (fd, fd_path, exe, cmd)
             try:
                 if fd_old := fd_dict.popitem(last=False)[1][0]:
