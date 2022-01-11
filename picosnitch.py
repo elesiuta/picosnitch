@@ -94,7 +94,14 @@ except Exception:
     pass
 FD_CACHE: typing.Final[int] = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128
 PID_CACHE: typing.Final[int] = max(8192, 2*FD_CACHE)
-ST_DEV_MASK: typing.Final[int] = 0xffffffff
+st_dev_mask = 0xffffffff
+try:
+    for part in psutil.disk_partitions():
+        if part.fstype == "btrfs":
+            st_dev_mask = 0
+except Exception:
+    pass
+ST_DEV_MASK: typing.Final[int] = st_dev_mask
 
 
 ### classes
