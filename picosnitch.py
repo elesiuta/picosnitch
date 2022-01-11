@@ -94,7 +94,7 @@ except Exception:
     pass
 FD_CACHE: typing.Final[int] = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128
 PID_CACHE: typing.Final[int] = max(8192, 2*FD_CACHE)
-ST_DEV_MASK: typing.Final[int] = 0xffffffffffffffff
+ST_DEV_MASK: typing.Final[int] = 0xffffffff
 
 
 ### classes
@@ -1479,7 +1479,7 @@ struct ipv4_event_t {
     u32 pid;
     u32 ppid;
     u32 uid;
-    u64 dev;
+    u32 dev;
     u64 ino;
     char comm[TASK_COMM_LEN];
     u32 daddr;
@@ -1491,7 +1491,7 @@ struct ipv6_event_t {
     u32 pid;
     u32 ppid;
     u32 uid;
-    u64 dev;
+    u32 dev;
     u64 ino;
     char comm[TASK_COMM_LEN];
     unsigned __int128 daddr;
@@ -1503,7 +1503,7 @@ struct other_socket_event_t {
     u32 pid;
     u32 ppid;
     u32 uid;
-    u64 dev;
+    u32 dev;
     u64 ino;
     char comm[TASK_COMM_LEN];
 } __attribute__((packed));
@@ -1513,7 +1513,7 @@ struct exec_event_t {
     u32 pid;
     u32 ppid;
     u32 uid;
-    u64 dev;
+    u32 dev;
     u64 ino;
     char comm[TASK_COMM_LEN];
 } __attribute__((packed));
@@ -1526,7 +1526,7 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     u32 ppid = task->real_parent->tgid;
     u64 ino = task->mm->exe_file->f_path.dentry->d_inode->i_ino;
-    u64 dev = task->mm->exe_file->f_path.dentry->d_inode->i_sb->s_dev;
+    u32 dev = task->mm->exe_file->f_path.dentry->d_inode->i_sb->s_dev;
     dev = new_encode_dev(dev);
     u32 address_family = address->sa_family;
     if (address_family == AF_INET) { // https://github.com/torvalds/linux/blob/master/include/linux/socket.h
