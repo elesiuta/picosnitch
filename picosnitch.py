@@ -1477,7 +1477,7 @@ struct ipv4_event_t {
     u32 pid;
     u32 ppid;
     u32 uid;
-    u32 dev;
+    u64 dev;
     u64 ino;
     char comm[TASK_COMM_LEN];
     u32 daddr;
@@ -1489,7 +1489,7 @@ struct ipv6_event_t {
     u32 pid;
     u32 ppid;
     u32 uid;
-    u32 dev;
+    u64 dev;
     u64 ino;
     char comm[TASK_COMM_LEN];
     unsigned __int128 daddr;
@@ -1501,7 +1501,7 @@ struct other_socket_event_t {
     u32 pid;
     u32 ppid;
     u32 uid;
-    u32 dev;
+    u64 dev;
     u64 ino;
     char comm[TASK_COMM_LEN];
 } __attribute__((packed));
@@ -1511,7 +1511,7 @@ struct exec_event_t {
     u32 pid;
     u32 ppid;
     u32 uid;
-    u32 dev;
+    u64 dev;
     u64 ino;
     char comm[TASK_COMM_LEN];
 } __attribute__((packed));
@@ -1524,8 +1524,8 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     u32 ppid = task->real_parent->tgid;
     u64 ino = task->mm->exe_file->f_path.dentry->d_inode->i_ino;
-    u32 dev = task->mm->exe_file->f_path.dentry->d_inode->i_sb->s_dev;
-    dev = (dev >> 12 & 0xfff00) | (dev & 0xff);
+    u64 dev = task->mm->exe_file->f_path.dentry->d_inode->i_sb->s_dev;
+    dev = new_encode_dev(dev);
     u32 address_family = address->sa_family;
     if (address_family == AF_INET) { // https://github.com/torvalds/linux/blob/master/include/linux/socket.h
         struct ipv4_event_t data4 = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino};
@@ -1568,7 +1568,7 @@ int exec_entry(struct pt_regs *ctx) {
         data.ppid = task->real_parent->tgid;
         data.ino = task->mm->exe_file->f_path.dentry->d_inode->i_ino;
         data.dev = task->mm->exe_file->f_path.dentry->d_inode->i_sb->s_dev;
-        data.dev = (data.dev >> 12 & 0xfff00) | (data.dev & 0xff);
+        data.dev = new_encode_dev(data.dev);
         bpf_get_current_comm(&data.comm, sizeof(data.comm));
         exec_events.perf_submit(ctx, &data, sizeof(data));
     }
