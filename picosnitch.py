@@ -806,7 +806,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     _FAN_MARK_FLUSH = 0x80
     _FAN_MODIFY = 0x2
     libc.fanotify_mark(fan_fd, _FAN_MARK_FLUSH, _FAN_MODIFY, -1, None)
-    pid_dict = collections.defaultdict(lambda: (0, 0))
+    pid_dict = {}
     fd_dict = collections.OrderedDict()
     for x in range(FD_CACHE):
         fd_dict[f"tmp{x}"] = (0,)
@@ -855,7 +855,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
                 pass
         if ppid == -1:
             exe += " (child)"
-        elif not fd:
+        elif not fd and ppid in pid_dict:
             p_st_dev, p_st_ino = pid_dict[ppid]
             if p_st_ino:
                 ppid_fd = get_fd(p_st_dev, p_st_ino, ppid, -1, port)
