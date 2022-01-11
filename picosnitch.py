@@ -94,6 +94,7 @@ except Exception:
     pass
 FD_CACHE: typing.Final[int] = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128
 PID_CACHE: typing.Final[int] = max(8192, 2*FD_CACHE)
+ST_DEV_MASK: typing.Final[int] = 0xffffffffffffffff
 
 
 ### classes
@@ -438,7 +439,7 @@ def get_fstat(fd: int) -> typing.Tuple[int, int]:
     """get (st_dev, st_ino) or (0, 0) if fails"""
     try:
         stat = os.fstat(fd)
-        return stat.st_dev, stat.st_ino
+        return stat.st_dev & ST_DEV_MASK, stat.st_ino
     except Exception:
         return 0, 0
 
@@ -799,6 +800,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         fd_dict[f"tmp{x}"] = (0,)
     self_pid = os.getpid()
     def get_fd(st_dev: int, st_ino: int, pid: int, ppid: int, port: int) -> typing.Tuple[int, int, int, str, str, str]:
+        st_dev = st_dev & ST_DEV_MASK
         pid_dict[pid] = (st_dev, st_ino)
         sig = f"{st_dev} {st_ino}"
         try:
