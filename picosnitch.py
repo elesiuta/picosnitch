@@ -99,6 +99,7 @@ try:
     for part in psutil.disk_partitions():
         if part.fstype == "btrfs":
             st_dev_mask = 0
+            print("Warning: running picosnitch on systems with btrfs is not fully supported due to dev number strangeness and non-unique inodes", file=sys.stderr)
 except Exception:
     pass
 ST_DEV_MASK: typing.Final[int] = st_dev_mask
