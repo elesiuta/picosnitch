@@ -69,7 +69,7 @@
   # reducing time precision, decreasing database size, and increasing hash latency
   "Desktop notifications": true, # Try connecting to dbus to show notifications
   "Every exe (not just conns)": false, # Check every running executable with picosnitch
-  # these will be treated as "connections" with a port of -1
+  # these are treated as "connections" with a port of -1
   # this feature is experimental but should work fairly well, errors should be expected as
   # picosnitch is unable to open file descriptors for some extremely short-lived processes
   "Log addresses": true, # Log remote addresses for each connection
@@ -103,8 +103,9 @@
   - it contains the following fields, separated by commas (commas, newlines, and null characters are removed from values)
   - `executable,name,cmdline,sha256,time,domain,ip,port,uid,count`
 - the error log is stored in `~/.config/picosnitch/error.log`
-  - errors will also trigger a notification and are usually caused by far too many processes/connections
+  - errors will also trigger a notification and are usually caused by far too many or extremely short-lived processes/connections, or suspending your system while a new executable is being hashed
   - for most people in most cases, this should raise suspicion that some other program may be misbehaving
+  - to improve reliability, picosnitch opens file descriptors to every executable once seen running, and will try deferring to the parent process if the child was too short-lived, logging the connection as coming from "/path/of/parent_exe (child)"
 
 # [building from source](#building-from-source)
 - install dependencies listed under [installation](#installation)
