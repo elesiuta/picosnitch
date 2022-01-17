@@ -34,6 +34,7 @@ import os
 import pickle
 import pwd
 import queue
+import re
 import resource
 import signal
 import site
@@ -56,7 +57,7 @@ except Exception:
 import psutil
 
 # picosnitch version and supported platform
-VERSION: typing.Final[str] = "0.9.1"
+VERSION: typing.Final[str] = "0.10.0"
 assert sys.version_info >= (3, 8), "Python version >= 3.8 is required"
 assert sys.platform.startswith("linux"), "Did not detect a supported operating system"
 
@@ -112,7 +113,7 @@ ST_DEV_MASK: typing.Final[int] = st_dev_mask
 
 ### classes
 class Daemon:
-    """A generic daemon class from http://www.jejik.com/files/examples/daemon3x.py"""
+    """A generic daemon class based on http://www.jejik.com/files/examples/daemon3x.py"""
     def __init__(self, pidfile):
         self.pidfile = pidfile
 
@@ -323,6 +324,7 @@ def read_snitch() -> dict:
     """read data for the snitch dictionary from config.json and record.json or init new files if not found"""
     template = {
         "Config": {
+            "Bandwidth monitor": True,
             "DB retention (days)": 365,
             "DB sql log": True,
             "DB text log": False,
@@ -501,31 +503,34 @@ def monitor_subprocess_initial_poll() -> list:
             proc["uid"] = proc["uids"][0]
             proc["ip"] = ""
             proc["port"] = -1
+            proc["socket"] = -1
             initial_processes.append(proc)
         except Exception:
             pass
     for conn in psutil.net_connections(kind="all"):
         try:
-            if conn.pid is not None and conn.raddr and not ipaddress.ip_address(conn.raddr.ip).is_private:
+            if conn.pid and conn.raddr:
                 proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "pid", "ppid", "uids"], ad_value="")
                 proc["uid"] = proc["uids"][0]
                 proc["ip"] = conn.raddr.ip
                 proc["port"] = conn.raddr.port
+                proc["socket"] = os.stat(f"/proc/{conn.pid}/fd/{conn.fd}").st_ino
                 initial_processes.append(proc)
         except Exception:
             pass
     return initial_processes
 
 
-def sql_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing.List[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> typing.List[tuple]:
+def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, traffic_cnt: dict, socket_inodes: dict, new_processes: typing.List[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> typing.List[tuple]:
     """iterate over the list of process/connection data and get sha256 to generate a list of transactions for the sql database"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     event_counter = collections.defaultdict(int)
+    traffic_counter = collections.defaultdict(int)
     transactions = set()
     for proc in new_processes:
         proc = pickle.loads(proc)
         if type(proc) != dict:
-            q_error.put("sync error between sql and updater, received '%s' in middle of transfer" % str(proc))
+            q_error.put("sync error between secondary and primary, received '%s' in middle of transfer" % str(proc))
             continue
         sha_fd_error = ""
         sha256 = get_sha256_fd(proc["fd"], proc["dev"], proc["ino"], fan_mod_cnt["%d %d" % (proc["dev"], proc["ino"])])
@@ -572,11 +577,27 @@ def sql_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing
                 continue
         event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"])
         event_counter[str(event)] += 1
+        traffic_counter["send " + str(event)] += traffic_cnt.pop(f"send {proc['pid']} {proc['socket']}", 0)
+        traffic_counter["recv " + str(event)] += traffic_cnt.pop(f"recv {proc['pid']} {proc['socket']}", 0)
+        socket_inodes[f"{proc['socket']}"] = event
         transactions.add(event)
-    return [(*event, event_counter[str(event)]) for event in transactions]
+    transactions = [(*event, event_counter[str(event)], traffic_counter["send " + str(event)], traffic_counter["recv " + str(event)]) for event in transactions]
+    for key in list(traffic_cnt.keys()):
+        if key.startswith("send"):
+            if event := socket_inodes[key.split(" ", 2)[2]]:
+                exe, name, cmdline, sha256, _, domain, ip, port, uid = event
+                transactions.append((exe, name, cmdline, sha256, datetime_now, domain, ip, port, uid, 0, traffic_cnt.pop(key, 0), traffic_cnt.pop(key.replace("send", "recv"), 0)))
+    for key in list(traffic_cnt.keys()):
+        if key.startswith("recv"):
+            if event := socket_inodes[key.split(" ", 2)[2]]:
+                exe, name, cmdline, sha256, _, domain, ip, port, uid = event
+                transactions.append((exe, name, cmdline, sha256, datetime_now, domain, ip, port, uid, 0, traffic_cnt.pop(key.replace("recv", "send"), 0), traffic_cnt.pop(key, 0)))
+    print(len(socket_inodes))
+    print(traffic_cnt)
+    return transactions
 
 
-def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -> None:
+def primary_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -> None:
     """iterate over the list of process/connection data to update the snitch dictionary and create notifications on new entries"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     for proc in new_processes:
@@ -602,8 +623,8 @@ def updater_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
 
 
 ### processes
-def updater_subprocess(snitch, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
-    """coordinates connection data between subprocesses, updates the snitch dictionary with new processes, and creates notifications"""
+def primary_subprocess(snitch, snitch_pipe, secondary_pipe, q_error, q_in, _q_out):
+    """first to receive connection data from monitor, more responsive than secondary, creates notifications and writes exe.log, error.log, and record.json"""
     os.nice(-20)
     # init variables for loop
     parent_process = multiprocessing.parent_process()
@@ -640,7 +661,7 @@ def updater_subprocess(snitch, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
     thread = threading.Thread(target=snitch_pipe_thread, args=(snitch_pipe, pipe_data, listen, ready,), daemon=True)
     thread.start()
     listen.set()
-    # snitch updater main loop
+    # main loop
     while True:
         if not parent_process.is_alive():
             q_error.put("picosnitch has stopped")
@@ -654,22 +675,22 @@ def updater_subprocess(snitch, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
             # get list of new processes and connections since last update
             listen.clear()
             if not ready.wait(timeout=300):
-                q_error.put("thread timeout error for updater subprocess")
+                q_error.put("thread timeout error for primary subprocess")
                 write_snitch_and_exit(snitch, q_error, snitch_pipe)
             new_processes = pipe_data[0]
             pipe_data[0] = []
             ready.clear()
             listen.set()
-            # process the list and update snitch, send new process/connection data to sql subprocess if ready
-            updater_subprocess_helper(snitch, new_processes)
+            # process the list and update snitch, send new process/connection data to secondary subprocess if ready
+            primary_subprocess_helper(snitch, new_processes)
             processes_to_send += new_processes
             while not q_in.empty():
                 msg: dict = pickle.loads(q_in.get())
                 if msg["type"] == "ready":
-                    sql_pipe.send_bytes(pickle.dumps(len(processes_to_send)))
+                    secondary_pipe.send_bytes(pickle.dumps(len(processes_to_send)))
                     for proc in processes_to_send:
-                        sql_pipe.send_bytes(proc)
-                    sql_pipe.send_bytes(pickle.dumps("done"))
+                        secondary_pipe.send_bytes(proc)
+                    secondary_pipe.send_bytes(pickle.dumps("done"))
                     processes_to_send = []
                     break
                 elif msg["type"] == "sha256":
@@ -701,14 +722,14 @@ def updater_subprocess(snitch, snitch_pipe, sql_pipe, q_error, q_in, _q_out):
                 last_write = time.time()
                 write_record = False
         except Exception as e:
-            q_error.put("Updater %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+            q_error.put("primary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
-def sql_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, sql_pipe, q_updater_in, q_error, _q_in, _q_out):
-    """updates the snitch sqlite3 db with new connections and reports sha256/vt_results back to updater_subprocess if needed"""
+def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary_pipe, q_primary_in, q_error, _q_in, _q_out):
+    """second to receive connection data from monitor, less responsive than primary, coordinates connection data with bpftrace bandwidth monitor, updates connection logs and reports sha256/vt_results back to primary_subprocess if needed"""
     parent_process = multiprocessing.parent_process()
-    # maintain a separate copy of the snitch dictionary here and coordinate with the updater_subprocess (sha256 and vt_results)
-    get_vt_results(snitch, p_virustotal.q_in, q_updater_in, True)
+    # maintain a separate copy of the snitch dictionary here and coordinate with the primary_subprocess (sha256 and vt_results)
+    get_vt_results(snitch, p_virustotal.q_in, q_primary_in, True)
     # init sql database
     file_path = os.path.join(BASE_PATH, "snitch.db")
     text_path = os.path.join(BASE_PATH, "conn.log")
@@ -717,13 +738,38 @@ def sql_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, sql_pipe, q_upd
     cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
     if cur.fetchone()[0] !=1:
         cur.execute(''' CREATE TABLE connections
-                        (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, events integer) ''')
+                        (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, conns integer, send integer, recv integer) ''')
+        cur.execute(''' PRAGMA user_version = 1 ''')
     else:
         cur.execute(''' DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") ''' % int(snitch["Config"]["DB retention (days)"]))
+    cur.execute(''' PRAGMA user_version ''')
+    assert cur.fetchone()[0] == 1, f"Incorrect database version of snitch.db for picosnitch v{VERSION}"
     con.commit()
     con.close()
-    # init fanotify mod counter, {"st_dev st_ino": modify_count}
+    # init bandwidth monitor thread
+    def bandwidth_monitor_thread(traffic_data: list, shift_data: threading.Event):
+        bpftrace_proc = subprocess.Popen(["sudo", "/usr/bin/env", "bpftrace", "-e", bpftrace_text], stdout=subprocess.PIPE, universal_newlines=True)
+        atexit.register(bpftrace_proc.terminate)
+        bandwidth_re = re.compile(r"@(recv|send)_bytes\[(\d+), (\d+)\]: (\d+)")
+        line = bpftrace_proc.stdout.readline().strip()
+        while True:
+            if shift_data.is_set():
+                traffic_data[1] = traffic_data[0]
+                traffic_data[0] = collections.defaultdict(int)
+                shift_data.clear()
+            line = bpftrace_proc.stdout.readline().strip()
+            if line:
+                traffic = bandwidth_re.match(line)
+                traffic_data[0][f"{traffic.group(1)} {traffic.group(2)} {traffic.group(3)}"] += int(traffic.group(4))
+    shift_data = threading.Event()
+    traffic_data = [collections.defaultdict(int), collections.defaultdict(int)]
+    if snitch["Config"]["Bandwidth monitor"]:
+        thread = threading.Thread(target=bandwidth_monitor_thread, args=(traffic_data, shift_data,), daemon=True)
+        thread.start()
+    # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
+    traffic_cnt = collections.defaultdict(int)
+    socket_inodes = collections.defaultdict(tuple)
     # main loop
     transactions = []
     new_processes = []
@@ -732,30 +778,35 @@ def sql_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, sql_pipe, q_upd
         if not parent_process.is_alive():
             return 0
         try:
+            # prep to check bandwidth usage and grab pending data
+            if not shift_data.is_set():
+                for k, v in traffic_data[1].items():
+                    traffic_cnt[k] += v
+                shift_data.set()
             # prep to receive new connections
-            if sql_pipe.poll():
-                q_error.put("sync error between sql and updater on ready (pipe not empty)")
+            if secondary_pipe.poll():
+                q_error.put("sync error between secondary and primary on ready (pipe not empty)")
             else:
-                q_updater_in.put(pickle.dumps({"type": "ready"}))
-                sql_pipe.poll(timeout=300)
-                if not sql_pipe.poll():
-                    q_error.put("sync error between sql and updater on ready (sql timed out waiting for first message)")
+                q_primary_in.put(pickle.dumps({"type": "ready"}))
+                secondary_pipe.poll(timeout=300)
+                if not secondary_pipe.poll():
+                    q_error.put("sync error between secondary and primary on ready (secondary timed out waiting for first message)")
             # receive first message, should be transfer size
             transfer_size = 0
-            if sql_pipe.poll():
-                first_pickle = sql_pipe.recv_bytes()
+            if secondary_pipe.poll():
+                first_pickle = secondary_pipe.recv_bytes()
                 if type(pickle.loads(first_pickle)) == int:
                     transfer_size = pickle.loads(first_pickle)
                 elif pickle.loads(first_pickle) == "done":
-                    q_error.put("sync error between sql and updater on ready (received done)")
+                    q_error.put("sync error between secondary and primary on ready (received done)")
                 else:
-                    q_error.put("sync error between sql and updater on ready (did not receive transfer size)")
+                    q_error.put("sync error between secondary and primary on ready (did not receive transfer size)")
                     new_processes.append(first_pickle)
             # receive new connections until "done"
             timeout_counter = 0
             while True:
-                while sql_pipe.poll(timeout=1):
-                    new_processes.append(sql_pipe.recv_bytes())
+                while secondary_pipe.poll(timeout=1):
+                    new_processes.append(secondary_pipe.recv_bytes())
                     transfer_size -= 1
                 timeout_counter += 1
                 if pickle.loads(new_processes[-1]) == "done":
@@ -763,23 +814,28 @@ def sql_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, sql_pipe, q_upd
                     transfer_size += 1
                     break
                 elif timeout_counter > 30:
-                    q_error.put("sync error between sql and updater on receive (did not receive done)")
+                    q_error.put("sync error between secondary and primary on receive (did not receive done)")
             if transfer_size > 0:
-                q_error.put("sync error between sql and updater on receive (did not receive all messages)")
+                q_error.put("sync error between secondary and primary on receive (did not receive all messages)")
             elif transfer_size < 0:
-                q_error.put("sync error between sql and updater on receive (received extra messages)")
-            # process new connections
-            get_vt_results(snitch, p_virustotal.q_out, q_updater_in, False)
+                q_error.put("sync error between secondary and primary on receive (received extra messages)")
+            # check for other pending data (vt, fanotify, bandwidth)
+            get_vt_results(snitch, p_virustotal.q_out, q_primary_in, False)
             get_fanotify_events(fan_fd, fan_mod_cnt, q_error)
+            if not shift_data.is_set():
+                for k, v in traffic_data[1].items():
+                    traffic_cnt[k] += v
+                shift_data.set()
+            # process connection data
             if time.time() - last_write > snitch["Config"]["DB write limit (seconds)"]:
-                transactions += sql_subprocess_helper(snitch, fan_mod_cnt, new_processes, p_virustotal.q_in, q_updater_in, q_error)
+                transactions += secondary_subprocess_helper(snitch, fan_mod_cnt, traffic_cnt, socket_inodes, new_processes, p_virustotal.q_in, q_primary_in, q_error)
                 new_processes = []
                 con = sqlite3.connect(file_path)
                 try:
                     if snitch["Config"]["DB sql log"]:
                         with con:
-                            # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], event_counter[str(event)])
-                            con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
+                            # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], event_counter[str(event)], sent bytes, received bytes)
+                            con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
                     if snitch["Config"]["DB text log"]:
                         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
                             for entry in transactions:
@@ -791,11 +847,11 @@ def sql_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, sql_pipe, q_upd
                     q_error.put("SQL execute %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
                 con.close()
         except Exception as e:
-            q_error.put("SQL subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+            q_error.put("secondary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
 def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out):
-    """runs a bpf program to monitor the system for new connections and puts info into a pipe for updater_subprocess"""
+    """runs a bpf program to monitor the system for new connections and puts info into a pipe for primary_subprocess"""
     # initialization
     os.nice(-20)
     from bcc import BPF
@@ -869,7 +925,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
             stat = os.stat(f"/proc/{proc['pid']}/exe")
             st_dev, st_ino, pid, fd, exe, cmd = get_fd(stat.st_dev, stat.st_ino, proc["pid"], proc["ppid"], proc["port"])
             if config["Every exe (not just conns)"] or proc["port"] != -1:
-                snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": proc["port"], "ip": proc["ip"]}))
+                snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "socket": proc["socket"], "port": proc["port"], "ip": proc["ip"]}))
         except Exception:
             pass
     # run bpf program
@@ -882,20 +938,20 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     def queue_ipv4_event(cpu, data, size):
         event = b["ipv4_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "socket": event.sock_ino, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
     def queue_ipv6_event(cpu, data, size):
         event = b["ipv6_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "socket": event.sock_ino, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
     def queue_other_event(cpu, data, size):
         event = b["other_socket_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, 0)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": 0, "ip": ""}))
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "socket": event.sock_ino, "port": 0, "ip": ""}))
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, -1)
         if config["Every exe (not just conns)"]:
-            snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "port": -1, "ip": ""}))
+            snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "socket": -1, "port": -1, "ip": ""}))
     b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
@@ -986,7 +1042,7 @@ def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
             q_error.put("Last VT Exception on: %s with %s" % (str(proc), str(analysis)))
 
 
-def picosnitch_master_process(snitch: dict):
+def main_process(snitch: dict):
     """coordinates all picosnitch subprocesses"""
     # init fanotify
     libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -995,19 +1051,19 @@ def picosnitch_master_process(snitch: dict):
     flags = _FAN_CLASS_CONTENT if FD_CACHE < 8192 else _FAN_CLASS_CONTENT | _FAN_UNLIMITED_MARKS
     fan_fd = libc.fanotify_init(flags, os.O_RDONLY)
     # start subprocesses
-    snitch_updater_pipe, snitch_monitor_pipe = multiprocessing.Pipe(duplex=False)
-    sql_recv_pipe, sql_send_pipe = multiprocessing.Pipe(duplex=False)
+    snitch_primary_pipe, snitch_monitor_pipe = multiprocessing.Pipe(duplex=False)
+    secondary_recv_pipe, secondary_send_pipe = multiprocessing.Pipe(duplex=False)
     q_error = multiprocessing.Queue()
     p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess,
                                init_args=(snitch["Config"], fan_fd, snitch_monitor_pipe, q_error,))
     p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess,
                                   init_args=(snitch["Config"], q_error,))
-    p_updater = ProcessManager(name="snitchupdater", target=updater_subprocess,
-                               init_args=(snitch, snitch_updater_pipe, sql_send_pipe, q_error,))
-    p_sql = ProcessManager(name="snitchsql", target=sql_subprocess,
-                           init_args=(snitch, fan_fd, p_virustotal, sql_recv_pipe, p_updater.q_in, q_error,))
+    p_primary = ProcessManager(name="snitchprimary", target=primary_subprocess,
+                               init_args=(snitch, snitch_primary_pipe, secondary_send_pipe, q_error,))
+    p_secondary = ProcessManager(name="snitchsecondary", target=secondary_subprocess,
+                           init_args=(snitch, fan_fd, p_virustotal, secondary_recv_pipe, p_primary.q_in, q_error,))
     # set signals
-    subprocesses = [p_monitor, p_virustotal, p_updater, p_sql]
+    subprocesses = [p_monitor, p_virustotal, p_primary, p_secondary]
     def clean_exit():
         _ = [p.terminate() for p in subprocesses]
         sys.exit(0)
@@ -1095,6 +1151,8 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     s_screens = p_screens + ["Commands"]
     s_names = p_names + ["Command"]
     s_col = p_col + ["cmdline"]
+    byte_units = 3
+    round_bytes = lambda size, b: f"{size if b == 0 else round(size/10**b, 2)!s:>{8 if b == 0 else 7}} {'k' if b == 3 else 'M' if b == 6 else 'G' if b == 9 else ''}B"
     # ui loop
     max_y, max_x = stdscr.getmaxyx()
     first_line = 4
@@ -1133,9 +1191,9 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                 else:
                     time_query = f" WHERE contime > datetime(\"{time_history_start}\") AND contime < datetime(\"{time_history_end}\")"
             if is_subquery:
-                current_query = f"SELECT {s_col[sec_i]}, SUM(\"events\") as Sum FROM connections WHERE {p_col[pri_i]} IS \"{primary_value}\"{time_query} GROUP BY {s_col[sec_i]}"
+                current_query = f"SELECT {s_col[sec_i]}, SUM(\"conns\"), SUM(\"send\"), SUM(\"recv\") FROM connections WHERE {p_col[pri_i]} IS \"{primary_value}\"{time_query} GROUP BY {s_col[sec_i]}"
             else:
-                current_query = f"SELECT {p_col[pri_i]}, SUM(\"events\") as Sum FROM connections{time_query} GROUP BY {p_col[pri_i]}"
+                current_query = f"SELECT {p_col[pri_i]}, SUM(\"conns\"), SUM(\"send\"), SUM(\"recv\") FROM connections{time_query} GROUP BY {p_col[pri_i]}"
             update_query = False
         if execute_query:
             try:
@@ -1165,14 +1223,14 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                     return 0
             current_screen = cur.fetchall()
             execute_query = False
-        help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  r: refresh  q: quit {' ': <{curses.COLS}}"
-        status_bar = f"history: {time_history}  time range: {time_period[time_i]}  line: {cursor-first_line+1}/{len(current_screen)}{' ': <{curses.COLS}}"
+        help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  u: units  r: refresh  q: quit {' ':<{curses.COLS}}"
+        status_bar = f"history: {time_history}  time range: {time_period[time_i]}  line: {cursor-first_line+1}/{len(current_screen)}{' ':<{curses.COLS}}"
         if is_subquery:
-            tab_bar = f"<- {s_screens[sec_i-1]: <{curses.COLS//3 - 2}}{s_screens[sec_i]: ^{curses.COLS//3 - 2}}{s_screens[(sec_i+1) % len(s_screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
-            column_names = f"{f'{s_names[sec_i]} (where {p_names[pri_i].lower()} = {primary_value})': <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
+            tab_bar = f"<- {s_screens[sec_i-1]:<{curses.COLS//3 - 2}}{s_screens[sec_i]:^{curses.COLS//3 - 2}}{s_screens[(sec_i+1) % len(s_screens)]:>{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
+            column_names = f"{f'{s_names[sec_i]} (where {p_names[pri_i].lower()} = {primary_value})':<{curses.COLS - 32}.{curses.COLS - 32}}  Connects       Sent   Received"
         else:
-            tab_bar = f"<- {p_screens[pri_i-1]: <{curses.COLS//3 - 2}}{p_screens[pri_i]: ^{curses.COLS//3 - 2}}{p_screens[(pri_i+1) % len(p_screens)]: >{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
-            column_names = f"{p_names[pri_i]: <{curses.COLS*7//8}}{'Entries': <{curses.COLS//8+7}}"
+            tab_bar = f"<- {p_screens[pri_i-1]:<{curses.COLS//3 - 2}}{p_screens[pri_i]:^{curses.COLS//3 - 2}}{p_screens[(pri_i+1) % len(p_screens)]:>{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
+            column_names = f"{p_names[pri_i]:<{curses.COLS - 32}}  Connects       Sent   Received"
         # display screen
         stdscr.clear()
         stdscr.attrset(curses.color_pair(3) | curses.A_BOLD)
@@ -1183,7 +1241,7 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
         line = first_line
         cursor = min(cursor, len(current_screen) + first_line - 1)
         offset = max(0, cursor - curses.LINES + 3)
-        for name, value in current_screen:
+        for name, conns, send, recv in current_screen:
             if line == cursor:
                 stdscr.attrset(curses.color_pair(1) | curses.A_BOLD)
                 if toggle_subquery:
@@ -1206,7 +1264,8 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                         name = f"{pwd.getpwuid(name).pw_name} ({name})"
                     except Exception:
                         name = f"??? ({name})"
-                stdscr.addstr(line - offset, 0, f"{name: <{curses.COLS*7//8}}{value: <{curses.COLS-(curses.COLS*7//8)}}")
+                value = f"{conns:>10} {round_bytes(send, byte_units)} {round_bytes(recv, byte_units)}"
+                stdscr.addstr(line - offset, 0, f"{name!s:<{curses.COLS-32}.{curses.COLS-32}}{value}")
             line += 1
         stdscr.refresh()
         if toggle_subquery:
@@ -1256,6 +1315,8 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             time_j -= 1
             update_query = True
             execute_query = True
+        elif ch == ord("u"):
+            byte_units = (byte_units + 3) % 12
         elif ch == curses.KEY_UP:
             cursor -= 1
             if cursor < first_line:
@@ -1322,8 +1383,9 @@ def ui_init() -> int:
     # check for table
     cur = con.cursor()
     cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
-    if cur.fetchone()[0] !=1:
-        raise Exception(f"Table 'connections' does not exist in {file_path}")
+    assert cur.fetchone()[0] == 1, f"Table 'connections' does not exist in {file_path}"
+    cur.execute(''' PRAGMA user_version ''')
+    assert cur.fetchone()[0] == 1, f"Incorrect database version of snitch.db for picosnitch v{VERSION}"
     con.close()
     con = sqlite3.connect(file_path, timeout=1)
     # start curses
@@ -1345,7 +1407,7 @@ def main():
     with open("/run/picosnitch.pid", "r") as f:
         assert int(f.read().strip()) == os.getpid()
     if __name__ == "__main__" or sys.argv[1] == "start-no-daemon":
-        sys.exit(picosnitch_master_process(snitch))
+        sys.exit(main_process(snitch))
     print("Snitch subprocess init failed, __name__ != __main__", file=sys.stderr)
     sys.exit(1)
 
@@ -1461,9 +1523,41 @@ def start_picosnitch():
         return 2
 
 
-### bpf program
+### bpf programs
+bpftrace_text = """
+// based on https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/
+#include <net/sock.h>
+
+kretfunc:sock_sendmsg {
+    $sock = args->sock;
+    $daddr = $sock->sk->__sk_common.skc_daddr;
+    $family = $sock->sk->__sk_common.skc_family;
+    if ($daddr && ($family == AF_INET || $family == AF_INET6) && retval < 0x7fffffff) {
+        $inode = $sock->file->f_path.dentry->d_inode->i_ino;
+        @send_bytes[pid, $inode] = sum(retval);
+    }
+}
+
+kretfunc:sock_recvmsg {
+    $sock = args->sock;
+    $daddr = $sock->sk->__sk_common.skc_daddr;
+    $family = $sock->sk->__sk_common.skc_family;
+    if ($daddr && ($family == AF_INET || $family == AF_INET6) && retval < 0x7fffffff) {
+        $inode = $sock->file->f_path.dentry->d_inode->i_ino;
+        @recv_bytes[pid, $inode] = sum(retval);
+    }
+}
+
+interval:s:1 {
+    print(@send_bytes);
+    clear(@send_bytes);
+    print(@recv_bytes);
+    clear(@recv_bytes);
+}
+"""
+
 bpf_text = """
-// This BPF program was based on the following source, licensed under the Apache License, Version 2.0
+// This eBPF program was based on the following source, licensed under the Apache License, Version 2.0
 // https://github.com/p-/socket-connect-bpf/blob/7f386e368759e53868a078570254348e73e73e22/securitySocketConnectSrc.bpf
 // Copyright 2019 Peter Stöckli
 
@@ -1492,6 +1586,7 @@ struct ipv4_event_t {
     u32 uid;
     u32 dev;
     u64 ino;
+    u64 sock_ino;
     char comm[TASK_COMM_LEN];
     u32 daddr;
     u16 dport;
@@ -1504,6 +1599,7 @@ struct ipv6_event_t {
     u32 uid;
     u32 dev;
     u64 ino;
+    u64 sock_ino;
     char comm[TASK_COMM_LEN];
     unsigned __int128 daddr;
     u16 dport;
@@ -1516,6 +1612,7 @@ struct other_socket_event_t {
     u32 uid;
     u32 dev;
     u64 ino;
+    u64 sock_ino;
     char comm[TASK_COMM_LEN];
 } __attribute__((packed));
 BPF_PERF_OUTPUT(other_socket_events);
@@ -1530,8 +1627,7 @@ struct exec_event_t {
 } __attribute__((packed));
 BPF_PERF_OUTPUT(exec_events);
 
-int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, struct sockaddr *address, int addrlen)
-{
+int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, struct sockaddr *address, int addrlen) {
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     u32 uid = bpf_get_current_uid_gid();
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
@@ -1539,33 +1635,30 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
     u64 ino = task->mm->exe_file->f_path.dentry->d_inode->i_ino;
     u32 dev = task->mm->exe_file->f_path.dentry->d_inode->i_sb->s_dev;
     dev = new_encode_dev(dev);
+    u64 sock_ino = sock->file->f_path.dentry->d_inode->i_ino;
     u32 address_family = address->sa_family;
     if (address_family == AF_INET) { // https://github.com/torvalds/linux/blob/master/include/linux/socket.h
-        struct ipv4_event_t data4 = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino};
+        struct ipv4_event_t data4 = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino, .sock_ino = sock_ino};
         struct sockaddr_in *daddr = (struct sockaddr_in *)address;
         bpf_probe_read(&data4.daddr, sizeof(data4.daddr), &daddr->sin_addr.s_addr);
         u16 dport = 0;
         bpf_probe_read(&dport, sizeof(dport), &daddr->sin_port);
         data4.dport = ntohs(dport);
-        if (data4.dport != 0) {
-            bpf_get_current_comm(&data4.comm, sizeof(data4.comm));
-            ipv4_events.perf_submit(ctx, &data4, sizeof(data4));
-        }
+        bpf_get_current_comm(&data4.comm, sizeof(data4.comm));
+        ipv4_events.perf_submit(ctx, &data4, sizeof(data4));
     }
     else if (address_family == AF_INET6) { // https://github.com/torvalds/linux/blob/master/include/linux/socket.h
-        struct ipv6_event_t data6 = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino};
+        struct ipv6_event_t data6 = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino, .sock_ino = sock_ino};
         struct sockaddr_in6 *daddr6 = (struct sockaddr_in6 *)address;
         bpf_probe_read(&data6.daddr, sizeof(data6.daddr), &daddr6->sin6_addr.in6_u.u6_addr32);
         u16 dport6 = 0;
         bpf_probe_read(&dport6, sizeof(dport6), &daddr6->sin6_port);
         data6.dport = ntohs(dport6);
-        if (data6.dport != 0) {
-            bpf_get_current_comm(&data6.comm, sizeof(data6.comm));
-            ipv6_events.perf_submit(ctx, &data6, sizeof(data6));
-        }
+        bpf_get_current_comm(&data6.comm, sizeof(data6.comm));
+        ipv6_events.perf_submit(ctx, &data6, sizeof(data6));
     }
     else if (address_family != AF_UNIX && address_family != AF_UNSPEC) { // other sockets, except UNIX and UNSPEC sockets
-        struct other_socket_event_t socket_event = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino};
+        struct other_socket_event_t socket_event = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino, .sock_ino = sock_ino};
         bpf_get_current_comm(&socket_event.comm, sizeof(socket_event.comm));
         other_socket_events.perf_submit(ctx, &socket_event, sizeof(socket_event));
     }

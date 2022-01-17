@@ -9,6 +9,6 @@ Homepage: https://elesiuta.github.io/picosnitch/
 Package: picosnitch
 Architecture: any
 Pre-Depends: dpkg (>= 1.16.1), python3 (>= 3.8), ${misc:Pre-Depends}
-Depends: ${python:Depends}, ${misc:Depends}, python3-bpfcc, python3-dbus, python3-psutil, python3-requests
+Depends: ${python:Depends}, ${misc:Depends}, bpftrace, python3-bpfcc, python3-dbus, python3-psutil, python3-requests
 Description: Protect your privacy
  See which processes make remote network connections
