@@ -602,25 +602,23 @@ def primary_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     for proc in new_processes:
         proc = pickle.loads(proc)
-        if proc["exe"] not in snitch["Executables"] and proc["name"] not in snitch["Names"]:
-            snitch["Exe Log"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"] + " (new)")
-            NotificationManager().toast("First connection detected for " + proc["name"])
+        notification = []
         if proc["name"] in snitch["Names"]:
             if proc["exe"] not in snitch["Names"][proc["name"]]:
                 snitch["Names"][proc["name"]].append(proc["exe"])
-                snitch["Exe Log"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"] + " (exe)")
-                NotificationManager().toast("New executable detected for " + proc["name"] + ": " + proc["exe"])
         else:
             snitch["Names"][proc["name"]] = [proc["exe"]]
+            notification.append("name")
         if proc["exe"] in snitch["Executables"]:
             if proc["name"] not in snitch["Executables"][proc["exe"]]:
                 snitch["Executables"][proc["exe"]].append(proc["name"])
-                snitch["Exe Log"].append(datetime_now + " " + proc["name"] + " - " + proc["exe"] + " (name)")
-                NotificationManager().toast("New name detected for " + proc["exe"] + ": " + proc["name"])
         else:
             snitch["Executables"][proc["exe"]] = [proc["name"]]
+            notification.append("exe")
+            NotificationManager().toast(f"picosnitch: {proc['exe']}")
             snitch["SHA256"][proc["exe"]] = {}
-
+        if notification:
+            snitch["Exe Log"].append(f"{datetime_now} {proc['name']:<16.16} {proc['exe']} (new {', '.join(notification)})")
 
 ### processes
 def primary_subprocess(snitch, snitch_pipe, secondary_pipe, q_error, q_in, _q_out):
@@ -697,21 +695,21 @@ def primary_subprocess(snitch, snitch_pipe, secondary_pipe, q_error, q_in, _q_ou
                     if msg["exe"] in snitch["SHA256"]:
                         if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
                             snitch["SHA256"][msg["exe"]][msg["sha256"]] = "VT Pending"
-                            snitch["Exe Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"] + " (new)")
-                            NotificationManager().toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
+                            snitch["Exe Log"].append(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg['sha256']:<16.16} {msg['exe']} (new hash)")
+                            NotificationManager().toast(f"New sha256: {msg['exe']}")
                     else:
                         snitch["SHA256"][msg["exe"]] = {msg["sha256"]: "VT Pending"}
                 elif msg["type"] == "vt_result":
                     if msg["exe"] in snitch["SHA256"]:
                         if msg["sha256"] not in snitch["SHA256"][msg["exe"]]:
-                            snitch["Exe Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"] + " (new)")
-                            NotificationManager().toast("New sha256 detected for " + msg["name"] + ": " + msg["exe"])
+                            snitch["Exe Log"].append(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg['sha256']:<16.16} {msg['exe']} (new hash)")
+                            NotificationManager().toast(f"New sha256: {msg['exe']}")
                         snitch["SHA256"][msg["exe"]][msg["sha256"]] = msg["result"]
                     else:
                         snitch["SHA256"][msg["exe"]] = {msg["sha256"]: msg["result"]}
                     if msg["suspicious"]:
-                        snitch["Exe Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg["name"] + " - " + msg["sha256"] + " (suspicious)")
-                        NotificationManager().toast("Suspicious VT results for " + msg["name"])
+                        snitch["Exe Log"].append(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg['sha256']:<16.16} {msg['exe']} (suspicious)")
+                        NotificationManager().toast(f"Suspicious VT results: {msg['exe']}")
             # write the snitch dictionary to record.json, error.log, and exe.log (limit writes to reduce disk wear)
             if snitch["Error Log"] or snitch["Exe Log"] or time.time() - last_write > 30:
                 new_record = pickle.dumps([snitch["Executables"], snitch["Names"], snitch["SHA256"]])
