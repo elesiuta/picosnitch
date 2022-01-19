@@ -592,8 +592,6 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, traffic_cnt: di
             if event := socket_inodes[key.split(" ", 2)[2]]:
                 exe, name, cmdline, sha256, _, domain, ip, port, uid = event
                 transactions.append((exe, name, cmdline, sha256, datetime_now, domain, ip, port, uid, 0, traffic_cnt.pop(key.replace("recv", "send"), 0), traffic_cnt.pop(key, 0)))
-    print(len(socket_inodes))
-    print(traffic_cnt)
     return transactions
 
 
@@ -1460,7 +1458,20 @@ def start_picosnitch():
             cap_sys_admin = 2**21
             assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
         assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
-        test_read_snitch = read_snitch()
+        tmp_snitch = read_snitch()
+        if tmp_snitch["Config"]["Bandwidth monitor"]:
+            assert subprocess.run(["sudo", "/usr/bin/env", "bpftrace", "--version"], capture_output=True).stdout, "Requires bpftrace for bandwidth monitoring"
+        if os.path.exists(os.path.join(BASE_PATH, "snitch.db")):
+            con = sqlite3.connect(os.path.join(BASE_PATH, "snitch.db"))
+            cur = con.cursor()
+            cur.execute(''' PRAGMA user_version ''')
+            if cur.fetchone()[0] == 0:
+                cur.execute(''' ALTER TABLE connections RENAME COLUMN events TO conns ''')
+                cur.execute(''' ALTER TABLE connections ADD COLUMN send integer DEFAULT 0 NOT NULL ''')
+                cur.execute(''' ALTER TABLE connections ADD COLUMN recv integer DEFAULT 0 NOT NULL ''')
+                cur.execute(''' PRAGMA user_version = 1 ''')
+                con.commit()
+            con.close()
         if sys.argv[1] in ["start", "stop", "restart"]:
             if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
                 print("Found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl")
