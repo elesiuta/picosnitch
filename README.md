@@ -56,7 +56,7 @@
   - or if you don't use systemd `picosnitch start|stop|restart`
 - user interface for browsing past connections
   - start with `picosnitch view`
-  - `space/enter`: filter on entry `backspace`: remove filter `h/H`: cycle through history `t/T`: cycle time range `r`: refresh view `q`: quit
+  - `space/enter`: filter on entry `backspace`: remove filter `h/H`: cycle through history `t/T`: cycle time range `u/U`: cycle units B/kB/MB/GB `r`: refresh view `q`: quit
 - show usage with `picosnitch help`
 
 # [configuration](#configuration)
