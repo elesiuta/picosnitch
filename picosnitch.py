@@ -1150,7 +1150,7 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     s_names = p_names + ["Command"]
     s_col = p_col + ["cmdline"]
     byte_units = 3
-    round_bytes = lambda size, b: f"{size if b == 0 else round(size/10**b, 2)!s:>{8 if b == 0 else 7}} {'k' if b == 3 else 'M' if b == 6 else 'G' if b == 9 else ''}B"
+    round_bytes = lambda size, b: f"{size if b == 0 else round(size/10**b, 1)!s:>{8 if b == 0 else 7}} {'k' if b == 3 else 'M' if b == 6 else 'G' if b == 9 else ''}B"
     # ui loop
     max_y, max_x = stdscr.getmaxyx()
     first_line = 4
@@ -1221,7 +1221,7 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                     return 0
             current_screen = cur.fetchall()
             execute_query = False
-        help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  u: units  r: refresh  q: quit {' ':<{curses.COLS}}"
+        help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  u/U: units  r: refresh  q: quit {' ':<{curses.COLS}}"
         status_bar = f"history: {time_history}  time range: {time_period[time_i]}  line: {cursor-first_line+1}/{len(current_screen)}{' ':<{curses.COLS}}"
         if is_subquery:
             tab_bar = f"<- {s_screens[sec_i-1]:<{curses.COLS//3 - 2}}{s_screens[sec_i]:^{curses.COLS//3 - 2}}{s_screens[(sec_i+1) % len(s_screens)]:>{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
@@ -1262,7 +1262,7 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                         name = f"{pwd.getpwuid(name).pw_name} ({name})"
                     except Exception:
                         name = f"??? ({name})"
-                value = f"{conns:>10} {round_bytes(send, byte_units)} {round_bytes(recv, byte_units)}"
+                value = f"{conns:>10} {round_bytes(send, byte_units):>10.10} {round_bytes(recv, byte_units):>10.10}"
                 stdscr.addstr(line - offset, 0, f"{name!s:<{curses.COLS-32}.{curses.COLS-32}}{value}")
             line += 1
         stdscr.refresh()
@@ -1287,14 +1287,6 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
         elif ch == ord("r"):
             update_query = True
             execute_query = True
-        elif ch == ord("s"):
-            sec_i += 1
-            update_query = True
-            execute_query = True
-        elif ch == ord("S"):
-            sec_i -= 1
-            update_query = True
-            execute_query = True
         elif ch == ord("t"):
             time_j = 0
             time_i += 1
@@ -1315,6 +1307,8 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             execute_query = True
         elif ch == ord("u"):
             byte_units = (byte_units + 3) % 12
+        elif ch == ord("U"):
+            byte_units = (byte_units - 3) % 12
         elif ch == curses.KEY_UP:
             cursor -= 1
             if cursor < first_line:
