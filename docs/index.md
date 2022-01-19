@@ -9,6 +9,7 @@
 [![GitHub downloads](https://img.shields.io/github/downloads/elesiuta/picosnitch/total?color=00a0a0&label=downloads%20%28github%29)](https://github.com/elesiuta/picosnitch/releases)
 
 # [picosnitch](https://elesiuta.github.io/picosnitch/)
+![screenshot.png](https://raw.githubusercontent.com/elesiuta/picosnitch/master/images/screenshot.png)
 - An extremely simple, reliable, and lightweight program for linux to help protect your privacy
 - It monitors your system and notifies you whenever it sees a new program that connects to the network
 - Or when the sha256 changes for one of those programs (can also check [VirusTotal](https://www.virustotal.com))
@@ -16,6 +17,7 @@
   - for example, it can successfully identify whether curl being run from inside a docker container is the same or different from curl being run on your system, even if they both appear to be located at /usr/bin/curl (or if another program is masquerading as curl)
   - to improve performance, hashes are cached based on the device and inode of the executable, and watched with fanotify to trigger a rehash if the executable is modified
 - Featuring a curses based UI for browsing past connections
+- And can monitor your bandwidth, breaking down traffic by time, executable, domain, port, user
 - For advanced users who know what should be running on their system, and when they should be making network connections
   - only you can decide which programs to trust, and what actions to take for offending programs
   - picosnitch is purely a monitoring and detection tool, focussing on doing one thing well, so blocking or sandboxing programs is out of scope
@@ -37,6 +39,8 @@
 ### [PyPI](https://pypi.org/project/picosnitch/) for any Linux distribution with Python >= 3.8
 - install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
   - it should be called `python-bcc` or `python-bpfcc`
+- install [bpftrace](https://github.com/iovisor/bpftrace/blob/master/INSTALL.md)
+  - only needed for bandwidth monitoring (enabled by default)
 - install picosnitch using [pip](https://pip.pypa.io/)
   - `pip3 install "picosnitch[full]" --upgrade --user`
 - create a service file for systemd to run picosnitch (recommended)
@@ -61,10 +65,11 @@
 
 ```yaml
 {
+  "Bandwidth monitor": true, # Log traffic per connection since last db write
   "DB retention (days)": 365, # How many days to keep connection logs in snitch.db
   "DB sql log": true, # Write connection logs to snitch.db
   "DB text log": false, # Write connection logs to conn.log
-  "DB write limit (seconds)": 1, # Minimum time between writing connection logs
+  "DB write limit (seconds)": 10, # Minimum time between writing connection logs
   # increasing it decreases disk writes by grouping connections into larger time windows
   # reducing time precision, decreasing database size, and increasing hash latency
   "Desktop notifications": true, # Try connecting to dbus to show notifications
@@ -101,7 +106,7 @@
 - if `DB text log` is enabled, the full connection log is also written to `~/.config/picosnitch/conn.log`
   - this may be useful for watching with another program
   - it contains the following fields, separated by commas (commas, newlines, and null characters are removed from values)
-  - `executable,name,cmdline,sha256,time,domain,ip,port,uid,count`
+  - `executable,name,cmdline,sha256,time,domain,ip,port,uid,conns,sent,received`
 - the error log is stored in `~/.config/picosnitch/error.log`
   - errors will also trigger a notification and are usually caused by far too many or extremely short-lived processes/connections, or suspending your system while a new executable is being hashed
   - for most people in most cases, this should raise suspicion that some other program may be misbehaving
@@ -112,3 +117,4 @@
 - install `python-setuptools`
 - install picosnitch with `python setup.py install --user`
 - see other options with `python setup.py [build|install] --help`
+- you can also run the script `picosnitch.py` directly
