@@ -9,7 +9,7 @@
 [![GitHub downloads](https://img.shields.io/github/downloads/elesiuta/picosnitch/total?color=00a0a0&label=downloads%20%28github%29)](https://github.com/elesiuta/picosnitch/releases)
 
 # [picosnitch](https://elesiuta.github.io/picosnitch/)
-![screenshot.png](https://raw.githubusercontent.com/elesiuta/picosnitch/master/images/screenshot.png)
+![screenshot.png](https://raw.githubusercontent.com/elesiuta/picosnitch/master/screenshot.png)
 - An extremely simple, reliable, and lightweight program for linux to help protect your privacy
 - It monitors your system and notifies you whenever it sees a new program that connects to the network
 - Or when the sha256 changes for one of those programs (can also check [VirusTotal](https://www.virustotal.com))
