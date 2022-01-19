@@ -613,10 +613,11 @@ def primary_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
         else:
             snitch["Executables"][proc["exe"]] = [proc["name"]]
             notification.append("exe")
-            NotificationManager().toast(f"picosnitch: {proc['exe']}")
             snitch["SHA256"][proc["exe"]] = {}
         if notification:
             snitch["Exe Log"].append(f"{datetime_now} {proc['name']:<16.16} {proc['exe']} (new {', '.join(notification)})")
+            NotificationManager().toast(f"picosnitch: {proc['name']} {proc['exe']}")
+
 
 ### processes
 def primary_subprocess(snitch, snitch_pipe, secondary_pipe, q_error, q_in, _q_out):
