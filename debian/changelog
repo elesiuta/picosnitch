@@ -1,4 +1,4 @@
-picosnitch (0.9.1) unstable; urgency=low
+picosnitch (0.10.0) unstable; urgency=low
 
   * create deb package, see releases on github for full changes
 
