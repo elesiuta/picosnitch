@@ -521,7 +521,7 @@ def monitor_subprocess_initial_poll() -> list:
     return initial_processes
 
 
-def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, traffic_cnt: dict, socket_inodes: dict, new_processes: typing.List[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> typing.List[tuple]:
+def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, traffic_cnt: dict, socket_inodes: collections.OrderedDict, new_processes: typing.List[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> typing.List[tuple]:
     """iterate over the list of process/connection data and get sha256 to generate a list of transactions for the sql database"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     event_counter = collections.defaultdict(int)
@@ -579,19 +579,25 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, traffic_cnt: di
         event_counter[str(event)] += 1
         traffic_counter["send " + str(event)] += traffic_cnt.pop(f"send {proc['pid']} {proc['socket']}", 0)
         traffic_counter["recv " + str(event)] += traffic_cnt.pop(f"recv {proc['pid']} {proc['socket']}", 0)
-        socket_inodes[f"{proc['socket']}"] = event
+        if snitch["Config"]["Bandwidth monitor"]:
+            socket_inodes[f"{proc['socket']}"] = event
         transactions.add(event)
     transactions = [(*event, event_counter[str(event)], traffic_counter["send " + str(event)], traffic_counter["recv " + str(event)]) for event in transactions]
-    for key in list(traffic_cnt.keys()):
-        if key.startswith("send"):
-            if event := socket_inodes[key.split(" ", 2)[2]]:
-                exe, name, cmdline, sha256, _, domain, ip, port, uid = event
-                transactions.append((exe, name, cmdline, sha256, datetime_now, domain, ip, port, uid, 0, traffic_cnt.pop(key, 0), traffic_cnt.pop(key.replace("send", "recv"), 0)))
-    for key in list(traffic_cnt.keys()):
-        if key.startswith("recv"):
-            if event := socket_inodes[key.split(" ", 2)[2]]:
-                exe, name, cmdline, sha256, _, domain, ip, port, uid = event
-                transactions.append((exe, name, cmdline, sha256, datetime_now, domain, ip, port, uid, 0, traffic_cnt.pop(key.replace("recv", "send"), 0), traffic_cnt.pop(key, 0)))
+    if snitch["Config"]["Bandwidth monitor"]:
+        for key in list(traffic_cnt.keys()):
+            if key.startswith("send"):
+                if event := socket_inodes.pop(inode := key.split(" ", 2)[2], ()):
+                    socket_inodes[inode] = event
+                    exe, name, cmdline, sha256, _, domain, ip, port, uid = event
+                    transactions.append((exe, name, cmdline, sha256, datetime_now, domain, ip, port, uid, 0, traffic_cnt.pop(key, 0), traffic_cnt.pop(key.replace("send", "recv"), 0)))
+        for key in list(traffic_cnt.keys()):
+            if key.startswith("recv"):
+                if event := socket_inodes.pop(inode := key.split(" ", 2)[2], ()):
+                    socket_inodes[inode] = event
+                    exe, name, cmdline, sha256, _, domain, ip, port, uid = event
+                    transactions.append((exe, name, cmdline, sha256, datetime_now, domain, ip, port, uid, 0, traffic_cnt.pop(key.replace("recv", "send"), 0), traffic_cnt.pop(key, 0)))
+        while len(socket_inodes) > 65536:
+            _ = socket_inodes.popitem(last=False)
     return transactions
 
 
@@ -766,7 +772,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
     traffic_cnt = collections.defaultdict(int)
-    socket_inodes = collections.defaultdict(tuple)
+    socket_inodes = collections.OrderedDict()
     # main loop
     transactions = []
     new_processes = []
