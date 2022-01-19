@@ -328,7 +328,7 @@ def read_snitch() -> dict:
             "DB retention (days)": 365,
             "DB sql log": True,
             "DB text log": False,
-            "DB write limit (seconds)": 1,
+            "DB write limit (seconds)": 10,
             "Desktop notifications": True,
             "Every exe (not just conns)": False,
             "Log addresses": True,
@@ -1459,8 +1459,8 @@ def start_picosnitch():
             cap_sys_admin = 2**21
             assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
         assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
-        tmp_snitch = read_snitch()
-        if tmp_snitch["Config"]["Bandwidth monitor"]:
+        test_read_snitch = read_snitch()
+        if test_read_snitch["Config"]["Bandwidth monitor"]:
             assert subprocess.run(["sudo", "/usr/bin/env", "bpftrace", "--version"], capture_output=True).stdout, "Requires bpftrace for bandwidth monitoring"
         if os.path.exists(os.path.join(BASE_PATH, "snitch.db")):
             con = sqlite3.connect(os.path.join(BASE_PATH, "snitch.db"))
