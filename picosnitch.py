@@ -885,7 +885,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     bpf_text = bpf_text_base
     if config["Bandwidth monitor"]:
         if BPF.support_kfunc():
-            bpf_text = bpf_text_base + bpf_text_bandwidth_structs + bpf_text_bandwidth_probe + bpf_text_bandwidth_probe.replace("sendmsg", "recvmsg")
+            bpf_text = bpf_text_base + bpf_text_bandwidth_structs + bpf_text_bandwidth_probe.replace("int flags, ", "") + bpf_text_bandwidth_probe.replace("sendmsg", "recvmsg")
         else:
             config["Bandwidth monitor"] = False
             q_error.put("BPF.support_kfunc() was False, your kernel does not support bandwidth monitor")
@@ -1655,7 +1655,7 @@ BPF_PERF_OUTPUT(recvmsg6_events);
 """
 
 bpf_text_bandwidth_probe = """
-KRETFUNC_PROBE(sock_sendmsg, struct socket *sock, struct msghdr *msg, u32 retval) {
+KRETFUNC_PROBE(sock_sendmsg, struct socket *sock, struct msghdr *msg, int flags, u32 retval) {
     if (retval > 0 && retval < 0x7fffffff) {
         u32 pid = bpf_get_current_pid_tgid() >> 32;
         u32 uid = bpf_get_current_uid_gid();
