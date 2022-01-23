@@ -62,7 +62,7 @@ assert sys.version_info >= (3, 8), "Python version >= 3.8 is required"
 assert sys.platform.startswith("linux"), "Did not detect a supported operating system"
 
 # set constants and RLIMIT_NOFILE if configured
-PAGE_CNT: typing.Final[int] = 8
+PAGE_CNT: typing.Final[int] = 64
 if os.getuid() == 0:
     if os.getenv("SUDO_UID"):
         home_user = pwd.getpwuid(int(os.getenv("SUDO_UID"))).pw_name
@@ -503,7 +503,6 @@ def monitor_subprocess_initial_poll() -> list:
             proc["uid"] = proc["uids"][0]
             proc["ip"] = ""
             proc["port"] = -1
-            proc["socket"] = -1
             initial_processes.append(proc)
         except Exception:
             pass
@@ -514,14 +513,13 @@ def monitor_subprocess_initial_poll() -> list:
                 proc["uid"] = proc["uids"][0]
                 proc["ip"] = conn.raddr.ip
                 proc["port"] = conn.raddr.port
-                proc["socket"] = os.stat(f"/proc/{conn.pid}/fd/{conn.fd}").st_ino
                 initial_processes.append(proc)
         except Exception:
             pass
     return initial_processes
 
 
-def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, traffic_cnt: dict, socket_inodes: collections.OrderedDict, new_processes: typing.List[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> typing.List[tuple]:
+def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing.List[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> typing.List[tuple]:
     """iterate over the list of process/connection data and get sha256 to generate a list of transactions for the sql database"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     event_counter = collections.defaultdict(int)
@@ -576,29 +574,12 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, traffic_cnt: di
                ):
                 continue
         event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"])
-        event_counter[str(event)] += 1
-        traffic_counter["send " + str(event)] += traffic_cnt.pop(f"send {proc['pid']} {proc['socket']}", 0)
-        traffic_counter["recv " + str(event)] += traffic_cnt.pop(f"recv {proc['pid']} {proc['socket']}", 0)
-        if snitch["Config"]["Bandwidth monitor"]:
-            socket_inodes[f"{proc['socket']}"] = event
+        if not (proc["send"] or proc["recv"]):
+            event_counter[str(event)] += 1
+        traffic_counter["send " + str(event)] += proc["send"]
+        traffic_counter["recv " + str(event)] += proc["recv"]
         transactions.add(event)
-    transactions = [(*event, event_counter[str(event)], traffic_counter["send " + str(event)], traffic_counter["recv " + str(event)]) for event in transactions]
-    if snitch["Config"]["Bandwidth monitor"]:
-        for key in list(traffic_cnt.keys()):
-            if key.startswith("send"):
-                if event := socket_inodes.pop(inode := key.split(" ", 2)[2], ()):
-                    socket_inodes[inode] = event
-                    exe, name, cmdline, sha256, _, domain, ip, port, uid = event
-                    transactions.append((exe, name, cmdline, sha256, datetime_now, domain, ip, port, uid, 0, traffic_cnt.pop(key, 0), traffic_cnt.pop(key.replace("send", "recv"), 0)))
-        for key in list(traffic_cnt.keys()):
-            if key.startswith("recv"):
-                if event := socket_inodes.pop(inode := key.split(" ", 2)[2], ()):
-                    socket_inodes[inode] = event
-                    exe, name, cmdline, sha256, _, domain, ip, port, uid = event
-                    transactions.append((exe, name, cmdline, sha256, datetime_now, domain, ip, port, uid, 0, traffic_cnt.pop(key.replace("recv", "send"), 0), traffic_cnt.pop(key, 0)))
-        while len(socket_inodes) > 65536:
-            _ = socket_inodes.popitem(last=False)
-    return transactions
+    return [(*event, event_counter[str(event)], traffic_counter["send " + str(event)], traffic_counter["recv " + str(event)]) for event in transactions]
 
 
 def primary_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -> None:
@@ -729,7 +710,7 @@ def primary_subprocess(snitch, snitch_pipe, secondary_pipe, q_error, q_in, _q_ou
 
 
 def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary_pipe, q_primary_in, q_error, _q_in, _q_out):
-    """second to receive connection data from monitor, less responsive than primary, coordinates connection data with bpftrace bandwidth monitor, updates connection logs and reports sha256/vt_results back to primary_subprocess if needed"""
+    """second to receive connection data from monitor, less responsive than primary, coordinates connection data with virtustotal subprocess and checks fanotify, updates connection logs and reports sha256/vt_results back to primary_subprocess if needed"""
     parent_process = multiprocessing.parent_process()
     # maintain a separate copy of the snitch dictionary here and coordinate with the primary_subprocess (sha256 and vt_results)
     get_vt_results(snitch, p_virustotal.q_in, q_primary_in, True)
@@ -749,30 +730,8 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
     assert cur.fetchone()[0] == 1, f"Incorrect database version of snitch.db for picosnitch v{VERSION}"
     con.commit()
     con.close()
-    # init bandwidth monitor thread
-    def bandwidth_monitor_thread(traffic_data: list, shift_data: threading.Event):
-        bpftrace_proc = subprocess.Popen(["sudo", "/usr/bin/env", "bpftrace", "-e", bpftrace_text], stdout=subprocess.PIPE, universal_newlines=True)
-        atexit.register(bpftrace_proc.terminate)
-        bandwidth_re = re.compile(r"@(recv|send)_bytes\[(\d+), (\d+)\]: (\d+)")
-        line = bpftrace_proc.stdout.readline().strip()
-        while True:
-            if shift_data.is_set():
-                traffic_data[1] = traffic_data[0]
-                traffic_data[0] = collections.defaultdict(int)
-                shift_data.clear()
-            line = bpftrace_proc.stdout.readline().strip()
-            if line:
-                traffic = bandwidth_re.match(line)
-                traffic_data[0][f"{traffic.group(1)} {traffic.group(2)} {traffic.group(3)}"] += int(traffic.group(4))
-    shift_data = threading.Event()
-    traffic_data = [collections.defaultdict(int), collections.defaultdict(int)]
-    if snitch["Config"]["Bandwidth monitor"]:
-        thread = threading.Thread(target=bandwidth_monitor_thread, args=(traffic_data, shift_data,), daemon=True)
-        thread.start()
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
-    traffic_cnt = collections.defaultdict(int)
-    socket_inodes = collections.OrderedDict()
     # main loop
     transactions = []
     new_processes = []
@@ -781,11 +740,6 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
         if not parent_process.is_alive():
             return 0
         try:
-            # prep to check bandwidth usage and grab pending data
-            if not shift_data.is_set():
-                for k, v in traffic_data[1].items():
-                    traffic_cnt[k] += v
-                shift_data.set()
             # prep to receive new connections
             if secondary_pipe.poll():
                 q_error.put("sync error between secondary and primary on ready (pipe not empty)")
@@ -822,16 +776,12 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                 q_error.put("sync error between secondary and primary on receive (did not receive all messages)")
             elif transfer_size < 0:
                 q_error.put("sync error between secondary and primary on receive (received extra messages)")
-            # check for other pending data (vt, fanotify, bandwidth)
+            # check for other pending data (vt, fanotify)
             get_vt_results(snitch, p_virustotal.q_out, q_primary_in, False)
             get_fanotify_events(fan_fd, fan_mod_cnt, q_error)
-            if not shift_data.is_set():
-                for k, v in traffic_data[1].items():
-                    traffic_cnt[k] += v
-                shift_data.set()
             # process connection data
             if time.time() - last_write > snitch["Config"]["DB write limit (seconds)"]:
-                transactions += secondary_subprocess_helper(snitch, fan_mod_cnt, traffic_cnt, socket_inodes, new_processes, p_virustotal.q_in, q_primary_in, q_error)
+                transactions += secondary_subprocess_helper(snitch, fan_mod_cnt, new_processes, p_virustotal.q_in, q_primary_in, q_error)
                 new_processes = []
                 con = sqlite3.connect(file_path)
                 try:
@@ -928,10 +878,17 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
             stat = os.stat(f"/proc/{proc['pid']}/exe")
             st_dev, st_ino, pid, fd, exe, cmd = get_fd(stat.st_dev, stat.st_ino, proc["pid"], proc["ppid"], proc["port"])
             if config["Every exe (not just conns)"] or proc["port"] != -1:
-                snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "socket": proc["socket"], "port": proc["port"], "ip": proc["ip"]}))
+                snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": 0, "port": proc["port"], "ip": proc["ip"]}))
         except Exception:
             pass
     # run bpf program
+    bpf_text = bpf_text_base
+    if config["Bandwidth monitor"]:
+        if BPF.support_kfunc():
+            bpf_text = bpf_text_base + bpf_text_bandwidth_structs + bpf_text_bandwidth_probe + bpf_text_bandwidth_probe.replace("sendmsg", "recvmsg")
+        else:
+            config["Bandwidth monitor"] = False
+            q_error.put("BPF.support_kfunc() was False, your kernel does not support bandwidth monitor")
     b = BPF(text=bpf_text)
     b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
     b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
@@ -941,15 +898,31 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     def queue_ipv4_event(cpu, data, size):
         event = b["ipv4_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "socket": event.sock_ino, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": 0, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
     def queue_ipv6_event(cpu, data, size):
         event = b["ipv6_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "socket": event.sock_ino, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": 0, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
     def queue_other_event(cpu, data, size):
         event = b["other_socket_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, 0)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "socket": event.sock_ino, "port": 0, "ip": ""}))
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": 0, "port": 0, "ip": ""}))
+    def queue_sendv4_event(cpu, data, size):
+        event = b["sendmsg_events"].event(data)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": event.bytes, "recv": 0, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+    def queue_sendv6_event(cpu, data, size):
+        event = b["sendmsg6_events"].event(data)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": event.bytes, "recv": 0, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
+    def queue_recvv4_event(cpu, data, size):
+        event = b["recvmsg_events"].event(data)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": event.bytes, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+    def queue_recvv6_event(cpu, data, size):
+        event = b["recvmsg6_events"].event(data)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": event.bytes, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, -1)
@@ -959,6 +932,11 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+    if config["Bandwidth monitor"]:
+        b["sendmsg_events"].open_perf_buffer(queue_sendv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+        b["sendmsg6_events"].open_perf_buffer(queue_sendv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+        b["recvmsg_events"].open_perf_buffer(queue_recvv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+        b["recvmsg6_events"].open_perf_buffer(queue_recvv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     while True:
         if not parent_process.is_alive() or not q_in.empty():
             return 0
@@ -1466,8 +1444,6 @@ def start_picosnitch():
             assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
         assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
         test_read_snitch = read_snitch()
-        if test_read_snitch["Config"]["Bandwidth monitor"]:
-            assert subprocess.run(["sudo", "/usr/bin/env", "bpftrace", "--version"], capture_output=True).stdout, "Requires bpftrace for bandwidth monitoring"
         if os.path.exists(os.path.join(BASE_PATH, "snitch.db")):
             con = sqlite3.connect(os.path.join(BASE_PATH, "snitch.db"))
             cur = con.cursor()
@@ -1533,55 +1509,13 @@ def start_picosnitch():
         return 2
 
 
-### bpf programs
-bpftrace_text = """
-// based on https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/
-#include <net/sock.h>
-
-kretfunc:sock_sendmsg {
-    $sock = args->sock;
-    $daddr = $sock->sk->__sk_common.skc_daddr;
-    $family = $sock->sk->__sk_common.skc_family;
-    if ($daddr && ($family == AF_INET || $family == AF_INET6) && retval < 0x7fffffff) {
-        $inode = $sock->file->f_path.dentry->d_inode->i_ino;
-        @send_bytes[pid, $inode] = sum(retval);
-    }
-}
-
-kretfunc:sock_recvmsg {
-    $sock = args->sock;
-    $daddr = $sock->sk->__sk_common.skc_daddr;
-    $family = $sock->sk->__sk_common.skc_family;
-    if ($daddr && ($family == AF_INET || $family == AF_INET6) && retval < 0x7fffffff) {
-        $inode = $sock->file->f_path.dentry->d_inode->i_ino;
-        @recv_bytes[pid, $inode] = sum(retval);
-    }
-}
-
-interval:s:1 {
-    print(@send_bytes);
-    clear(@send_bytes);
-    print(@recv_bytes);
-    clear(@recv_bytes);
-}
-"""
-
-bpf_text = """
-// This eBPF program was based on the following source, licensed under the Apache License, Version 2.0
+### bpf program
+bpf_text_base = """
+// This eBPF program was based on the following sources
 // https://github.com/p-/socket-connect-bpf/blob/7f386e368759e53868a078570254348e73e73e22/securitySocketConnectSrc.bpf
-// Copyright 2019 Peter Stöckli
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-
-//     http://www.apache.org/licenses/LICENSE-2.0
-
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// https://github.com/iovisor/bcc/blob/master/tools/execsnoop.py
+// https://github.com/iovisor/bcc/blob/master/tools/tcpconnect.py
+// https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/
 
 #include <uapi/linux/ptrace.h>
 #include <linux/socket.h>
@@ -1596,7 +1530,6 @@ struct ipv4_event_t {
     u32 uid;
     u32 dev;
     u64 ino;
-    u64 sock_ino;
     char comm[TASK_COMM_LEN];
     u32 daddr;
     u16 dport;
@@ -1609,7 +1542,6 @@ struct ipv6_event_t {
     u32 uid;
     u32 dev;
     u64 ino;
-    u64 sock_ino;
     char comm[TASK_COMM_LEN];
     unsigned __int128 daddr;
     u16 dport;
@@ -1622,7 +1554,6 @@ struct other_socket_event_t {
     u32 uid;
     u32 dev;
     u64 ino;
-    u64 sock_ino;
     char comm[TASK_COMM_LEN];
 } __attribute__((packed));
 BPF_PERF_OUTPUT(other_socket_events);
@@ -1645,10 +1576,9 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
     u64 ino = task->mm->exe_file->f_path.dentry->d_inode->i_ino;
     u32 dev = task->mm->exe_file->f_path.dentry->d_inode->i_sb->s_dev;
     dev = new_encode_dev(dev);
-    u64 sock_ino = sock->file->f_path.dentry->d_inode->i_ino;
     u32 address_family = address->sa_family;
     if (address_family == AF_INET) { // https://github.com/torvalds/linux/blob/master/include/linux/socket.h
-        struct ipv4_event_t data4 = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino, .sock_ino = sock_ino};
+        struct ipv4_event_t data4 = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino};
         struct sockaddr_in *daddr = (struct sockaddr_in *)address;
         bpf_probe_read(&data4.daddr, sizeof(data4.daddr), &daddr->sin_addr.s_addr);
         u16 dport = 0;
@@ -1658,7 +1588,7 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
         ipv4_events.perf_submit(ctx, &data4, sizeof(data4));
     }
     else if (address_family == AF_INET6) { // https://github.com/torvalds/linux/blob/master/include/linux/socket.h
-        struct ipv6_event_t data6 = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino, .sock_ino = sock_ino};
+        struct ipv6_event_t data6 = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino};
         struct sockaddr_in6 *daddr6 = (struct sockaddr_in6 *)address;
         bpf_probe_read(&data6.daddr, sizeof(data6.daddr), &daddr6->sin6_addr.in6_u.u6_addr32);
         u16 dport6 = 0;
@@ -1668,7 +1598,7 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
         ipv6_events.perf_submit(ctx, &data6, sizeof(data6));
     }
     else if (address_family != AF_UNIX && address_family != AF_UNSPEC) { // other sockets, except UNIX and UNSPEC sockets
-        struct other_socket_event_t socket_event = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino, .sock_ino = sock_ino};
+        struct other_socket_event_t socket_event = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino};
         bpf_get_current_comm(&socket_event.comm, sizeof(socket_event.comm));
         other_socket_events.perf_submit(ctx, &socket_event, sizeof(socket_event));
     }
@@ -1687,6 +1617,87 @@ int exec_entry(struct pt_regs *ctx) {
         data.dev = new_encode_dev(data.dev);
         bpf_get_current_comm(&data.comm, sizeof(data.comm));
         exec_events.perf_submit(ctx, &data, sizeof(data));
+    }
+    return 0;
+}
+"""
+
+bpf_text_bandwidth_structs = """
+#include <net/sock.h>
+
+struct sendrecv_event_t {
+    u32 pid;
+    u32 ppid;
+    u32 uid;
+    u32 dev;
+    u64 ino;
+    u32 bytes;
+    char comm[TASK_COMM_LEN];
+    u32 daddr;
+    u16 dport;
+} __attribute__((packed));
+BPF_PERF_OUTPUT(sendmsg_events);
+BPF_PERF_OUTPUT(recvmsg_events);
+
+struct sendrecv6_event_t {
+    u32 pid;
+    u32 ppid;
+    u32 uid;
+    u32 dev;
+    u64 ino;
+    u32 bytes;
+    char comm[TASK_COMM_LEN];
+    unsigned __int128 daddr;
+    u16 dport;
+} __attribute__((packed));
+BPF_PERF_OUTPUT(sendmsg6_events);
+BPF_PERF_OUTPUT(recvmsg6_events);
+"""
+
+bpf_text_bandwidth_probe = """
+KRETFUNC_PROBE(sock_sendmsg, struct socket *sock, struct msghdr *msg, u32 retval) {
+    if (retval > 0 && retval < 0x7fffffff) {
+        u32 pid = bpf_get_current_pid_tgid() >> 32;
+        u32 uid = bpf_get_current_uid_gid();
+        struct task_struct *task, *parent;
+        struct mm_struct *mm;
+        struct file *exe_file;
+        struct dentry *exe_dentry;
+        struct inode *exe_inode;
+        struct super_block *exe_sb;
+        u64 ino;
+        u32 ppid, dev;
+        task = (struct task_struct *)bpf_get_current_task();
+        // u32 ppid = task->real_parent->tgid;
+        // u64 ino = task->mm->exe_file->f_path.dentry->d_inode->i_ino;
+        // u32 dev = task->mm->exe_file->f_path.dentry->d_inode->i_sb->s_dev;
+        if (bpf_probe_read_kernel(&parent, sizeof(parent), &task->real_parent)) return 0;
+        if (bpf_probe_read_kernel(&ppid, sizeof(ppid), &parent->tgid)) return 0;
+        if (bpf_probe_read_kernel(&mm, sizeof(mm), &task->mm)) return 0;
+        if (bpf_probe_read_kernel(&exe_file, sizeof(exe_file), &mm->exe_file)) return 0;
+        if (bpf_probe_read_kernel(&exe_dentry, sizeof(exe_dentry), &exe_file->f_path.dentry)) return 0;
+        if (bpf_probe_read_kernel(&exe_inode, sizeof(exe_inode), &exe_dentry->d_inode)) return 0;
+        if (bpf_probe_read_kernel(&ino, sizeof(ino), &exe_inode->i_ino)) return 0;
+        if (bpf_probe_read_kernel(&exe_sb, sizeof(exe_sb), &exe_inode->i_sb)) return 0;
+        if (bpf_probe_read_kernel(&dev, sizeof(dev), &exe_sb->s_dev)) return 0;
+        dev = new_encode_dev(dev);
+        u32 address_family = sock->sk->__sk_common.skc_family;
+        if (address_family == AF_INET) {
+            struct sendrecv_event_t data = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino, .bytes = retval};
+            bpf_get_current_comm(&data.comm, sizeof(data.comm));
+            bpf_probe_read(&data.daddr, sizeof(data.daddr), &sock->sk->__sk_common.skc_daddr);
+            bpf_probe_read(&data.dport, sizeof(data.dport), &sock->sk->__sk_common.skc_dport);
+            data.dport = ntohs(data.dport);
+            sendmsg_events.perf_submit(ctx, &data, sizeof(data));
+        }
+        else if (address_family == AF_INET6) {
+            struct sendrecv6_event_t data = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino, .bytes = retval};
+            bpf_get_current_comm(&data.comm, sizeof(data.comm));
+            bpf_probe_read(&data.daddr, sizeof(data.daddr), &sock->sk->__sk_common.skc_v6_daddr);
+            bpf_probe_read(&data.dport, sizeof(data.dport), &sock->sk->__sk_common.skc_dport);
+            data.dport = ntohs(data.dport);
+            sendmsg6_events.perf_submit(ctx, &data, sizeof(data));
+        }
     }
     return 0;
 }
