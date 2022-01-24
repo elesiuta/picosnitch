@@ -561,17 +561,15 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: 
             proc["cmdline"] = proc["cmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").replace("\0", "").strip()
         else:
             proc["cmdline"] = ""
-        if snitch["Config"]["Log addresses"]:
-            domain = reverse_dns_lookup(proc["ip"])
-        else:
-            domain, proc["ip"] = "", ""
+        if not snitch["Config"]["Log addresses"]:
+            proc["domain"], proc["ip"] = "", ""
         for ignore in snitch["Config"]["Log ignore"]:
             if ((proc["port"] == ignore) or
                 (sha256 == ignore) or
-                (type(ignore) == str and domain.startswith(ignore))
+                (type(ignore) == str and proc["domain"].startswith(ignore))
                ):
                 continue
-        event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"])
+        event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, proc["domain"], proc["ip"], proc["port"], proc["uid"])
         if not (proc["send"] or proc["recv"]):
             event_counter[str(event)] += 1
         traffic_counter["send " + str(event)] += proc["send"]
@@ -814,6 +812,11 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     _FAN_MARK_FLUSH = 0x80
     _FAN_MODIFY = 0x2
     libc.fanotify_mark(fan_fd, _FAN_MARK_FLUSH, _FAN_MODIFY, -1, None)
+    domain_dict = collections.defaultdict(str)
+    def get_domain(ip: str):
+        if domain := domain_dict[ip]:
+            return domain
+        return reverse_dns_lookup(ip)
     pid_dict = {}
     fd_dict = collections.OrderedDict()
     for x in range(FD_CACHE):
@@ -876,7 +879,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
             stat = os.stat(f"/proc/{proc['pid']}/exe")
             st_dev, st_ino, pid, fd, exe, cmd = get_fd(stat.st_dev, stat.st_ino, proc["pid"], proc["ppid"], proc["port"])
             if config["Every exe (not just conns)"] or proc["port"] != -1:
-                snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": 0, "port": proc["port"], "ip": proc["ip"]}))
+                snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": proc["uid"], "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": 0, "port": proc["port"], "ip": proc["ip"], "domain": get_domain(proc["ip"])}))
         except Exception:
             pass
     # run bpf program
@@ -890,46 +893,62 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     b = BPF(text=bpf_text)
     b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
     b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
+    b.attach_uprobe(name="c", sym="getaddrinfo", fn_name="dns_entry")
+    b.attach_uretprobe(name="c", sym="getaddrinfo", fn_name="dns_return")
     def queue_lost(*args):
         # if you see this, try increasing PAGE_CNT
         q_error.put("BPF callbacks not processing fast enough, may have lost data")
     def queue_ipv4_event(cpu, data, size):
         event = b["ipv4_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": 0, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+        ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": 0, "port": event.dport, "ip": ip, "domain": get_domain(ip)}))
     def queue_ipv6_event(cpu, data, size):
         event = b["ipv6_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": 0, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
+        ip = socket.inet_ntop(socket.AF_INET6, event.daddr)
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": 0, "port": event.dport, "ip": ip, "domain": get_domain(ip)}))
     def queue_other_event(cpu, data, size):
         event = b["other_socket_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, 0)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": 0, "port": 0, "ip": ""}))
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": 0, "port": 0, "ip": "", "domain": ""}))
     def queue_sendv4_event(cpu, data, size):
         event = b["sendmsg_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": event.bytes, "recv": 0, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+        ip =socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": event.bytes, "recv": 0, "port": event.dport, "ip": ip, "domain": get_domain(ip)}))
     def queue_sendv6_event(cpu, data, size):
         event = b["sendmsg6_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": event.bytes, "recv": 0, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
+        ip = socket.inet_ntop(socket.AF_INET6, event.daddr)
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": event.bytes, "recv": 0, "port": event.dport, "ip": ip, "domain": get_domain(ip)}))
     def queue_recvv4_event(cpu, data, size):
         event = b["recvmsg_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": event.bytes, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))}))
+        ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": event.bytes, "port": event.dport, "ip": ip, "domain": get_domain(ip)}))
     def queue_recvv6_event(cpu, data, size):
         event = b["recvmsg6_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": event.bytes, "port": event.dport, "ip": socket.inet_ntop(socket.AF_INET6, event.daddr)}))
+        ip = socket.inet_ntop(socket.AF_INET6, event.daddr)
+        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": event.bytes, "port": event.dport, "ip": ip, "domain": get_domain(ip)}))
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, -1)
         if config["Every exe (not just conns)"]:
-            snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "socket": -1, "port": -1, "ip": ""}))
+            snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "socket": -1, "port": -1, "ip": "", "domain": ""}))
+    def queue_dns_event(cpu, data, size):
+        event = b["dns_events"].event(data)
+        if event.daddr:
+            ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
+        else:
+            ip = socket.inet_ntop(socket.AF_INET6, event.daddr6)
+        domain_dict[ip] = ".".join(reversed(event.host.decode("utf-8", "replace").split(".")))
     b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+    b["dns_events"].open_perf_buffer(queue_dns_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     if config["Bandwidth monitor"]:
         b["sendmsg_events"].open_perf_buffer(queue_sendv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
         b["sendmsg6_events"].open_perf_buffer(queue_sendv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
@@ -1512,6 +1531,7 @@ bpf_text_base = """
 // This eBPF program was based on the following sources
 // https://github.com/p-/socket-connect-bpf/blob/7f386e368759e53868a078570254348e73e73e22/securitySocketConnectSrc.bpf
 // https://github.com/iovisor/bcc/blob/master/tools/execsnoop.py
+// https://github.com/iovisor/bcc/blob/master/tools/gethostlatency.py
 // https://github.com/iovisor/bcc/blob/master/tools/tcpconnect.py
 // https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/
 
@@ -1521,6 +1541,17 @@ bpf_text_base = """
 #include <linux/in.h>
 #include <linux/in6.h>
 #include <linux/ip.h>
+
+struct addrinfo {
+    int ai_flags;
+    int ai_family;
+    int ai_socktype;
+    int ai_protocol;
+    u32 ai_addrlen;
+    struct sockaddr *ai_addr;
+    char *ai_canonname;
+    struct addrinfo *ai_next;
+};
 
 struct ipv4_event_t {
     u32 pid;
@@ -1555,6 +1586,19 @@ struct other_socket_event_t {
     char comm[TASK_COMM_LEN];
 } __attribute__((packed));
 BPF_PERF_OUTPUT(other_socket_events);
+
+struct dns_val_t {
+    char host[80];
+    struct addrinfo **res;
+};
+BPF_HASH(dns_hash, u32, struct dns_val_t);
+
+struct dns_event_t {
+    char host[80];
+    u32 daddr;
+    unsigned __int128 daddr6;
+} __attribute__((packed));
+BPF_PERF_OUTPUT(dns_events);
 
 struct exec_event_t {
     u32 pid;
@@ -1599,6 +1643,45 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
         struct other_socket_event_t socket_event = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino};
         bpf_get_current_comm(&socket_event.comm, sizeof(socket_event.comm));
         other_socket_events.perf_submit(ctx, &socket_event, sizeof(socket_event));
+    }
+    return 0;
+}
+
+int dns_entry(struct pt_regs *ctx, const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res) {
+    if (PT_REGS_PARM1(ctx)) {
+        struct dns_val_t val = {.res = res};
+        if (bpf_probe_read_user(&val.host, sizeof(val.host), (void *)PT_REGS_PARM1(ctx)) == 0) {
+            u32 tid = (u32)bpf_get_current_pid_tgid();
+            dns_hash.update(&tid, &val);
+        }
+    }
+    return 0;
+}
+
+int dns_return(struct pt_regs *ctx) {
+    struct dns_val_t *valp;
+    u32 tid = (u32)bpf_get_current_pid_tgid();
+    valp = dns_hash.lookup(&tid);
+    if (valp) {
+        struct dns_event_t data = {};
+        bpf_probe_read_kernel(&data.host, sizeof(data.host), (void *)valp->host);
+        struct addrinfo *address;
+        bpf_probe_read(&address, sizeof(address), valp->res);
+        u32 address_family;
+        bpf_probe_read(&address_family, sizeof(address_family), &address->ai_family);
+        if (address_family == AF_INET) {
+            struct sockaddr_in *daddr;
+            bpf_probe_read(&daddr, sizeof(daddr), &address->ai_addr);
+            bpf_probe_read(&data.daddr, sizeof(data.daddr), &daddr->sin_addr.s_addr);
+            dns_events.perf_submit(ctx, &data, sizeof(data));
+        }
+        else if (address_family == AF_INET6) {
+            struct sockaddr_in6 *daddr6;
+            bpf_probe_read(&daddr6, sizeof(daddr6), &address->ai_addr);
+            bpf_probe_read(&data.daddr6, sizeof(data.daddr6), &daddr6->sin6_addr.in6_u.u6_addr32);
+            dns_events.perf_submit(ctx, &data, sizeof(data));
+        }
+        dns_hash.delete(&tid);
     }
     return 0;
 }
