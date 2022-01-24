@@ -1667,19 +1667,22 @@ int dns_return(struct pt_regs *ctx) {
         bpf_probe_read_kernel(&data.host, sizeof(data.host), (void *)valp->host);
         struct addrinfo *address;
         bpf_probe_read(&address, sizeof(address), valp->res);
-        u32 address_family;
-        bpf_probe_read(&address_family, sizeof(address_family), &address->ai_family);
-        if (address_family == AF_INET) {
-            struct sockaddr_in *daddr;
-            bpf_probe_read(&daddr, sizeof(daddr), &address->ai_addr);
-            bpf_probe_read(&data.daddr, sizeof(data.daddr), &daddr->sin_addr.s_addr);
-            dns_events.perf_submit(ctx, &data, sizeof(data));
-        }
-        else if (address_family == AF_INET6) {
-            struct sockaddr_in6 *daddr6;
-            bpf_probe_read(&daddr6, sizeof(daddr6), &address->ai_addr);
-            bpf_probe_read(&data.daddr6, sizeof(data.daddr6), &daddr6->sin6_addr.in6_u.u6_addr32);
-            dns_events.perf_submit(ctx, &data, sizeof(data));
+        for (int i = 0; i < 3; i++) {
+            u32 address_family;
+            bpf_probe_read(&address_family, sizeof(address_family), &address->ai_family);
+            if (address_family == AF_INET) {
+                struct sockaddr_in *daddr;
+                bpf_probe_read(&daddr, sizeof(daddr), &address->ai_addr);
+                bpf_probe_read(&data.daddr, sizeof(data.daddr), &daddr->sin_addr.s_addr);
+                dns_events.perf_submit(ctx, &data, sizeof(data));
+            }
+            else if (address_family == AF_INET6) {
+                struct sockaddr_in6 *daddr6;
+                bpf_probe_read(&daddr6, sizeof(daddr6), &address->ai_addr);
+                bpf_probe_read(&data.daddr6, sizeof(data.daddr6), &daddr6->sin6_addr.in6_u.u6_addr32);
+                dns_events.perf_submit(ctx, &data, sizeof(data));
+            }
+            if (bpf_probe_read(&address, sizeof(address), &address->ai_next) != 0) break;
         }
         dns_hash.delete(&tid);
     }
