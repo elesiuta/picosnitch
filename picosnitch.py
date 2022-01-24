@@ -34,7 +34,6 @@ import os
 import pickle
 import pwd
 import queue
-import re
 import resource
 import signal
 import site
@@ -508,12 +507,11 @@ def monitor_subprocess_initial_poll() -> list:
             pass
     for conn in psutil.net_connections(kind="all"):
         try:
-            if conn.pid and conn.raddr:
-                proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "pid", "ppid", "uids"], ad_value="")
-                proc["uid"] = proc["uids"][0]
-                proc["ip"] = conn.raddr.ip
-                proc["port"] = conn.raddr.port
-                initial_processes.append(proc)
+            proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "pid", "ppid", "uids"], ad_value="")
+            proc["uid"] = proc["uids"][0]
+            proc["ip"] = conn.raddr.ip
+            proc["port"] = conn.raddr.port
+            initial_processes.append(proc)
         except Exception:
             pass
     return initial_processes
@@ -710,7 +708,7 @@ def primary_subprocess(snitch, snitch_pipe, secondary_pipe, q_error, q_in, _q_ou
 
 
 def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary_pipe, q_primary_in, q_error, _q_in, _q_out):
-    """second to receive connection data from monitor, less responsive than primary, coordinates connection data with virtustotal subprocess and checks fanotify, updates connection logs and reports sha256/vt_results back to primary_subprocess if needed"""
+    """second to receive connection data from monitor, less responsive than primary, coordinates connection data with virustotal subprocess and checks fanotify, updates connection logs and reports sha256/vt_results back to primary_subprocess if needed"""
     parent_process = multiprocessing.parent_process()
     # maintain a separate copy of the snitch dictionary here and coordinate with the primary_subprocess (sha256 and vt_results)
     get_vt_results(snitch, p_virustotal.q_in, q_primary_in, True)
@@ -1125,8 +1123,8 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
         "year": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1, month=1),
     })
     pri_i = 0
-    p_screens = ["Applications", "Names", "SHA256", "Host Names", "Host IPs", "Ports", "Users", "Connection Time"]
-    p_names = ["Application", "Name", "SHA256", "Host Name", "Host IP", "Port", "User", "Connection Time"]
+    p_screens = ["Executables", "Process Names", "SHA256", "Domains", "Destination IPs", "Destination Ports", "Users", "Entry Time"]
+    p_names = ["Executable", "Process Name", "SHA256", "Domain", "Destination IP", "Destination Port", "User", "Entry Time"]
     p_col = ["exe", "name", "sha256", "domain", "ip", "port", "uid", "contime"]
     sec_i = 0
     s_screens = p_screens + ["Commands"]
@@ -1577,7 +1575,7 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
     u32 dev = task->mm->exe_file->f_path.dentry->d_inode->i_sb->s_dev;
     dev = new_encode_dev(dev);
     u32 address_family = address->sa_family;
-    if (address_family == AF_INET) { // https://github.com/torvalds/linux/blob/master/include/linux/socket.h
+    if (address_family == AF_INET) {
         struct ipv4_event_t data4 = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino};
         struct sockaddr_in *daddr = (struct sockaddr_in *)address;
         bpf_probe_read(&data4.daddr, sizeof(data4.daddr), &daddr->sin_addr.s_addr);
@@ -1587,7 +1585,7 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
         bpf_get_current_comm(&data4.comm, sizeof(data4.comm));
         ipv4_events.perf_submit(ctx, &data4, sizeof(data4));
     }
-    else if (address_family == AF_INET6) { // https://github.com/torvalds/linux/blob/master/include/linux/socket.h
+    else if (address_family == AF_INET6) {
         struct ipv6_event_t data6 = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino};
         struct sockaddr_in6 *daddr6 = (struct sockaddr_in6 *)address;
         bpf_probe_read(&data6.daddr, sizeof(data6.daddr), &daddr6->sin6_addr.in6_u.u6_addr32);
@@ -1597,7 +1595,7 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
         bpf_get_current_comm(&data6.comm, sizeof(data6.comm));
         ipv6_events.perf_submit(ctx, &data6, sizeof(data6));
     }
-    else if (address_family != AF_UNIX && address_family != AF_UNSPEC) { // other sockets, except UNIX and UNSPEC sockets
+    else if (address_family != AF_UNIX && address_family != AF_UNSPEC) {
         struct other_socket_event_t socket_event = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .ino = ino};
         bpf_get_current_comm(&socket_event.comm, sizeof(socket_event.comm));
         other_socket_events.perf_submit(ctx, &socket_event, sizeof(socket_event));
