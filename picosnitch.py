@@ -943,7 +943,11 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
             ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
         else:
             ip = socket.inet_ntop(socket.AF_INET6, event.daddr6)
-        domain_dict[ip] = ".".join(reversed(event.host.decode("utf-8", "replace").split(".")))
+        domain = event.host.decode("utf-8", "replace")
+        try:
+            _ = ipaddress.ip_address(domain)
+        except ValueError:
+            domain_dict[ip] = ".".join(reversed(domain.split(".")))
     b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
