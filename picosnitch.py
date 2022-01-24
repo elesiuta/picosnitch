@@ -813,7 +813,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     _FAN_MODIFY = 0x2
     libc.fanotify_mark(fan_fd, _FAN_MARK_FLUSH, _FAN_MODIFY, -1, None)
     domain_dict = collections.defaultdict(str)
-    def get_domain(ip: str):
+    def get_domain(ip: str) -> str:
         if domain := domain_dict[ip]:
             return domain
         return reverse_dns_lookup(ip)
@@ -936,7 +936,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         event = b["exec_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, -1)
         if config["Every exe (not just conns)"]:
-            snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "socket": -1, "port": -1, "ip": "", "domain": ""}))
+            snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "uid": event.uid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd, "send": 0, "recv": 0, "port": -1, "ip": "", "domain": ""}))
     def queue_dns_event(cpu, data, size):
         event = b["dns_events"].event(data)
         if event.daddr:
