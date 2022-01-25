@@ -1693,6 +1693,8 @@ int dns_return(struct pt_regs *ctx) {
                 dns_events.perf_submit(ctx, &data, sizeof(data));
             }
             if (bpf_probe_read(&address, sizeof(address), &address->ai_next) != 0) break;
+            struct dns_event_t data = {};
+            bpf_probe_read_kernel(&data.host, sizeof(data.host), (void *)valp->host);
         }
         dns_hash.delete(&tid);
     }
