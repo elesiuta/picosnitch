@@ -17,7 +17,7 @@
   - for example, it can successfully identify whether curl being run from inside a docker container is the same or different from curl being run on your system, even if they both appear to be located at /usr/bin/curl (or if another program is masquerading as curl)
   - to improve performance, hashes are cached based on the device and inode of the executable, and watched with fanotify to trigger a rehash if the executable is modified
 - Featuring a curses based UI for browsing past connections
-- And can monitor your bandwidth, breaking down traffic by time, executable, domain, port, user
+- And can monitor your bandwidth, breaking down traffic by time, executable, hash, domain, port, user
 - For advanced users who know what should be running on their system, and when they should be making network connections
   - only you can decide which programs to trust, and what actions to take for offending programs
   - picosnitch is purely a monitoring and detection tool, focussing on doing one thing well, so blocking or sandboxing programs is out of scope
@@ -39,8 +39,6 @@
 ### [PyPI](https://pypi.org/project/picosnitch/) for any Linux distribution with Python >= 3.8
 - install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
   - it should be called `python-bcc` or `python-bpfcc`
-- install [bpftrace](https://github.com/iovisor/bpftrace/blob/master/INSTALL.md)
-  - only needed for bandwidth monitoring (enabled by default)
 - install picosnitch using [pip](https://pip.pypa.io/)
   - `pip3 install "picosnitch[full]" --upgrade --user`
 - create a service file for systemd to run picosnitch (recommended)
@@ -56,7 +54,7 @@
   - or if you don't use systemd `picosnitch start|stop|restart`
 - user interface for browsing past connections
   - start with `picosnitch view`
-  - `space/enter`: filter on entry `backspace`: remove filter `h/H`: cycle through history `t/T`: cycle time range `u/U`: cycle units B/kB/MB/GB `r`: refresh view `q`: quit
+  - `space/enter`: filter on entry `backspace`: remove filter `h/H`: cycle through history `t/T`: cycle time range `u/U`: cycle byte units `r`: refresh view `q`: quit
 - show usage with `picosnitch help`
 
 # [configuration](#configuration)
