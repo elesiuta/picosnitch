@@ -780,6 +780,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
             get_fanotify_events(fan_fd, fan_mod_cnt, q_error)
             # process connection data
             if time.time() - last_write > snitch["Config"]["DB write limit (seconds)"]:
+                current_write = time.time()
                 transactions += secondary_subprocess_helper(snitch, fan_mod_cnt, new_processes, p_virustotal.q_in, q_primary_in, q_error)
                 new_processes = []
                 con = sqlite3.connect(file_path)
@@ -794,7 +795,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                                 clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in entry]
                                 text_file.write(",".join(clean_entry) + "\n")
                     transactions = []
-                    last_write = time.time()
+                    last_write = current_write
                 except Exception as e:
                     q_error.put("SQL execute %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
                 con.close()
