@@ -806,6 +806,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     """runs a bpf program to monitor the system for new connections and puts info into a pipe for primary_subprocess"""
     # initialization
     os.nice(-20)
+    import bcc
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
@@ -884,16 +885,20 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     # run bpf program
     bpf_text = bpf_text_base
     if config["Bandwidth monitor"]:
-        if BPF.support_kfunc():
-            bpf_text = bpf_text_base + bpf_text_bandwidth_structs + bpf_text_bandwidth_probe.replace("int flags, ", "") + bpf_text_bandwidth_probe.replace("sendmsg", "recvmsg")
-        else:
+        try:
+            if BPF.support_kfunc():
+                bpf_text = bpf_text_base + bpf_text_bandwidth_structs + bpf_text_bandwidth_probe.replace("int flags, ", "") + bpf_text_bandwidth_probe.replace("sendmsg", "recvmsg")
+            else:
+                raise Exception()
+        except Exception:
             config["Bandwidth monitor"] = False
-            q_error.put("BPF.support_kfunc() was False, your kernel does not support bandwidth monitor")
+            q_error.put("BPF.support_kfunc() was False, cannot enable bandwidth monitor")
     b = BPF(text=bpf_text)
     b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
     b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
-    b.attach_uprobe(name="c", sym="getaddrinfo", fn_name="dns_entry")
-    b.attach_uretprobe(name="c", sym="getaddrinfo", fn_name="dns_return")
+    if tuple(map(int, bcc.__version__.split("."))) >= (0, 23):
+        b.attach_uprobe(name="c", sym="getaddrinfo", fn_name="dns_entry")
+        b.attach_uretprobe(name="c", sym="getaddrinfo", fn_name="dns_return")
     def queue_lost(*args):
         # if you see this, try increasing PAGE_CNT
         q_error.put("BPF callbacks not processing fast enough, may have lost data")
@@ -951,7 +956,8 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
-    b["dns_events"].open_perf_buffer(queue_dns_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+    if tuple(map(int, bcc.__version__.split("."))) >= (0, 23):
+        b["dns_events"].open_perf_buffer(queue_dns_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
     if config["Bandwidth monitor"]:
         b["sendmsg_events"].open_perf_buffer(queue_sendv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
         b["sendmsg6_events"].open_perf_buffer(queue_sendv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
