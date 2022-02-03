@@ -10,20 +10,13 @@
 
 # [picosnitch](https://elesiuta.github.io/picosnitch/)
 ![screenshot.png](https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/screenshot.png)
-- An extremely simple, reliable, and lightweight program for linux to help protect your privacy
-- It monitors your system and notifies you whenever it sees a new program that connects to the network
-- Or when the sha256 changes for one of those programs (can also check [VirusTotal](https://www.virustotal.com))
-  - by hashing executables, picosnitch can provide more reliable intrusion detection since different executables can appear to be located on the same path
-  - for example, it can successfully identify whether curl being run from inside a docker container is the same or different from curl being run on your system, even if they both appear to be located at /usr/bin/curl (or if another program is masquerading as curl)
-  - to improve performance, hashes are cached based on the device and inode of the executable, and watched with fanotify to trigger a rehash if the executable is modified
-- Featuring a curses based UI for browsing past connections
-- And can monitor your bandwidth, breaking down traffic by time, executable, hash, domain, port, user
-- For advanced users who know what should be running on their system, and when they should be making network connections
-  - only you can decide which programs to trust, and what actions to take for offending programs
-  - picosnitch is purely a monitoring and detection tool, focussing on doing one thing well, so blocking or sandboxing programs is out of scope
-  - running untrustworthy programs should only be done in an isolated environment and you should always have good backups in order to recover, picosnitch can only help you detect if your system becomes compromised or if something breaks your trust
-  - you may want to watch picosnitch logs with another program to automatically take actions such as blocking connections, terminating the offending program, and emailing the log if this is a server
-  - picosnitch can be used with any other firewall tool and does not impact performance since it only monitors connections and does not intercept them
+- Monitors your bandwidth, breaking down traffic by executable, hash, domain, port, or user over time
+- Receive notifications whenever a new program connects to the network, or when it's modified
+- Can optionally check hashes or executables using [VirusTotal](https://www.virustotal.com)
+- Executable hashes are cached based on dev + ino for improved performance, and works with applications running inside containers
+- Uses BPF [for accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and fanotify to watch executables for modification
+- Focus is on monitoring and detection, and doing that well, this is not a firewall since that would significantly increase complexity and impact performance in order to make use of the security benefits of verifying hashes and would need to intercept calls to other programs
+- Since applications can also call others to send/receive data for them, you need to take this into account when inspecting your logs, and should sandbox anything suspect with something like [firejail](https://wiki.archlinux.org/title/firejail#Usage), [flatpak](https://github.com/tchx84/Flatseal/blob/master/DOCUMENTATION.md#share), or a virtual machine
 - Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
 
 # [installation](#installation)
@@ -98,7 +91,7 @@
   - this is used for determining whether to create a notification
   - it contains known process name(s) by executable, executable(s) by process name, and sha256 hash(es) with VirusTotal results by executable
 - the full connection log is stored in `~/.config/picosnitch/snitch.db`
-  - this is used for `picosnitch view`
+  - this is used for `picosnitch view` or something like [DB Browser](https://sqlitebrowser.org/)
   - note, connection times are based on when the group is processed, so they are accurate to within `DB write limit (seconds)` at best, and could be delayed if the previous group is slow to hash
   - notifications are handled by a separate subprocess, so they are not subject to the same delays as the connection log
 - if `DB text log` is enabled, the full connection log is also written to `~/.config/picosnitch/conn.log`

@@ -1416,12 +1416,12 @@ def main():
 
 def start_picosnitch():
     """command line interface, pre-startup checks, and run"""
-    readme = textwrap.dedent(f"""    picosnitch is a small program to monitor your system for processes that
-    make network connections.
+    readme = textwrap.dedent(f"""    picosnitch monitors your system for applications that make network connections
+    and can track their bandwidth or verify their hash.
 
     picosnitch comes with ABSOLUTELY NO WARRANTY. This is free software, and you
-    are welcome to redistribute it under certain conditions. See the GNU General
-    Public License for details.
+    are welcome to redistribute it under certain conditions. See version 3 of the
+    GNU General Public License for details.
 
     website: https://elesiuta.github.io/picosnitch
     version: {VERSION} ({os.path.abspath(__file__)})

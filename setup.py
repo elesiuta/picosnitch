@@ -8,7 +8,7 @@ setuptools.setup(
     name="picosnitch",
     version=picosnitch.VERSION,
     python_requires=">=3.8",
-    description="Protect your privacy, see which processes make remote network connections",
+    description="Protect your privacy, see which applications make remote network connections",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://elesiuta.github.io/picosnitch",
