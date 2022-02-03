@@ -10,10 +10,10 @@
 
 # [picosnitch](https://elesiuta.github.io/picosnitch/)
 ![screenshot.png](https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/screenshot.png)
-- Monitors your bandwidth, breaking down traffic by executable, hash, domain, port, or user over time
 - Receive notifications whenever a new program connects to the network, or when it's modified
+- Monitors your bandwidth, breaking down traffic by executable, hash, domain, port, or user over time
 - Can optionally check hashes or executables using [VirusTotal](https://www.virustotal.com)
-- Executable hashes are cached based on dev + ino for improved performance, and works with applications running inside containers
+- Executable hashes are cached based on device + inode for improved performance, and works with applications running inside containers
 - Uses BPF [for accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and fanotify to watch executables for modification
 - Focus is on monitoring and detection, and doing that well, this is not a firewall since that would significantly increase complexity and impact performance in order to make use of the security benefits of verifying hashes and would need to intercept calls to other programs
 - Since applications can also call others to send/receive data for them, you need to take this into account when inspecting your logs, and should sandbox anything suspect with something like [firejail](https://wiki.archlinux.org/title/firejail#Usage), [flatpak](https://github.com/tchx84/Flatseal/blob/master/DOCUMENTATION.md#share), or a virtual machine
