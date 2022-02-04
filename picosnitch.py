@@ -723,17 +723,12 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
     file_path = os.path.join(BASE_PATH, "snitch.db")
     text_path = os.path.join(BASE_PATH, "conn.log")
     con = sqlite3.connect(file_path)
-    cur = con.cursor()
-    cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
-    if cur.fetchone()[0] != 1:
-        cur.execute(''' CREATE TABLE connections
-                        (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, psha256 text, conns integer, send integer, recv integer) ''')
-        cur.execute(''' PRAGMA user_version = 2 ''')
-    else:
+    if snitch["Config"]["DB sql log"]:
+        cur = con.cursor()
+        cur.execute(''' PRAGMA user_version ''')
+        assert cur.fetchone()[0] == 2, f"Incorrect database version of snitch.db for picosnitch v{VERSION}"
         cur.execute(''' DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") ''' % int(snitch["Config"]["DB retention (days)"]))
-    cur.execute(''' PRAGMA user_version ''')
-    assert cur.fetchone()[0] == 2, f"Incorrect database version of snitch.db for picosnitch v{VERSION}"
-    con.commit()
+        con.commit()
     con.close()
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
@@ -1401,8 +1396,6 @@ def ui_init() -> int:
     con = sqlite3.connect(file_path, timeout=15)
     # check for table
     cur = con.cursor()
-    cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
-    assert cur.fetchone()[0] == 1, f"Table 'connections' does not exist in {file_path}"
     cur.execute(''' PRAGMA user_version ''')
     assert cur.fetchone()[0] == 2, f"Incorrect database version of snitch.db for picosnitch v{VERSION}"
     con.close()
@@ -1488,9 +1481,15 @@ def start_picosnitch():
             assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
         assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
         test_read_snitch = read_snitch()
-        if os.path.exists(os.path.join(BASE_PATH, "snitch.db")):
-            con = sqlite3.connect(os.path.join(BASE_PATH, "snitch.db"))
-            cur = con.cursor()
+        con = sqlite3.connect(os.path.join(BASE_PATH, "snitch.db"))
+        cur = con.cursor()
+        cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
+        if cur.fetchone()[0] != 1:
+            cur.execute(''' CREATE TABLE connections
+                            (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, psha256 text, conns integer, send integer, recv integer) ''')
+            cur.execute(''' PRAGMA user_version = 2 ''')
+            con.commit()
+        else:
             cur.execute(''' PRAGMA user_version ''')
             user_version = cur.fetchone()[0]
             if user_version == 0:
@@ -1508,7 +1507,7 @@ def start_picosnitch():
                 cur.execute(''' DROP TABLE tmp ''')
                 cur.execute(''' PRAGMA user_version = 2 ''')
                 con.commit()
-            con.close()
+        con.close()
         if sys.argv[1] in ["start", "stop", "restart"]:
             if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
                 print("Found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl")
