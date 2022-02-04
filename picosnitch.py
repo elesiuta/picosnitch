@@ -909,9 +909,9 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     if tuple(map(int, bcc.__version__.split("."))) >= (0, 23):
         b.attach_uprobe(name="c", sym="getaddrinfo", fn_name="dns_entry")
         b.attach_uretprobe(name="c", sym="getaddrinfo", fn_name="dns_return")
-    def queue_lost(*args):
+    def queue_lost(event, *args):
         # if you see this, try increasing PAGE_CNT
-        q_error.put("BPF callbacks not processing fast enough, may have lost data")
+        q_error.put(f"BPF callbacks not processing fast enough, missed {event} event")
     def queue_ipv4_event(cpu, data, size):
         event = b["ipv4_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
@@ -970,17 +970,17 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
             _ = ipaddress.ip_address(domain)
         except ValueError:
             domain_dict[ip] = ".".join(reversed(domain.split(".")))
-    b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
-    b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
-    b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
-    b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+    b["ipv4_events"].open_perf_buffer(queue_ipv4_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("ipv4", *args))
+    b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("ipv6", *args))
+    b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("other", *args))
+    b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("exec", *args))
     if tuple(map(int, bcc.__version__.split("."))) >= (0, 23):
-        b["dns_events"].open_perf_buffer(queue_dns_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+        b["dns_events"].open_perf_buffer(queue_dns_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("dns", *args))
     if config["Bandwidth monitor"]:
-        b["sendmsg_events"].open_perf_buffer(queue_sendv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
-        b["sendmsg6_events"].open_perf_buffer(queue_sendv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
-        b["recvmsg_events"].open_perf_buffer(queue_recvv4_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
-        b["recvmsg6_events"].open_perf_buffer(queue_recvv6_event, page_cnt=PAGE_CNT, lost_cb=queue_lost)
+        b["sendmsg_events"].open_perf_buffer(queue_sendv4_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("sendv4", *args))
+        b["sendmsg6_events"].open_perf_buffer(queue_sendv6_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("sendv6", *args))
+        b["recvmsg_events"].open_perf_buffer(queue_recvv4_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("recvv4", *args))
+        b["recvmsg6_events"].open_perf_buffer(queue_recvv6_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("recvv6", *args))
     while True:
         if not parent_process.is_alive() or not q_in.empty():
             return 0
