@@ -1715,7 +1715,7 @@ int dns_return(struct pt_regs *ctx) {
         bpf_probe_read_kernel(&data.host, sizeof(data.host), (void *)valp->host);
         struct addrinfo *address;
         bpf_probe_read(&address, sizeof(address), valp->res);
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 8; i++) {
             u32 address_family;
             bpf_probe_read(&address_family, sizeof(address_family), &address->ai_family);
             if (address_family == AF_INET) {
