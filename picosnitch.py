@@ -342,6 +342,8 @@ def read_snitch() -> dict:
         "Exe Log": [],
         "Executables": {},
         "Names": {},
+        "Parent Executables": {},
+        "Parent Names": {},
         "SHA256": {}
     }
     data = {k: v for k, v in template.items()}
@@ -361,7 +363,7 @@ def read_snitch() -> dict:
     if os.path.exists(record_path):
         with open(record_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             snitch_record = json.load(json_file)
-        for key in ["Executables", "Names", "SHA256"]:
+        for key in ["Executables", "Names", "Parent Executables", "Parent Names", "SHA256"]:
             if key in snitch_record:
                 data[key] = snitch_record[key]
     assert all(type(data[key]) == type(template[key]) for key in template), "Invalid json files"
@@ -483,6 +485,8 @@ def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiproces
                 if snitch["SHA256"][exe][sha256] in ["VT Pending", "File not analyzed (no api key)", "", None]:
                     if exe in snitch["Executables"] and snitch["Executables"][exe]:
                         name = snitch["Executables"][exe][0]
+                    elif exe in snitch["Parent Executables"] and snitch["Parent Executables"][exe]:
+                        name = snitch["Parent Executables"][exe][0]
                     else:
                         name = exe
                     proc = {"exe": exe, "name": name}
@@ -519,8 +523,41 @@ def monitor_subprocess_initial_poll() -> list:
     return initial_processes
 
 
+def secondary_subprocess_sha_wrapper(snitch: dict, fan_mod_cnt: dict, proc: dict, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> str:
+    """get sha256 of executable and submit to primary_subprocess or virustotal_subprocess if necessary"""
+    sha_fd_error = ""
+    sha256 = get_sha256_fd(proc["fd"], proc["dev"], proc["ino"], fan_mod_cnt["%d %d" % (proc["dev"], proc["ino"])])
+    if sha256.startswith("!"):
+        # fallback on trying to read directly (if still alive) if fd_cache fails, probable causes include:
+        # system suspends in the middle of hashing (since cache is reset)
+        # process too short lived to open fd or stat in time (then fallback will fail too)
+        # too many executables on system (see Set RLIMIT_NOFILE)
+        sha_fd_error = sha256
+        sha256 = get_sha256_pid(proc["pid"], proc["dev"], proc["ino"])
+        if sha256.startswith("!"):
+            # notify user with what went wrong (may be cause for suspicion)
+            sha256_error = sha_fd_error[4:] + " and " + sha256[4:]
+            sha256 = sha_fd_error + " " + sha256
+            q_error.put(sha256_error + " for " + str(proc))
+        else:
+            q_error.put(sha_fd_error[4:] + " for " + str(proc) + " (fallback pid hash successful)")
+    if proc["exe"] in snitch["SHA256"]:
+        if sha256 not in snitch["SHA256"][proc["exe"]]:
+            snitch["SHA256"][proc["exe"]][sha256] = "SUBMITTED"
+            q_vt.put(pickle.dumps((proc, sha256)))
+            q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
+        elif snitch["SHA256"][proc["exe"]][sha256] == "Failed to read process for upload":
+            snitch["SHA256"][proc["exe"]][sha256] = "RETRY"
+            q_vt.put(pickle.dumps((proc, sha256)))
+    else:
+        snitch["SHA256"][proc["exe"]] = {sha256: "SUBMITTED"}
+        q_vt.put(pickle.dumps((proc, sha256)))
+        q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
+    return sha256
+
+
 def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing.List[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> typing.List[tuple]:
-    """iterate over the list of process/connection data and get sha256 to generate a list of transactions for the sql database"""
+    """iterate over the list of process/connection data to generate a list of transactions for the sql database"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     event_counter = collections.defaultdict(int)
     traffic_counter = collections.defaultdict(int)
@@ -530,40 +567,9 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: 
         if type(proc) != dict:
             q_error.put("sync error between secondary and primary, received '%s' in middle of transfer" % str(proc))
             continue
-        sha_fd_error = ""
-        sha256 = get_sha256_fd(proc["fd"], proc["dev"], proc["ino"], fan_mod_cnt["%d %d" % (proc["dev"], proc["ino"])])
-        if sha256.startswith("!"):
-            # fallback on trying to read directly (if still alive) if fd_cache fails, probable causes include:
-            # system suspends in the middle of hashing (since cache is reset)
-            # process too short lived to open fd or stat in time (then fallback will fail too)
-            # too many executables on system (see Set RLIMIT_NOFILE)
-            sha_fd_error = sha256
-            sha256 = get_sha256_pid(proc["pid"], proc["dev"], proc["ino"])
-            if sha256.startswith("!"):
-                # notify user with what went wrong (may be cause for suspicion)
-                sha256_error = sha_fd_error[4:] + " and " + sha256[4:]
-                sha256 = sha_fd_error + " " + sha256
-                q_error.put(sha256_error + " for " + str(proc))
-            else:
-                q_error.put(sha_fd_error[4:] + " for " + str(proc) + " (fallback pid hash successful)")
-        psha256 = get_sha256_fd(proc["pfd"], proc["pdev"], proc["pino"], fan_mod_cnt["%d %d" % (proc["pdev"], proc["pino"])])
-        if psha256.startswith("!"):
-            psha_fd_error = psha256
-            psha256 = get_sha256_pid(proc["ppid"], proc["pdev"], proc["pino"])
-            if psha256.startswith("!"):
-                psha256 = psha_fd_error + " " + psha256
-        if proc["exe"] in snitch["SHA256"]:
-            if sha256 not in snitch["SHA256"][proc["exe"]]:
-                snitch["SHA256"][proc["exe"]][sha256] = "SUBMITTED"
-                q_vt.put(pickle.dumps((proc, sha256)))
-                q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
-            elif snitch["SHA256"][proc["exe"]][sha256] == "Failed to read process for upload":
-                snitch["SHA256"][proc["exe"]][sha256] = "RETRY"
-                q_vt.put(pickle.dumps((proc, sha256)))
-        else:
-            snitch["SHA256"][proc["exe"]] = {sha256: "SUBMITTED"}
-            q_vt.put(pickle.dumps((proc, sha256)))
-            q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
+        sha256 = secondary_subprocess_sha_wrapper(snitch, fan_mod_cnt, proc, q_vt, q_out, q_error)
+        pproc = {"pid": proc["ppid"], "name": proc["pname"], "exe": proc["pexe"], "fd": proc["pfd"], "dev": proc["pdev"], "ino": proc["pino"]}
+        psha256 = secondary_subprocess_sha_wrapper(snitch, fan_mod_cnt, pproc, q_vt, q_out, q_error)
         # filter from logs
         if snitch["Config"]["Log commands"]:
             proc["cmdline"] = proc["cmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").replace("\0", "").strip()
@@ -580,6 +586,7 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: 
                 (type(ignore) == str and proc["domain"].startswith(ignore))
                ):
                 continue
+        # create sql entry
         event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, proc["domain"], proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], psha256)
         if not (proc["send"] or proc["recv"]):
             event_counter[str(event)] += 1
@@ -594,23 +601,27 @@ def primary_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     for proc in new_processes:
         proc = pickle.loads(proc)
-        notification = []
-        if proc["name"] in snitch["Names"]:
-            if proc["exe"] not in snitch["Names"][proc["name"]]:
-                snitch["Names"][proc["name"]].append(proc["exe"])
-        else:
-            snitch["Names"][proc["name"]] = [proc["exe"]]
-            notification.append("name")
-        if proc["exe"] in snitch["Executables"]:
-            if proc["name"] not in snitch["Executables"][proc["exe"]]:
-                snitch["Executables"][proc["exe"]].append(proc["name"])
-        else:
-            snitch["Executables"][proc["exe"]] = [proc["name"]]
-            notification.append("exe")
-            snitch["SHA256"][proc["exe"]] = {}
-        if notification:
-            snitch["Exe Log"].append(f"{datetime_now} {proc['name']:<16.16} {proc['exe']} (new {', '.join(notification)})")
-            NotificationManager().toast(f"picosnitch: {proc['name']} {proc['exe']}")
+        proc_name, proc_exe, snitch_names, snitch_executables, parent = proc["name"], proc["exe"], snitch["Names"], snitch["Executables"], ""
+        for i in range(2):
+            notification = []
+            if proc_name in snitch_names:
+                if proc_exe not in snitch_names[proc_name]:
+                    snitch_names[proc_name].append(proc_exe)
+            else:
+                snitch_names[proc_name] = [proc_exe]
+                notification.append("name")
+            if proc_exe in snitch_executables:
+                if proc_name not in snitch_executables[proc_exe]:
+                    snitch_executables[proc_exe].append(proc_name)
+            else:
+                snitch_executables[proc_exe] = [proc_name]
+                notification.append("exe")
+                if proc_exe not in snitch["SHA256"]:
+                    snitch["SHA256"][proc_exe] = {}
+            if notification:
+                snitch["Exe Log"].append(f"{datetime_now} {proc_name:<16.16} {proc_exe} (new {parent}{', '.join(notification)})")
+                NotificationManager().toast(f"picosnitch: {proc_name} {proc_exe}")
+            proc_name, proc_exe, snitch_names, snitch_executables, parent = proc["pname"], proc["pexe"], snitch["Parent Names"], snitch["Parent Executables"], "parent "
 
 
 ### processes
@@ -619,7 +630,7 @@ def primary_subprocess(snitch, snitch_pipe, secondary_pipe, q_error, q_in, _q_ou
     os.nice(-20)
     # init variables for loop
     parent_process = multiprocessing.parent_process()
-    snitch_record = pickle.dumps([snitch["Executables"], snitch["Names"], snitch["SHA256"]])
+    snitch_record = pickle.dumps([snitch["Executables"], snitch["Names"], snitch["Parent Executables"], snitch["Parent Names"], snitch["SHA256"]])
     last_write = 0
     write_record = False
     processes_to_send = []
@@ -705,7 +716,7 @@ def primary_subprocess(snitch, snitch_pipe, secondary_pipe, q_error, q_in, _q_ou
                         NotificationManager().toast(f"Suspicious VT results: {msg['exe']}")
             # write the snitch dictionary to record.json, error.log, and exe.log (limit writes to reduce disk wear)
             if snitch["Error Log"] or snitch["Exe Log"] or time.time() - last_write > 30:
-                new_record = pickle.dumps([snitch["Executables"], snitch["Names"], snitch["SHA256"]])
+                new_record = pickle.dumps([snitch["Executables"], snitch["Names"], snitch["Parent Executables"], snitch["Parent Names"], snitch["SHA256"]])
                 if new_record != snitch_record:
                     snitch_record = new_record
                     write_record = True
