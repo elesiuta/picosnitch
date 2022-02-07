@@ -16,7 +16,7 @@
 - Executable hashes are cached based on device + inode for improved performance, and works with applications running inside containers
 - Uses BPF [for accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and fanotify to watch executables for modification
 - Since applications can call others to send/receive data for them, the parent executable and hash is also logged for each connection
-- Focus is on monitoring and detection, and doing that well, this is not a firewall since that would significantly increase complexity, impact performance, and cannot be done as reliably as simply sandboxing with something such as [firejail](https://wiki.archlinux.org/title/firejail#Usage), [flatpak](https://github.com/tchx84/Flatseal/blob/master/DOCUMENTATION.md#share), or a virtual machine
+- Focus is on monitoring and detection, and doing that well, this is not a firewall since that would increase complexity, impact performance, and can't be done as securely as [sandboxing](https://wiki.archlinux.org/title/Security#Sandboxing_applications) with something such as [firejail](https://wiki.archlinux.org/title/firejail#Usage), [flatpak](https://github.com/tchx84/Flatseal/blob/master/DOCUMENTATION.md#share), or a virtual machine
 - Even though executables are hashed, they may still be compromised via shared libraries, if this is a concern you may want to see other host-based intrusion detection systems (HIDS) such as [AIDE](https://wiki.archlinux.org/title/AIDE) or something like [debsums (with caveats)](https://manpages.debian.org/unstable/debsums/debsums.1.en.html)
 - Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
 
@@ -99,11 +99,11 @@
 - if `DB text log` is enabled, the full connection log is also written to `~/.config/picosnitch/conn.log`
   - this may be useful for watching with another program
   - it contains the following fields, separated by commas (commas, newlines, and null characters are removed from values)
-  - `executable,name,cmdline,sha256,time,domain,ip,port,uid,conns,sent,received`
+  - `executable,name,cmdline,sha256,time,domain,ip,port,uid,parent_exe,parent_name,parent_sha256,conns,sent,received`
 - the error log is stored in `~/.config/picosnitch/error.log`
   - errors will also trigger a notification and are usually caused by far too many or extremely short-lived processes/connections, or suspending your system while a new executable is being hashed
   - while it is very unlikely for processes/connections to be missed (unless `Every exe (not just conns)` is enabled), picosnitch was designed such that it should still detect this and log an error giving you some indication of what happened
-  - for most people in most cases, this should raise suspicion that some other program may be misbehaving
+  - for most people in most cases, this should raise suspicion that a program may be misbehaving
   - to improve reliability, picosnitch opens file descriptors to every executable once seen running, and will try deferring to the parent process if the child was too short-lived, logging the connection as coming from "/path/of/parent_exe (child)"
 
 # [building from source](#building-from-source)
