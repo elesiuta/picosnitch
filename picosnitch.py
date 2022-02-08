@@ -621,9 +621,9 @@ def primary_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
                 if proc_exe not in snitch["SHA256"]:
                     snitch["SHA256"][proc_exe] = {}
             if notification:
-                snitch["Exe Log"].append(f"{datetime_now} {proc_name:<16.16} {proc_exe} (new {parent}{', '.join(notification)})")
+                snitch["Exe Log"].append(f"{datetime_now} {proc_name:<16.16} {proc_exe} (new {', '.join(notification)}){parent}")
                 NotificationManager().toast(f"picosnitch: {proc_name} {proc_exe}")
-            proc_name, proc_exe, snitch_names, snitch_executables, parent = proc["pname"], proc["pexe"], snitch["Parent Names"], snitch["Parent Executables"], "parent "
+            proc_name, proc_exe, snitch_names, snitch_executables, parent = proc["pname"], proc["pexe"], snitch["Parent Names"], snitch["Parent Executables"], " (parent)"
 
 
 ### processes
@@ -805,7 +805,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                         with con:
                             # (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, pname text, pcmdline text, psha256 text, conns integer, send integer, recv integer)
                             # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], proc["pcmdline"], psha256, event_counter[str(event)], sent bytes, received bytes)
-                            con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
+                            con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
                     if snitch["Config"]["DB text log"]:
                         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
                             for entry in transactions:
@@ -835,14 +835,12 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     _FAN_MODIFY = 0x2
     libc.fanotify_mark(fan_fd, _FAN_MARK_FLUSH, _FAN_MODIFY, -1, None)
     domain_dict = collections.defaultdict(str)
-    pid_dict = {}
     fd_dict = collections.OrderedDict()
     for x in range(FD_CACHE):
         fd_dict[f"tmp{x}"] = (0,)
     self_pid = os.getpid()
-    def get_fd(st_dev: int, st_ino: int, pid: int, ppid: int, port: int) -> typing.Tuple[int, int, int, str, str, str]:
+    def get_fd(st_dev: int, st_ino: int, pid: int, port: int) -> typing.Tuple[int, int, int, str, str, str]:
         st_dev = st_dev & ST_DEV_MASK
-        pid_dict[pid] = (st_dev, st_ino)
         sig = f"{st_dev} {st_ino}"
         try:
             fd_dict.move_to_end(sig)
@@ -871,7 +869,6 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
                 if config["Every exe (not just conns)"] or port != -1:
                     q_error.put(f"Exe inode changed for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino}) before FD could be opened, using port: {port}")
                 st_dev, st_ino = get_fstat(fd)
-                pid_dict[pid] = (st_dev, st_ino)
                 sig = f"{st_dev} {st_ino}"
                 if config["Every exe (not just conns)"] or port != -1:
                     q_error.put(f"New inode for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino} exe: {exe})")
@@ -882,22 +879,14 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
                     os.close(fd_old)
             except Exception:
                 pass
-        if ppid == -1:
-            exe += " (child)"
-        elif not fd and ppid in pid_dict:
-            p_st_dev, p_st_ino = pid_dict[ppid]
-            if p_st_ino:
-                ppid_fd = get_fd(p_st_dev, p_st_ino, ppid, -1, port)
-                if ppid_fd[3]:
-                    return ppid_fd
         return (st_dev, st_ino, pid, fd_path, exe, cmd)
     # get current connections
     for proc in monitor_subprocess_initial_poll():
         try:
             stat = os.stat(f"/proc/{proc['pid']}/exe")
             pstat = os.stat(f"/proc/{proc['ppid']}/exe")
-            st_dev, st_ino, pid, fd, exe, cmd = get_fd(stat.st_dev, stat.st_ino, proc["pid"], proc["ppid"], proc["port"])
-            pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(pstat.st_dev, pstat.st_ino, proc["ppid"], -2, -1)
+            st_dev, st_ino, pid, fd, exe, cmd = get_fd(stat.st_dev, stat.st_ino, proc["pid"], proc["port"])
+            pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(pstat.st_dev, pstat.st_ino, proc["ppid"], -1)
             if config["Every exe (not just conns)"] or proc["port"] != -1:
                 snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                                      "ppid": ppid, "pname": proc["pname"], "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
@@ -926,63 +915,63 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         q_error.put(f"BPF callbacks not processing fast enough, missed {event} event")
     def queue_ipv4_event(cpu, data, size):
         event = b["ipv4_events"].event(data)
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -2, -1)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
+        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
         snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": 0, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
     def queue_ipv6_event(cpu, data, size):
         event = b["ipv6_events"].event(data)
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -2, -1)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
+        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         ip = socket.inet_ntop(socket.AF_INET6, event.daddr)
         snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": 0, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
     def queue_other_event(cpu, data, size):
         event = b["other_socket_events"].event(data)
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, 0)
-        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -2, -1)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, 0)
+        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": 0, "port": 0, "ip": "", "domain": ""}))
     def queue_sendv4_event(cpu, data, size):
         event = b["sendmsg_events"].event(data)
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -2, -1)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
+        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         ip =socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
         snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": event.bytes, "recv": 0, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
     def queue_sendv6_event(cpu, data, size):
         event = b["sendmsg6_events"].event(data)
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -2, -1)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
+        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         ip = socket.inet_ntop(socket.AF_INET6, event.daddr)
         snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": event.bytes, "recv": 0, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
     def queue_recvv4_event(cpu, data, size):
         event = b["recvmsg_events"].event(data)
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -2, -1)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
+        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
         snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": event.bytes, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
     def queue_recvv6_event(cpu, data, size):
         event = b["recvmsg6_events"].event(data)
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, event.dport)
-        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -2, -1)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
+        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         ip = socket.inet_ntop(socket.AF_INET6, event.daddr)
         snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": event.bytes, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
-        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.ppid, -1)
-        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -2, -1)
+        st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, -1)
+        pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         if config["Every exe (not just conns)"]:
             snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                                  "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,

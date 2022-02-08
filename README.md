@@ -104,7 +104,6 @@
   - errors will also trigger a notification and are usually caused by far too many or extremely short-lived processes/connections, or suspending your system while a new executable is being hashed
   - while it is very unlikely for processes/connections to be missed (unless `Every exe (not just conns)` is enabled), picosnitch was designed such that it should still detect this and log an error giving you some indication of what happened
   - for most people in most cases, this should raise suspicion that a program may be misbehaving
-  - to improve reliability, picosnitch opens file descriptors to every executable once seen running, and will try deferring to the parent process if the child was too short-lived, logging the connection as coming from "/path/of/parent_exe (child)"
 
 # [building from source](#building-from-source)
 - install dependencies listed under [installation](#installation)
