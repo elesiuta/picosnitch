@@ -1268,17 +1268,27 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
         help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  u/U: units  r: refresh  q: quit {' ':<{curses.COLS}}"
         status_bar = f"history: {time_history}  time range: {time_period[time_i]}  line: {cursor-first_line+1}/{len(current_screen)}{' ':<{curses.COLS}}"
         if is_subquery:
-            tab_bar = f"<- {s_screens[sec_i-1]:<{curses.COLS//3 - 2}}{s_screens[sec_i]:^{curses.COLS//3 - 2}}{s_screens[(sec_i+1) % len(s_screens)]:>{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
+            l_tabs = " ".join(reversed([s_screens[sec_i-i] for i in range (1, len(s_screens))]))
+            r_tabs = " ".join([s_screens[(sec_i+i) % len(s_screens)] for i in range(1, len(s_screens))])
+            c_tab = s_screens[sec_i]
             column_names = f"{f'{s_names[sec_i]} (where {p_names[pri_i].lower()} = {primary_value})':<{curses.COLS - 32}.{curses.COLS - 32}}  Connects       Sent   Received"
         else:
-            tab_bar = f"<- {p_screens[pri_i-1]:<{curses.COLS//3 - 2}}{p_screens[pri_i]:^{curses.COLS//3 - 2}}{p_screens[(pri_i+1) % len(p_screens)]:>{curses.COLS-((curses.COLS//3-2)*2+6)}} ->"
+            l_tabs = " ".join(reversed([p_screens[pri_i-i] for i in range(1, len(p_screens))]))
+            r_tabs = " ".join([p_screens[(pri_i+i) % len(p_screens)] for i in range(1, len(p_screens))])
+            c_tab = p_screens[pri_i]
             column_names = f"{p_names[pri_i]:<{curses.COLS - 32}}  Connects       Sent   Received"
+        l_width = (curses.COLS - len(c_tab) - 14) // 2
+        r_width = curses.COLS - len(c_tab) - 14 - l_width
+        l_tabs = f"<- ...{l_tabs[-l_width:]:>{l_width}} "
+        r_tabs = f" {r_tabs:<{r_width}.{r_width}}... ->"
         # display screen
         stdscr.clear()
         stdscr.attrset(curses.color_pair(3) | curses.A_BOLD)
         stdscr.addstr(0, 0, help_bar)
         stdscr.addstr(1, 0, status_bar)
-        stdscr.addstr(2, 0, tab_bar)
+        stdscr.addstr(2, 0, l_tabs)
+        stdscr.addstr(2, l_width + 7, c_tab, curses.color_pair(3) | curses.A_BOLD | curses.A_UNDERLINE)
+        stdscr.addstr(2, l_width + 7 + len(c_tab), r_tabs)
         stdscr.addstr(3, 0, column_names)
         line = first_line
         cursor = min(cursor, len(current_screen) + first_line - 1)
