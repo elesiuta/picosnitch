@@ -99,7 +99,7 @@
 - if `DB text log` is enabled, the full connection log is also written to `~/.config/picosnitch/conn.log`
   - this may be useful for watching with another program
   - it contains the following fields, separated by commas (commas, newlines, and null characters are removed from values)
-  - `executable,name,cmdline,sha256,time,domain,ip,port,uid,parent_exe,parent_name,parent_sha256,conns,sent,received`
+  - `executable,name,cmdline,sha256,time,domain,ip,port,uid,parent_exe,parent_name,parent_cmdline,parent_sha256,conns,sent,received`
 - the error log is stored in `~/.config/picosnitch/error.log`
   - errors will also trigger a notification and are usually caused by far too many or extremely short-lived processes/connections, or suspending your system while a new executable is being hashed
   - while it is very unlikely for processes/connections to be missed (unless `Every exe (not just conns)` is enabled), picosnitch was designed such that it should still detect this and log an error giving you some indication of what happened
