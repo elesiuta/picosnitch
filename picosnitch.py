@@ -1279,16 +1279,18 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             column_names = f"{p_names[pri_i]:<{curses.COLS - 32}}  Connects       Sent   Received"
         l_width = (curses.COLS - len(c_tab) - 14) // 2
         r_width = curses.COLS - len(c_tab) - 14 - l_width
-        l_tabs = f"<- ...{l_tabs[-l_width:]:>{l_width}} "
-        r_tabs = f" {r_tabs:<{r_width}.{r_width}}... ->"
+        l_tabs = f" ...{l_tabs[-l_width:]:>{l_width}} "
+        r_tabs = f" {r_tabs:<{r_width}.{r_width}}... "
         # display screen
         stdscr.clear()
         stdscr.attrset(curses.color_pair(3) | curses.A_BOLD)
         stdscr.addstr(0, 0, help_bar)
         stdscr.addstr(1, 0, status_bar)
-        stdscr.addstr(2, 0, l_tabs)
-        stdscr.addstr(2, l_width + 7, c_tab, curses.color_pair(3) | curses.A_BOLD | curses.A_UNDERLINE)
-        stdscr.addstr(2, l_width + 7 + len(c_tab), r_tabs)
+        stdscr.addstr(2, 0, "<-")
+        stdscr.addstr(2, 2, l_tabs, curses.color_pair(3))
+        stdscr.addstr(2, 2 + l_width + 5, c_tab, curses.color_pair(3) | curses.A_BOLD | curses.A_UNDERLINE)
+        stdscr.addstr(2, 2 + l_width + 5 + len(c_tab), r_tabs, curses.color_pair(3))
+        stdscr.addstr(2, 2 + l_width + 5 + len(c_tab) + r_width + 5, "->")
         stdscr.addstr(3, 0, column_names)
         line = first_line
         cursor = min(cursor, len(current_screen) + first_line - 1)
