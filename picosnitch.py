@@ -1474,15 +1474,14 @@ def ui_dash():
         except Exception:
             run_status = "not running"
         return html.Div([
-            # dcc.Interval(
-            #     id="interval-component",
-            #     interval=10000
-            # ),
             html.Div(html.Button("Stop Dash", id="exit"), style={"float": "right"}),
             html.Div([
                 dcc.Dropdown(
                     id="smoothing",
-                    options=[{"label": "Use Rolling Window", "value": True}, {"label": "Raw Values", "value": False}],
+                    options=[
+                        {"label": "Use Rolling Window", "value": True},
+                        {"label": "Raw Values", "value": False},
+                    ],
                     value=True,
                     clearable=False,
                 ),
@@ -1508,15 +1507,15 @@ def ui_dash():
                 dcc.RadioItems(
                     id="time_i",
                     options=[{"label": time_period[i], "value": i} for i in range(len(time_period))],
-                    value=0
-                )
+                    value=11,
+                ),
             ]),
             html.Div([
                 dcc.Slider(
                     id="time_j",
                     min=0, max=100, step=1, value=0,
                     included=False,
-                )
+                ),
             ]),
             dcc.Graph(id="send", config={"scrollZoom":True}),
             dcc.Graph(id="recv", config={"scrollZoom":True}),
@@ -1596,8 +1595,8 @@ def main():
 
 def start_picosnitch():
     """command line interface, pre-startup checks, and run"""
-    readme = textwrap.dedent(f"""    picosnitch monitors your system for applications that make network connections
-    and can track their bandwidth or verify their hash.
+    readme = textwrap.dedent(f"""    Monitor your system for applications that make network connections, track their
+    bandwidth, verify hashes, and receive notifications.
 
     picosnitch comes with ABSOLUTELY NO WARRANTY. This is free software, and you
     are welcome to redistribute it under certain conditions. See version 3 of the
@@ -1608,12 +1607,12 @@ def start_picosnitch():
     config and log files: {BASE_PATH}
 
     usage:
-        picosnitch status|dash|view|version|help
-                    |      |    |    |       |--> this text
-                    |      |    |    |--> version info
-                    |      |    |--> curses ui
-                    |      |--> web gui
-                    |--> show pid
+        picosnitch dash|view|status|version|help
+                    |    |    |      |       |--> this text
+                    |    |    |      |--> version info
+                    |    |    |--> show pid
+                    |    |--> curses tui
+                    |--> start web gui (http://localhost:8050)
 
         systemctl enable|disable|start|stop|restart|status picosnitch
                    |      |       |     |    |       |--> show status with systemd
@@ -1651,7 +1650,7 @@ def start_picosnitch():
             cap_sys_admin = 2**21
             assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
         assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
-        test_read_snitch = read_snitch()
+        assert read_snitch()
         con = sqlite3.connect(os.path.join(BASE_PATH, "snitch.db"))
         cur = con.cursor()
         cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
