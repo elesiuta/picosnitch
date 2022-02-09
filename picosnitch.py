@@ -1444,6 +1444,142 @@ def ui_init() -> int:
     return 1
 
 
+def ui_dash():
+    """gui with plotly dash"""
+    import dash
+    import dash_core_components as dcc
+    import dash_html_components as html
+    from dash.dependencies import Input, Output
+    import pandas.io.sql as psql
+    import plotly.express as px
+    file_path = os.path.join(BASE_PATH, "snitch.db")
+    all_dims = ["exe", "name", "sha256", "domain", "ip", "port", "uid", "pexe", "pname", "psha256"]
+    dim_labels = {"exe": "Executable", "name": "Process Name", "sha256": "SHA256", "domain": "Domain", "ip": "Destination IP", "port": "Destination Port", "uid": "User", "pexe": "Parent Executable", "pname": "Parent Name", "psha256": "Parent SHA256"}
+    time_period = ["all", "1 minute", "3 minutes", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "1 hour", "3 hours", "6 hours", "12 hours", "1 day", "3 days", "7 days", "30 days", "365 days"]
+    time_minutes = [0, 1, 3, 5, 10, 15, 30, 60, 180, 360, 720, 1440, 4320, 10080, 43200, 525600]
+    time_deltas = [datetime.timedelta(minutes=x) for x in time_minutes]
+    time_r = ["second"] + ["minute"]*6 + ["hour"]*4 + ["day"]*3 + ["month"] + ["year"]
+    time_resolution = collections.OrderedDict({
+        "second": lambda x: x.replace(microsecond=0),
+        "minute": lambda x: x.replace(microsecond=0, second=0),
+        "hour": lambda x: x.replace(microsecond=0, second=0, minute=0),
+        "day": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0),
+        "month": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1),
+        "year": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1, month=1),
+    })
+    def serve_layout():
+        try:
+            with open("/run/picosnitch.pid", "r") as f:
+                run_status = "pid: " + f.read().strip()
+        except Exception:
+            run_status = "not running"
+        return html.Div([
+            # dcc.Interval(
+            #     id="interval-component",
+            #     interval=10000
+            # ),
+            html.Div(html.Button("Stop Dash", id="exit"), style={"float": "right"}),
+            html.Div([
+                dcc.Dropdown(
+                    id="smoothing",
+                    options=[{"label": "Use Rolling Window", "value": True}, {"label": "Raw Values", "value": False}],
+                    value=True,
+                    clearable=False,
+                ),
+            ], style={"width": "30%"}),
+            html.Div([
+                dcc.Dropdown(
+                    id="select",
+                    options=[{"label": f"Select {dim_labels[x]}", "value": x} for x in all_dims],
+                    value="exe",
+                    clearable=False,
+                ),
+            ], style={"display":"inline-block", "width": "33%"}),
+            html.Div([
+                dcc.Dropdown(
+                    id="where",
+                    options=[{"label": f"Where {dim_labels[x]}", "value": x} for x in all_dims],
+                    ),
+            ], style={"display":"inline-block", "width": "33%"}),
+            html.Div([
+                dcc.Dropdown(id="whereis"),
+            ], style={"display":"inline-block", "width": "33%"}),
+            html.Div([
+                dcc.RadioItems(
+                    id="time_i",
+                    options=[{"label": time_period[i], "value": i} for i in range(len(time_period))],
+                    value=0
+                )
+            ]),
+            html.Div([
+                dcc.Slider(
+                    id="time_j",
+                    min=0, max=100, step=1, value=0,
+                    included=False,
+                )
+            ]),
+            dcc.Graph(id="send", config={"scrollZoom":True}),
+            dcc.Graph(id="recv", config={"scrollZoom":True}),
+            html.Footer(f"picosnitch v{VERSION} ({run_status}) (using {file_path})"),
+        ])
+    app = dash.Dash(__name__)
+    app.layout = serve_layout
+    @app.callback(Output("time_j", "marks"), Input("time_i", "value"), Input("time_j", "value"))
+    def update_time_slider(time_i, _):
+        return {x: time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (x-2)).strftime("%Y-%m-%d %H:%M:%S") for x in range(2,100,10)}
+    @app.callback(Output("send", "figure"), Output("recv", "figure"), Output("whereis", "options"), Input("smoothing", "value"), Input("select", "value"), Input("where", "value"), Input("whereis", "value"), Input("time_i", "value"), Input("time_j", "value"))
+    def update(smoothing, dim, where, whereis, time_i, time_j):
+        if time_j == 0:
+            time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%Y-%m-%d %H:%M:%S")
+            time_history_end = "now"
+        elif time_i != 0:
+            time_history_start = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-1)).strftime("%Y-%m-%d %H:%M:%S")
+            time_history_end = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-2)).strftime("%Y-%m-%d %H:%M:%S")
+        if time_i == 0:
+            time_query = ""
+        else:
+            if where and whereis:
+                time_query = f" AND contime > datetime(\"{time_history_start}\") AND contime < datetime(\"{time_history_end}\")"
+            else:
+                time_query = f" WHERE contime > datetime(\"{time_history_start}\") AND contime < datetime(\"{time_history_end}\")"
+        if where and whereis:
+            query = f"SELECT {dim}, contime, send, recv FROM connections WHERE {where} IS \"{whereis}\"{time_query}"
+        else:
+            query = f"SELECT {dim}, contime, send, recv FROM connections{time_query}"
+        con = sqlite3.connect(file_path)
+        df = psql.read_sql(query, con)
+        whereis_options = []
+        if where:
+            if time_query.startswith(" AND"):
+                time_query = time_query.replace(" AND", " WHERE", 1)
+            query = f"SELECT DISTINCT {where} FROM connections{time_query}"
+            cur = con.cursor()
+            cur.execute(query)
+            whereis_values = cur.fetchall()
+            whereis_options = [{"label": f"is {x[0]}", "value": x[0]} for x in whereis_values]
+        con.close()
+        df_send = df.pivot_table(index="contime", columns=dim, values="send", fill_value=0, dropna=True).groupby(level=0).sum()
+        df_recv = df.pivot_table(index="contime", columns=dim, values="recv", fill_value=0, dropna=True).groupby(level=0).sum()
+        if smoothing:
+            df_send = df_send.rolling(4).mean()
+            df_recv = df_recv.rolling(4).mean()
+        fig_send = px.line(df_send, line_shape="linear", render_mode="svg", labels={
+            "contime": "", "value": "Data Sent (bytes)", dim: dim_labels[dim]})
+        fig_send.update_yaxes(autorange=True, fixedrange=True)
+        fig_send.update_traces(fill="tozeroy", line_simplify=True)
+        fig_recv = px.line(df_recv, line_shape="linear", render_mode="svg", labels={
+            "contime": "", "value": "Data Received (bytes)", dim: dim_labels[dim]})
+        fig_recv.update_yaxes(autorange=True, fixedrange=True)
+        fig_recv.update_traces(fill="tozeroy", line_simplify=True)
+        return fig_send, fig_recv, whereis_options
+    @app.callback(Output("exit", "n_clicks"), Input("exit", "n_clicks"))
+    def exit(clicks):
+        if clicks:
+            os.kill(os.getpid(), signal.SIGTERM)
+        return 0
+    app.run_server(debug=False)
+
+
 ### startup
 def main():
     """init picosnitch"""
@@ -1472,10 +1608,11 @@ def start_picosnitch():
     config and log files: {BASE_PATH}
 
     usage:
-        picosnitch status|view|version|help
-                    |      |    |       |--> this text
-                    |      |    |--> version info
-                    |      |--> curses ui
+        picosnitch status|dash|view|version|help
+                    |      |    |    |       |--> this text
+                    |      |    |    |--> version info
+                    |      |    |--> curses ui
+                    |      |--> web gui
                     |--> show pid
 
         systemctl enable|disable|start|stop|restart|status picosnitch
@@ -1582,6 +1719,13 @@ def start_picosnitch():
             print(f"using config and log files from: {BASE_PATH}")
             print(f"using DBUS_SESSION_BUS_ADDRESS: {os.getenv('DBUS_SESSION_BUS_ADDRESS')}")
             sys.exit(main())
+        elif sys.argv[1] == "dash":
+            if sudo_user := os.getenv("SUDO_USER"):
+                subprocess.run(["sudo", "-i", "-u", sudo_user, "/usr/bin/env", "python3", "-m", "webbrowser", "-t", "http://localhost:8050"])
+            args = ["bash", "-c", f"sudo -i -u {sudo_user} nohup {sys.executable} \"{os.path.abspath(__file__)}\" start-dash > /dev/null 2>&1 &"]
+            os.execvp("bash", args)
+        elif sys.argv[1] == "start-dash":
+            return ui_dash()
         elif sys.argv[1] == "view":
             return ui_init()
         elif sys.argv[1] == "version":
