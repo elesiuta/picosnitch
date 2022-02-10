@@ -8,7 +8,7 @@ setuptools.setup(
     name="picosnitch",
     version=picosnitch.VERSION,
     python_requires=">=3.8",
-    description="Protect your privacy, see which applications make remote network connections",
+    description="Protect your privacy, see which applications make network connections",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://elesiuta.github.io/picosnitch",
@@ -17,9 +17,10 @@ setuptools.setup(
     entry_points={"console_scripts": ["picosnitch = picosnitch:start_picosnitch"]},
     install_requires=["psutil"],
     extras_require={
-        "enable_notifications":  ["dbus-python"],
-        "enable_virustotal":  ["requests"],
-        "full":  ["dbus-python", "requests"]
+        "enable_dash": ["dash", "pandas", "plotly"],
+        "enable_notifications": ["dbus-python"],
+        "enable_virustotal": ["requests"],
+        "full": ["dash", "pandas", "plotly", "dbus-python", "requests"]
     },
     classifiers=[
         "Operating System :: POSIX :: Linux",

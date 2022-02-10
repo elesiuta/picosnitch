@@ -804,7 +804,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                     if snitch["Config"]["DB sql log"]:
                         with con:
                             # (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, pname text, pcmdline text, psha256 text, conns integer, send integer, recv integer)
-                            # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, domain, proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], proc["pcmdline"], psha256, event_counter[str(event)], sent bytes, received bytes)
+                            # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, proc["domain"], proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], proc["pcmdline"], psha256, event_counter[str(event)], sent bytes, received bytes)
                             con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
                     if snitch["Config"]["DB text log"]:
                         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
@@ -1722,6 +1722,8 @@ def start_picosnitch():
             print(f"using DBUS_SESSION_BUS_ADDRESS: {os.getenv('DBUS_SESSION_BUS_ADDRESS')}")
             sys.exit(main())
         elif sys.argv[1] == "dash":
+            import dash, pandas, plotly
+            assert dash.__version__ and pandas.__version__ and plotly.__version__
             print("serving web gui on http://localhost:8050")
             args = ["bash", "-c", f"sudo -i -u {os.getenv('SUDO_USER')} nohup {sys.executable} \"{os.path.abspath(__file__)}\" start-dash > /dev/null 2>&1 &"]
             os.execvp("bash", args)
