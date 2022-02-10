@@ -1467,6 +1467,11 @@ def ui_dash():
         "month": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1),
         "year": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1, month=1),
     })
+    def get_user(uid) -> str:
+        try:
+            return f"{pwd.getpwuid(uid).pw_name} ({uid})"
+        except Exception:
+            return f"??? ({uid})"
     def serve_layout():
         try:
             with open("/run/picosnitch.pid", "r") as f:
@@ -1498,10 +1503,14 @@ def ui_dash():
                 dcc.Dropdown(
                     id="where",
                     options=[{"label": f"Where {dim_labels[x]}", "value": x} for x in all_dims],
-                    ),
+                    placeholder="Where...",
+                ),
             ], style={"display":"inline-block", "width": "33%"}),
             html.Div([
-                dcc.Dropdown(id="whereis"),
+                dcc.Dropdown(
+                    id="whereis",
+                    placeholder="Is...",
+                ),
             ], style={"display":"inline-block", "width": "33%"}),
             html.Div([
                 dcc.RadioItems(
@@ -1555,13 +1564,19 @@ def ui_dash():
             cur = con.cursor()
             cur.execute(query)
             whereis_values = cur.fetchall()
-            whereis_options = [{"label": f"is {x[0]}", "value": x[0]} for x in whereis_values]
+            if where == "uid":
+                whereis_options = [{"label": f"is {get_user(x[0])}", "value": x[0]} for x in whereis_values]
+            else:
+                whereis_options = [{"label": f"is {x[0]}", "value": x[0]} for x in whereis_values]
         con.close()
         df_send = df.pivot_table(index="contime", columns=dim, values="send", fill_value=0, dropna=True).groupby(level=0).sum()
         df_recv = df.pivot_table(index="contime", columns=dim, values="recv", fill_value=0, dropna=True).groupby(level=0).sum()
         if smoothing:
             df_send = df_send.rolling(4).mean()
             df_recv = df_recv.rolling(4).mean()
+        if dim == "uid":
+            df_send.rename(columns=get_user, inplace=True)
+            df_recv.rename(columns=get_user, inplace=True)
         fig_send = px.line(df_send, line_shape="linear", render_mode="svg", labels={
             "contime": "", "value": "Data Sent (bytes)", dim: dim_labels[dim]})
         fig_send.update_yaxes(autorange=True, fixedrange=True)
