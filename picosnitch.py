@@ -56,7 +56,7 @@ except Exception:
 import psutil
 
 # picosnitch version and supported platform
-VERSION: typing.Final[str] = "0.10.1"
+VERSION: typing.Final[str] = "0.11.0"
 assert sys.version_info >= (3, 8), "Python version >= 3.8 is required"
 assert sys.platform.startswith("linux"), "Did not detect a supported operating system"
 
