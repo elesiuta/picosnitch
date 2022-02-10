@@ -1641,6 +1641,9 @@ def start_picosnitch():
         if sys.argv[1] == "help":
             print(readme)
             return 0
+        elif sys.argv[1] == "dash":
+            if os.getuid() != 0:
+                subprocess.run(["/usr/bin/env", "python3", "-m", "webbrowser", "-t", "http://localhost:8050"])
         if os.getuid() != 0:
             args = ["sudo", "-E", sys.executable, os.path.abspath(__file__), sys.argv[1]]
             os.execvp("sudo", args)
@@ -1719,9 +1722,8 @@ def start_picosnitch():
             print(f"using DBUS_SESSION_BUS_ADDRESS: {os.getenv('DBUS_SESSION_BUS_ADDRESS')}")
             sys.exit(main())
         elif sys.argv[1] == "dash":
-            if sudo_user := os.getenv("SUDO_USER"):
-                subprocess.run(["sudo", "-i", "-u", sudo_user, "/usr/bin/env", "python3", "-m", "webbrowser", "-t", "http://localhost:8050"])
-            args = ["bash", "-c", f"sudo -i -u {sudo_user} nohup {sys.executable} \"{os.path.abspath(__file__)}\" start-dash > /dev/null 2>&1 &"]
+            print("serving web gui on http://localhost:8050")
+            args = ["bash", "-c", f"sudo -i -u {os.getenv('SUDO_USER')} nohup {sys.executable} \"{os.path.abspath(__file__)}\" start-dash > /dev/null 2>&1 &"]
             os.execvp("bash", args)
         elif sys.argv[1] == "start-dash":
             return ui_dash()
