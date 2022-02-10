@@ -1479,6 +1479,11 @@ def ui_dash():
         except Exception:
             run_status = "not running"
         return html.Div([
+            dcc.Interval(
+                id="interval-component",
+                interval=10000,
+                disabled=True,
+            ),
             html.Div(html.Button("Stop Dash", id="exit"), style={"float": "right"}),
             html.Div([
                 dcc.Dropdown(
@@ -1490,7 +1495,19 @@ def ui_dash():
                     value=True,
                     clearable=False,
                 ),
-            ], style={"width": "30%"}),
+            ], style={"display":"inline-block", "width": "25%"}),
+            html.Div([
+                dcc.Dropdown(
+                    id="auto-refresh",
+                    options=[
+                        {"label": "Auto-Refresh (10 seconds)", "value": True},
+                        {"label": "Disable Auto-Refresh", "value": False},
+                    ],
+                    value=False,
+                    clearable=False,
+                ),
+            ], style={"display":"inline-block", "width": "25%"}),
+            html.Div(),
             html.Div([
                 dcc.Dropdown(
                     id="select",
@@ -1532,11 +1549,14 @@ def ui_dash():
         ])
     app = dash.Dash(__name__)
     app.layout = serve_layout
+    @app.callback(Output("interval-component", "disabled"), Input("auto-refresh", "value"))
+    def toggle_refresh(value):
+        return not value
     @app.callback(Output("time_j", "marks"), Input("time_i", "value"), Input("time_j", "value"))
     def update_time_slider(time_i, _):
         return {x: time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (x-2)).strftime("%Y-%m-%d %H:%M:%S") for x in range(2,100,10)}
-    @app.callback(Output("send", "figure"), Output("recv", "figure"), Output("whereis", "options"), Input("smoothing", "value"), Input("select", "value"), Input("where", "value"), Input("whereis", "value"), Input("time_i", "value"), Input("time_j", "value"))
-    def update(smoothing, dim, where, whereis, time_i, time_j):
+    @app.callback(Output("send", "figure"), Output("recv", "figure"), Output("whereis", "options"), Input("smoothing", "value"), Input("select", "value"), Input("where", "value"), Input("whereis", "value"), Input("time_i", "value"), Input("time_j", "value"), Input("interval-component", "n_intervals"))
+    def update(smoothing, dim, where, whereis, time_i, time_j, _):
         if time_j == 0:
             time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%Y-%m-%d %H:%M:%S")
             time_history_end = "now"
