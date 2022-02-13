@@ -1187,13 +1187,11 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
         "year": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1, month=1),
     })
     pri_i = 0
-    p_screens = ["Executables", "Process Names", "SHA256", "Domains", "Destination IPs", "Destination Ports", "Users", "Parent Executables", "Parent Names", "Parent SHA256", "Entry Time"]
-    p_names = ["Executable", "Process Name", "SHA256", "Domain", "Destination IP", "Destination Port", "User", "Parent Executable", "Parent Name", "Parent SHA256", "Entry Time"]
-    p_col = ["exe", "name", "sha256", "domain", "ip", "port", "uid", "pexe", "pname", "psha256", "contime"]
+    p_screens = ["Executables", "Process Names", "Commands", "SHA256", "Entry Time", "Domains", "Destination IPs", "Destination Ports", "Users", "Parent Executables", "Parent Names", "Parent Commands", "Parent SHA256"]
+    p_names = ["Executable", "Process Name", "Command", "SHA256", "Entry Time", "Domain", "Destination IP", "Destination Port", "User", "Parent Executable", "Parent Name", "Parent Command", "Parent SHA256"]
+    p_col = ["exe", "name", "cmdline", "sha256", "contime", "domain", "ip", "port", "uid", "pexe", "pname", "pcmdline", "psha256"]
     sec_i = 0
-    s_screens = p_screens + ["Parent Commands", "Commands"]
-    s_names = p_names + ["Parent Command", "Command"]
-    s_col = p_col + ["pcmdline", "cmdline"]
+    s_screens, s_names, s_col = p_screens, p_names, p_col
     byte_units = 3
     round_bytes = lambda size, b: f"{size if b == 0 else round(size/10**b, 1)!s:>{8 if b == 0 else 7}} {'k' if b == 3 else 'M' if b == 6 else 'G' if b == 9 else ''}B"
     # ui loop
@@ -1454,8 +1452,8 @@ def ui_dash():
     import pandas.io.sql as psql
     import plotly.express as px
     file_path = os.path.join(BASE_PATH, "snitch.db")
-    all_dims = ["exe", "name", "sha256", "domain", "ip", "port", "uid", "pexe", "pname", "psha256"]
-    dim_labels = {"exe": "Executable", "name": "Process Name", "sha256": "SHA256", "domain": "Domain", "ip": "Destination IP", "port": "Destination Port", "uid": "User", "pexe": "Parent Executable", "pname": "Parent Name", "psha256": "Parent SHA256"}
+    all_dims = ["exe", "name", "cmdline", "sha256", "domain", "ip", "port", "uid", "pexe", "pname", "pcmdline", "psha256"]
+    dim_labels = {"exe": "Executable", "name": "Process Name", "cmdline": "Command", "sha256": "SHA256", "domain": "Domain", "ip": "Destination IP", "port": "Destination Port", "uid": "User", "pexe": "Parent Executable", "pname": "Parent Name", "pcmdline": "Parent Command", "psha256": "Parent SHA256"}
     time_period = ["all", "1 minute", "3 minutes", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "1 hour", "3 hours", "6 hours", "12 hours", "1 day", "3 days", "7 days", "30 days", "365 days"]
     time_minutes = [0, 1, 3, 5, 10, 15, 30, 60, 180, 360, 720, 1440, 4320, 10080, 43200, 525600]
     time_deltas = [datetime.timedelta(minutes=x) for x in time_minutes]
@@ -1473,6 +1471,10 @@ def ui_dash():
             return f"{pwd.getpwuid(uid).pw_name} ({uid})"
         except Exception:
             return f"??? ({uid})"
+    def trim_cmdline(cmdline, trim) -> str:
+        if trim and len(cmdline) > 64:
+            return f"{cmdline[:32]}...{cmdline[-29:]}"
+        return cmdline
     def serve_layout():
         try:
             with open("/run/picosnitch.pid", "r") as f:
@@ -1496,7 +1498,18 @@ def ui_dash():
                     value=True,
                     clearable=False,
                 ),
-            ], style={"display":"inline-block", "width": "25%"}),
+            ], style={"display":"inline-block", "width": "20%"}),
+            html.Div([
+                dcc.Dropdown(
+                    id="trim-cmds",
+                    options=[
+                        {"label": "Trim Commands", "value": True},
+                        {"label": "Show Full Commands", "value": False},
+                    ],
+                    value=True,
+                    clearable=False,
+                ),
+            ], style={"display":"inline-block", "width": "20%"}),
             html.Div([
                 dcc.Dropdown(
                     id="auto-refresh",
@@ -1507,7 +1520,7 @@ def ui_dash():
                     value=False,
                     clearable=False,
                 ),
-            ], style={"display":"inline-block", "width": "25%"}),
+            ], style={"display":"inline-block", "width": "20%"}),
             html.Div(),
             html.Div([
                 dcc.Dropdown(
@@ -1534,7 +1547,7 @@ def ui_dash():
                 dcc.RadioItems(
                     id="time_i",
                     options=[{"label": time_period[i], "value": i} for i in range(len(time_period))],
-                    value=11,
+                    value=8,
                 ),
             ]),
             html.Div([
@@ -1556,8 +1569,8 @@ def ui_dash():
     @app.callback(Output("time_j", "marks"), Input("time_i", "value"), Input("time_j", "value"))
     def update_time_slider(time_i, _):
         return {x: time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (x-2)).strftime("%Y-%m-%d %H:%M:%S") for x in range(2,100,10)}
-    @app.callback(Output("send", "figure"), Output("recv", "figure"), Output("whereis", "options"), Input("smoothing", "value"), Input("select", "value"), Input("where", "value"), Input("whereis", "value"), Input("time_i", "value"), Input("time_j", "value"), Input("interval-component", "n_intervals"))
-    def update(smoothing, dim, where, whereis, time_i, time_j, _):
+    @app.callback(Output("send", "figure"), Output("recv", "figure"), Output("whereis", "options"), Input("smoothing", "value"), Input("trim-cmds", "value"), Input("select", "value"), Input("where", "value"), Input("whereis", "value"), Input("time_i", "value"), Input("time_j", "value"), Input("interval-component", "n_intervals"))
+    def update(smoothing, trim, dim, where, whereis, time_i, time_j, _):
         if time_j == 0:
             time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%Y-%m-%d %H:%M:%S")
             time_history_end = "now"
@@ -1587,6 +1600,8 @@ def ui_dash():
             whereis_values = cur.fetchall()
             if where == "uid":
                 whereis_options = [{"label": f"is {get_user(x[0])}", "value": x[0]} for x in whereis_values]
+            elif where in ["cmdline", "pcmdline"]:
+                whereis_options = [{"label": f"is {trim_cmdline(x[0], trim)}", "value": x[0]} for x in whereis_values]
             else:
                 whereis_options = [{"label": f"is {x[0]}", "value": x[0]} for x in whereis_values]
         con.close()
@@ -1598,6 +1613,9 @@ def ui_dash():
         if dim == "uid":
             df_send.rename(columns=get_user, inplace=True)
             df_recv.rename(columns=get_user, inplace=True)
+        elif dim in ["cmdline", "pcmdline"]:
+            df_send.rename(columns=lambda x: trim_cmdline(x, trim), inplace=True)
+            df_recv.rename(columns=lambda x: trim_cmdline(x, trim), inplace=True)
         fig_send = px.line(df_send, line_shape="linear", render_mode="svg", labels={
             "contime": "", "value": "Data Sent (bytes)", dim: dim_labels[dim]})
         fig_send.update_yaxes(autorange=True, fixedrange=True)
