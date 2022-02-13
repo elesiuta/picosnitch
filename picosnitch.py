@@ -35,6 +35,7 @@ import pickle
 import pwd
 import queue
 import resource
+import shlex
 import signal
 import site
 import socket
@@ -572,8 +573,8 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: 
         psha256 = secondary_subprocess_sha_wrapper(snitch, fan_mod_cnt, pproc, q_vt, q_out, q_error)
         # filter from logs
         if snitch["Config"]["Log commands"]:
-            proc["cmdline"] = proc["cmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").replace("\0", "").strip()
-            proc["pcmdline"] = proc["pcmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").replace("\0", "").strip()
+            proc["cmdline"] = shlex.join(proc["cmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").strip("\0\t\n ").split("\0"))
+            proc["pcmdline"] = shlex.join(proc["pcmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").strip("\0\t\n ").split("\0"))
         else:
             proc["cmdline"] = ""
             proc["pcmdline"] = ""
