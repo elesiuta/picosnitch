@@ -1630,7 +1630,7 @@ def ui_dash():
         if clicks:
             os.kill(os.getpid(), signal.SIGTERM)
         return 0
-    app.run_server(debug=False)
+    app.run_server(host=os.getenv("HOST", "localhost"), port=os.getenv("PORT", "5100"), debug=False)
 
 
 ### startup
@@ -1666,7 +1666,7 @@ def start_picosnitch():
                     |    |    |      |--> version info
                     |    |    |--> show pid
                     |    |--> curses tui
-                    |--> start web gui (http://localhost:8050)
+                    |--> start web gui (http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")})
 
         systemctl enable|disable|start|stop|restart|status picosnitch
                    |      |       |     |    |       |--> show status with systemd
@@ -1697,7 +1697,7 @@ def start_picosnitch():
             return 0
         elif sys.argv[1] == "dash":
             if os.getuid() != 0:
-                subprocess.Popen(["bash", "-c", f'let i=0; rm {BASE_PATH}/dash; while [[ ! -f {BASE_PATH}/dash || "$i" -gt 30 ]]; do let i++; sleep 1; done; rm {BASE_PATH}/dash && /usr/bin/env python3 -m webbrowser -t http://localhost:8050'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.Popen(["bash", "-c", f'let i=0; rm {BASE_PATH}/dash; while [[ ! -f {BASE_PATH}/dash || "$i" -gt 30 ]]; do let i++; sleep 1; done; rm {BASE_PATH}/dash && /usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if os.getuid() != 0:
             args = ["sudo", "-E", sys.executable, os.path.abspath(__file__), sys.argv[1]]
             os.execvp("sudo", args)
@@ -1778,7 +1778,7 @@ def start_picosnitch():
         elif sys.argv[1] == "dash":
             import dash, pandas, plotly
             assert dash.__version__ and pandas.__version__ and plotly.__version__
-            print("serving web gui on http://localhost:8050")
+            print(f"serving web gui on http://{os.getenv('HOST', 'localhost')}:{os.getenv('PORT', '5100')}")
             args = ["bash", "-c", f"sudo -i -u {os.getenv('SUDO_USER')} touch {BASE_PATH}/dash; nohup {sys.executable} \"{os.path.abspath(__file__)}\" start-dash > /dev/null 2>&1 &"]
             os.execvp("bash", args)
         elif sys.argv[1] == "start-dash":
