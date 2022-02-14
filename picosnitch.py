@@ -1618,10 +1618,12 @@ def ui_dash():
             df_recv.rename(columns=lambda x: trim_cmdline(x, trim), inplace=True)
         fig_send = px.line(df_send, line_shape="linear", render_mode="svg", labels={
             "contime": "", "value": "Data Sent (bytes)", dim: dim_labels[dim]})
+        fig_send.update_layout(uirevision=dim)
         fig_send.update_yaxes(autorange=True, fixedrange=True)
         fig_send.update_traces(fill="tozeroy", line_simplify=True)
         fig_recv = px.line(df_recv, line_shape="linear", render_mode="svg", labels={
             "contime": "", "value": "Data Received (bytes)", dim: dim_labels[dim]})
+        fig_recv.update_layout(uirevision=dim)
         fig_recv.update_yaxes(autorange=True, fixedrange=True)
         fig_recv.update_traces(fill="tozeroy", line_simplify=True)
         return fig_send, fig_recv, whereis_options
