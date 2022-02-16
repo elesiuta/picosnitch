@@ -1749,16 +1749,17 @@ def start_picosnitch():
                 cur.execute(''' PRAGMA user_version = 2 ''')
                 con.commit()
         con.close()
-        if sql_kwargs := tmp_snitch["Config"]["DB sql server"]:
-            sql_client = sql_kwargs.pop("client", "error")
-            assert sql_client in ["mariadb", "psycopg", "psycopg2", "pymysql"], "Did not specify a supported \"client\" for \"DB sql server\""
-            sql = importlib.import_module(sql_client)
-            con = sql.connect(**sql_kwargs)
-            cur = con.cursor()
-            cur.execute(''' CREATE TABLE IF NOT EXISTS connections
-                            (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, pname text, pcmdline text, psha256 text, conns integer, send integer, recv integer) ''')
-            con.commit()
-            con.close()
+        if sys.argv[1] in ["start", "start-no-daemon", "restart"]:
+            if sql_kwargs := tmp_snitch["Config"]["DB sql server"]:
+                sql_client = sql_kwargs.pop("client", "error")
+                assert sql_client in ["mariadb", "psycopg", "psycopg2", "pymysql"], "Did not specify a supported \"client\" for \"DB sql server\""
+                sql = importlib.import_module(sql_client)
+                con = sql.connect(**sql_kwargs)
+                cur = con.cursor()
+                cur.execute(''' CREATE TABLE IF NOT EXISTS connections
+                                (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, pname text, pcmdline text, psha256 text, conns integer, send integer, recv integer) ''')
+                con.commit()
+                con.close()
         if sys.argv[1] in ["start", "stop", "restart"]:
             if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
                 print("Found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl")
