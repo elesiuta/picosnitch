@@ -17,13 +17,11 @@ setuptools.setup(
     entry_points={"console_scripts": ["picosnitch = picosnitch:start_picosnitch"]},
     install_requires=["psutil"],
     extras_require={
-        "mariadb": ["mariadb"],
-        "mysql": ["pymysql"],
-        "postgresql": ["psycopg2"],
         "enable_dash": ["dash", "pandas", "plotly"],
         "enable_notifications": ["dbus-python"],
+        "enable_sql": ["psycopg", "pymysql"],
         "enable_virustotal": ["requests"],
-        "full": ["dash", "pandas", "plotly", "dbus-python", "requests", "pymysql"]
+        "full": ["dash", "pandas", "plotly", "dbus-python", "psycopg", "pymysql", "requests"]
     },
     classifiers=[
         "Operating System :: POSIX :: Linux",

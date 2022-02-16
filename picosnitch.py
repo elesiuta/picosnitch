@@ -28,6 +28,7 @@ import functools
 import ipaddress
 import json
 import hashlib
+import importlib
 import importlib.util
 import multiprocessing
 import os
@@ -748,15 +749,9 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
         con.commit()
         con.close()
     if sql_kwargs := snitch["Config"]["DB sql server"]:
-        rdbms = sql_kwargs.pop("RDBMS", "error").lower()
-        if rdbms == "mariadb":
-            import mariadb as sql
-        elif rdbms == "mysql":
-            import pymysql as sql
-        elif rdbms == "postgresql":
-            import psycopg2 as sql
-        else:
-            raise Exception("Did not specify a supported \"RDBMS\" for \"DB sql server\"")
+        sql_client = sql_kwargs.pop("client", "error")
+        assert sql_client in ["mariadb", "pymysql", "psycopg", "psycopg2"], "Did not specify a supported \"client\" for \"DB sql server\""
+        sql = importlib.import_module(sql_client)
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
     # main loop
@@ -1755,15 +1750,9 @@ def start_picosnitch():
                 con.commit()
         con.close()
         if sql_kwargs := tmp_snitch["Config"]["DB sql server"]:
-            rdbms = sql_kwargs.pop("RDBMS", "error").lower()
-            if rdbms == "mariadb":
-                import mariadb as sql
-            elif rdbms == "mysql":
-                import pymysql as sql
-            elif rdbms == "postgresql":
-                import psycopg2 as sql
-            else:
-                raise Exception("Did not specify a supported \"RDBMS\" for \"DB sql server\"")
+            sql_client = sql_kwargs.pop("client", "error")
+            assert sql_client in ["mariadb", "pymysql", "psycopg", "psycopg2"], "Did not specify a supported \"client\" for \"DB sql server\""
+            sql = importlib.import_module(sql_client)
             con = sql.connect(**sql_kwargs)
             cur = con.cursor()
             cur.execute(''' CREATE TABLE IF NOT EXISTS connections

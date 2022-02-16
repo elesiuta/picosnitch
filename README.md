@@ -39,11 +39,11 @@
   - `pip3 install "picosnitch[full]" --upgrade --user`
 - create a service file for systemd to run picosnitch (recommended)
   - `picosnitch systemd`
-- optional dependencies (should already be installed or install automatically)
+- optional dependencies (will install from [PyPI](https://pypi.org/) with `[full]` if not already installed)
   - for dash: [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
-  - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro)
-  - for sql server: [pymysql](https://pymysql.readthedocs.io/en/latest/user/installation.html) (included with `[full]`), [mariadb](https://mariadb-corporation.github.io/mariadb-connector-python/install.html) (manual), or [psycopg2](https://www.psycopg.org/docs/install.html) (manual)
-  - for VirusTotal: `python-requests`
+  - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro and should be preinstalled)
+  - for sql server: one of [pymysql](https://pypi.org/project/PyMySQL/), [psycopg](https://pypi.org/project/psycopg/), [mariadb](https://pypi.org/project/mariadb/) (not included with `[full]`), or [psycopg2](https://pypi.org/project/psycopg2/) (not included with `[full]`)
+  - for VirusTotal: [requests](https://pypi.org/project/requests/)
 
 # [usage](#usage)
 - running picosnitch
@@ -106,7 +106,7 @@
   - notifications are handled by a separate subprocess, so they are not subject to the same delays as the connection log
 - you can also write the connection log to a MariaDB, MySQL, or PostgreSQL server with `DB sql server`
   - this is separate from `snitch.db` and only used to provide an [off-system copy to prevent tampering](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS) (use [GRANT](https://www.postgresql.org/docs/current/sql-grant.html) to assign privileges)
-  - to configure, add the key `RDBMS` to `DB sql server` with value `mariadb`, `mysql`, or `postgresql`
+  - to configure, add the key `client` to `DB sql server` with value `mariadb`, `psycopg`, `psycopg2`, or `pymysql`
   - assign remaining connection parameters for [MariaDB](https://mariadb-corporation.github.io/mariadb-connector-python/usage.html#connecting), [MySQL](https://pymysql.readthedocs.io/en/latest/modules/connections.html), or [PostgreSQL](https://www.psycopg.org/docs/module.html#psycopg2.connect) to `DB sql server` as key/value pairs
 - if `DB text log` is enabled, the full connection log is also written to `~/.config/picosnitch/conn.log`
   - this may be useful for watching with another program
