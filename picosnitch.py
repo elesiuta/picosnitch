@@ -839,6 +839,8 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                     q_error.put("text log %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transaction)))
                 if transaction_success or log_destinations == 0:
                     transaction = []
+                else:
+                    q_error.put("secondary subprocess all log desinations failed, will retry %s entries with next write" % (len(transaction)))
                 last_write = current_write
         except Exception as e:
             q_error.put("secondary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
