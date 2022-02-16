@@ -802,7 +802,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
             get_vt_results(snitch, p_virustotal.q_out, q_primary_in, False)
             get_fanotify_events(fan_fd, fan_mod_cnt, q_error)
             # process connection data
-            if time.time() - last_write > snitch["Config"]["DB write limit (seconds)"]:
+            if time.time() - last_write > snitch["Config"]["DB write limit (seconds)"] and (transaction or new_processes):
                 current_write = time.time()
                 transaction += secondary_subprocess_helper(snitch, fan_mod_cnt, new_processes, p_virustotal.q_in, q_primary_in, q_error)
                 new_processes = []
