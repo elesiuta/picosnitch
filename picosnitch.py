@@ -750,7 +750,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
         con.close()
     if sql_kwargs := snitch["Config"]["DB sql server"]:
         sql_client = sql_kwargs.pop("client", "error")
-        assert sql_client in ["mariadb", "pymysql", "psycopg", "psycopg2"], "Did not specify a supported \"client\" for \"DB sql server\""
+        assert sql_client in ["mariadb", "psycopg", "psycopg2", "pymysql"], "Did not specify a supported \"client\" for \"DB sql server\""
         sql = importlib.import_module(sql_client)
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
@@ -1751,7 +1751,7 @@ def start_picosnitch():
         con.close()
         if sql_kwargs := tmp_snitch["Config"]["DB sql server"]:
             sql_client = sql_kwargs.pop("client", "error")
-            assert sql_client in ["mariadb", "pymysql", "psycopg", "psycopg2"], "Did not specify a supported \"client\" for \"DB sql server\""
+            assert sql_client in ["mariadb", "psycopg", "psycopg2", "pymysql"], "Did not specify a supported \"client\" for \"DB sql server\""
             sql = importlib.import_module(sql_client)
             con = sql.connect(**sql_kwargs)
             cur = con.cursor()

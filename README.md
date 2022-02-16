@@ -42,7 +42,7 @@
 - optional dependencies (will install from [PyPI](https://pypi.org/) with `[full]` if not already installed)
   - for dash: [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
   - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro and should be preinstalled)
-  - for sql server: one of [pymysql](https://pypi.org/project/PyMySQL/), [psycopg](https://pypi.org/project/psycopg/), [mariadb](https://pypi.org/project/mariadb/) (not included with `[full]`), or [psycopg2](https://pypi.org/project/psycopg2/) (not included with `[full]`)
+  - for sql server: one of [psycopg](https://pypi.org/project/psycopg/), [pymysql](https://pypi.org/project/PyMySQL/), [mariadb](https://pypi.org/project/mariadb/), or [psycopg2](https://pypi.org/project/psycopg2/) (latter two not included with `[full]`)
   - for VirusTotal: [requests](https://pypi.org/project/requests/)
 
 # [usage](#usage)
@@ -67,7 +67,7 @@
   "Bandwidth monitor": true, # Log traffic per connection since last db write
   "DB retention (days)": 365, # How many days to keep connection logs in snitch.db
   "DB sql log": true, # Write connection logs to snitch.db (SQLite)
-  "DB sql server": {}, # Write connection logs to a MySQL or PostgreSQL server
+  "DB sql server": {}, # Write connection logs to a MariaDB, MySQL, or PostgreSQL server
   "DB text log": false, # Write connection logs to conn.log
   "DB write limit (seconds)": 10, # Minimum time between writing connection logs
   # increasing it decreases disk writes by grouping connections into larger time windows
@@ -107,7 +107,7 @@
 - you can also write the connection log to a MariaDB, MySQL, or PostgreSQL server with `DB sql server`
   - this is separate from `snitch.db` and only used to provide an [off-system copy to prevent tampering](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS) (use [GRANT](https://www.postgresql.org/docs/current/sql-grant.html) to assign privileges)
   - to configure, add the key `client` to `DB sql server` with value `mariadb`, `psycopg`, `psycopg2`, or `pymysql`
-  - assign remaining connection parameters for [MariaDB](https://mariadb-corporation.github.io/mariadb-connector-python/usage.html#connecting), [MySQL](https://pymysql.readthedocs.io/en/latest/modules/connections.html), or [PostgreSQL](https://www.psycopg.org/docs/module.html#psycopg2.connect) to `DB sql server` as key/value pairs
+  - assign remaining connection parameters for [mariadb](https://mariadb-corporation.github.io/mariadb-connector-python/usage.html#connecting), [psycopg](https://www.psycopg.org/docs/module.html#psycopg2.connect), or [pymysql](https://pymysql.readthedocs.io/en/latest/modules/connections.html) to `DB sql server` as key/value pairs
 - if `DB text log` is enabled, the full connection log is also written to `~/.config/picosnitch/conn.log`
   - this may be useful for watching with another program
   - it contains the following fields, separated by commas (commas, newlines, and null characters are removed from values)
