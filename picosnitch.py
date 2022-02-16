@@ -560,11 +560,11 @@ def secondary_subprocess_sha_wrapper(snitch: dict, fan_mod_cnt: dict, proc: dict
 
 
 def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing.List[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> typing.List[tuple]:
-    """iterate over the list of process/connection data to generate a list of transactions for the sql database"""
+    """iterate over the list of process/connection data to generate a list of entries for the sql database"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     event_counter = collections.defaultdict(int)
     traffic_counter = collections.defaultdict(int)
-    transactions = set()
+    transaction = set()
     for proc in new_processes:
         proc = pickle.loads(proc)
         if type(proc) != dict:
@@ -597,8 +597,8 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: 
             event_counter[str(event)] += 1
         traffic_counter["send " + str(event)] += proc["send"]
         traffic_counter["recv " + str(event)] += proc["recv"]
-        transactions.add(event)
-    return [(*event, event_counter[str(event)], traffic_counter["send " + str(event)], traffic_counter["recv " + str(event)]) for event in transactions]
+        transaction.add(event)
+    return [(*event, event_counter[str(event)], traffic_counter["send " + str(event)], traffic_counter["recv " + str(event)]) for event in transaction]
 
 
 def primary_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -> None:
@@ -737,7 +737,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
     parent_process = multiprocessing.parent_process()
     # maintain a separate copy of the snitch dictionary here and coordinate with the primary_subprocess (sha256 and vt_results)
     get_vt_results(snitch, p_virustotal.q_in, q_primary_in, True)
-    # init sql database
+    # init sql
     file_path = os.path.join(BASE_PATH, "snitch.db")
     text_path = os.path.join(BASE_PATH, "conn.log")
     if snitch["Config"]["DB sql log"]:
@@ -754,7 +754,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
     # main loop
-    transactions = []
+    transaction = []
     new_processes = []
     last_write = 0
     while True:
@@ -803,7 +803,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
             # process connection data
             if time.time() - last_write > snitch["Config"]["DB write limit (seconds)"]:
                 current_write = time.time()
-                transactions += secondary_subprocess_helper(snitch, fan_mod_cnt, new_processes, p_virustotal.q_in, q_primary_in, q_error)
+                transaction += secondary_subprocess_helper(snitch, fan_mod_cnt, new_processes, p_virustotal.q_in, q_primary_in, q_error)
                 new_processes = []
                 try:
                     if snitch["Config"]["DB sql log"]:
@@ -811,28 +811,28 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                         with con:
                             # (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, pname text, pcmdline text, psha256 text, conns integer, send integer, recv integer)
                             # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, proc["domain"], proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], proc["pcmdline"], psha256, event_counter[str(event)], sent bytes, received bytes)
-                            con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
+                            con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transaction)
                         con.close()
                 except Exception as e:
-                    q_error.put("SQLite execute %s%s on line %s, lost %s transactions" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transactions)))
+                    q_error.put("SQLite execute %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transaction)))
                 try:
                     if sql_kwargs:
                         con = sql.connect(**sql_kwargs)
                         with con.cursor() as cur:
-                            cur.executemany(''' INSERT INTO connections VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ''', transactions)
+                            cur.executemany(''' INSERT INTO connections VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ''', transaction)
                         con.commit()
                         con.close()
                 except Exception as e:
-                    q_error.put("SQL server execute %s%s on line %s, lost %s transactions" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transactions)))
+                    q_error.put("SQL server execute %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transaction)))
                 try:
                     if snitch["Config"]["DB text log"]:
                         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
-                            for entry in transactions:
+                            for entry in transaction:
                                 clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in entry]
                                 text_file.write(",".join(clean_entry) + "\n")
                 except Exception as e:
-                    q_error.put("text log %s%s on line %s, lost %s transactions" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transactions)))
-                transactions = []
+                    q_error.put("text log %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transaction)))
+                transaction = []
                 last_write = current_write
         except Exception as e:
             q_error.put("secondary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
