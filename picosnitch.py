@@ -814,21 +814,27 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                             # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, proc["domain"], proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], proc["pcmdline"], psha256, event_counter[str(event)], sent bytes, received bytes)
                             con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
                         con.close()
+                except Exception as e:
+                    q_error.put("SQLite execute %s%s on line %s, lost %s transactions" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transactions)))
+                try:
                     if sql_kwargs:
                         con = sql.connect(**sql_kwargs)
                         with con.cursor() as cur:
                             cur.executemany(''' INSERT INTO connections VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ''', transactions)
                         con.commit()
                         con.close()
+                except Exception as e:
+                    q_error.put("SQL server execute %s%s on line %s, lost %s transactions" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transactions)))
+                try:
                     if snitch["Config"]["DB text log"]:
                         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
                             for entry in transactions:
                                 clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in entry]
                                 text_file.write(",".join(clean_entry) + "\n")
-                    transactions = []
-                    last_write = current_write
                 except Exception as e:
-                    q_error.put("SQL execute %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+                    q_error.put("text log %s%s on line %s, lost %s transactions" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transactions)))
+                transactions = []
+                last_write = current_write
         except Exception as e:
             q_error.put("secondary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
