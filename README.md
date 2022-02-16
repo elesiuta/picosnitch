@@ -42,6 +42,7 @@
 - optional dependencies (should already be installed or install automatically)
   - for dash: [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
   - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro)
+  - for sql server: [pymysql](https://pymysql.readthedocs.io/en/latest/user/installation.html) (included with `[full]`), [mariadb](https://mariadb-corporation.github.io/mariadb-connector-python/install.html) (manual), or [psycopg2](https://www.psycopg.org/docs/install.html) (manual)
   - for VirusTotal: `python-requests`
 
 # [usage](#usage)
@@ -65,7 +66,8 @@
 {
   "Bandwidth monitor": true, # Log traffic per connection since last db write
   "DB retention (days)": 365, # How many days to keep connection logs in snitch.db
-  "DB sql log": true, # Write connection logs to snitch.db
+  "DB sql log": true, # Write connection logs to snitch.db (SQLite)
+  "DB sql server": {}, # Write connection logs to a MySQL or PostgreSQL server
   "DB text log": false, # Write connection logs to conn.log
   "DB write limit (seconds)": 10, # Minimum time between writing connection logs
   # increasing it decreases disk writes by grouping connections into larger time windows
@@ -99,9 +101,13 @@
   - this is used for determining whether to create a notification
   - it contains known process name(s) by executable, executable(s) by process name, and sha256 hash(es) with VirusTotal results by executable
 - the full connection log is stored in `~/.config/picosnitch/snitch.db`
-  - this is used for `picosnitch dash`, `picosnitch view` or something like [DB Browser](https://sqlitebrowser.org/)
+  - this is used for `picosnitch dash`, `picosnitch view`, or something like [DB Browser](https://sqlitebrowser.org/)
   - note, connection times are based on when the group is processed, so they are accurate to within `DB write limit (seconds)` at best, and could be delayed if the previous group is slow to hash
   - notifications are handled by a separate subprocess, so they are not subject to the same delays as the connection log
+- you can also write the connection log to a MariaDB, MySQL, or PostgreSQL server with `DB sql server`
+  - this is separate from `snitch.db` and only used to provide an [off-system copy to prevent tampering](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS) (use [GRANT](https://www.postgresql.org/docs/current/sql-grant.html) to assign privileges)
+  - to configure, add the key `RDBMS` to `DB sql server` with value `mariadb`, `mysql`, or `postgresql`
+  - assign remaining connection parameters for [MariaDB](https://mariadb-corporation.github.io/mariadb-connector-python/usage.html#connecting), [MySQL](https://pymysql.readthedocs.io/en/latest/modules/connections.html), or [PostgreSQL](https://www.psycopg.org/docs/module.html#psycopg2.connect) to `DB sql server` as key/value pairs
 - if `DB text log` is enabled, the full connection log is also written to `~/.config/picosnitch/conn.log`
   - this may be useful for watching with another program
   - it contains the following fields, separated by commas (commas, newlines, and null characters are removed from values)

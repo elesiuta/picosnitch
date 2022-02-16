@@ -327,6 +327,7 @@ def read_snitch() -> dict:
             "Bandwidth monitor": True,
             "DB retention (days)": 365,
             "DB sql log": True,
+            "DB sql server": {},
             "DB text log": False,
             "DB write limit (seconds)": 10,
             "Desktop notifications": True,
@@ -738,14 +739,24 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
     # init sql database
     file_path = os.path.join(BASE_PATH, "snitch.db")
     text_path = os.path.join(BASE_PATH, "conn.log")
-    con = sqlite3.connect(file_path)
     if snitch["Config"]["DB sql log"]:
+        con = sqlite3.connect(file_path)
         cur = con.cursor()
         cur.execute(''' PRAGMA user_version ''')
         assert cur.fetchone()[0] == 2, f"Incorrect database version of snitch.db for picosnitch v{VERSION}"
         cur.execute(''' DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") ''' % int(snitch["Config"]["DB retention (days)"]))
         con.commit()
-    con.close()
+        con.close()
+    if sql_kwargs := snitch["Config"]["DB sql server"]:
+        rdbms = sql_kwargs.pop("RDBMS", "error").lower()
+        if rdbms == "mariadb":
+            import mariadb as sql
+        elif rdbms == "mysql":
+            import pymysql as sql
+        elif rdbms == "postgresql":
+            import psycopg2 as sql
+        else:
+            raise Exception("Did not specify a supported \"RDBMS\" for \"DB sql server\"")
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
     # main loop
@@ -800,13 +811,20 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                 current_write = time.time()
                 transactions += secondary_subprocess_helper(snitch, fan_mod_cnt, new_processes, p_virustotal.q_in, q_primary_in, q_error)
                 new_processes = []
-                con = sqlite3.connect(file_path)
                 try:
                     if snitch["Config"]["DB sql log"]:
+                        con = sqlite3.connect(file_path)
                         with con:
                             # (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, pname text, pcmdline text, psha256 text, conns integer, send integer, recv integer)
                             # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, proc["domain"], proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], proc["pcmdline"], psha256, event_counter[str(event)], sent bytes, received bytes)
                             con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transactions)
+                        con.close()
+                    if sql_kwargs:
+                        con = sql.connect(**sql_kwargs)
+                        with con.cursor() as cur:
+                            cur.executemany(''' INSERT INTO connections VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ''', transactions)
+                        con.commit()
+                        con.close()
                     if snitch["Config"]["DB text log"]:
                         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
                             for entry in transactions:
@@ -816,7 +834,6 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                     last_write = current_write
                 except Exception as e:
                     q_error.put("SQL execute %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
-                con.close()
         except Exception as e:
             q_error.put("secondary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
@@ -1709,7 +1726,7 @@ def start_picosnitch():
             cap_sys_admin = 2**21
             assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
         assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
-        assert read_snitch()
+        tmp_snitch = read_snitch()
         con = sqlite3.connect(os.path.join(BASE_PATH, "snitch.db"))
         cur = con.cursor()
         cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
@@ -1737,6 +1754,22 @@ def start_picosnitch():
                 cur.execute(''' PRAGMA user_version = 2 ''')
                 con.commit()
         con.close()
+        if sql_kwargs := tmp_snitch["Config"]["DB sql server"]:
+            rdbms = sql_kwargs.pop("RDBMS", "error").lower()
+            if rdbms == "mariadb":
+                import mariadb as sql
+            elif rdbms == "mysql":
+                import pymysql as sql
+            elif rdbms == "postgresql":
+                import psycopg2 as sql
+            else:
+                raise Exception("Did not specify a supported \"RDBMS\" for \"DB sql server\"")
+            con = sql.connect(**sql_kwargs)
+            cur = con.cursor()
+            cur.execute(''' CREATE TABLE IF NOT EXISTS connections
+                            (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, pname text, pcmdline text, psha256 text, conns integer, send integer, recv integer) ''')
+            con.commit()
+            con.close()
         if sys.argv[1] in ["start", "stop", "restart"]:
             if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
                 print("Found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl")
