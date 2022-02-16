@@ -749,8 +749,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
         con.commit()
         con.close()
     if sql_kwargs := snitch["Config"]["DB sql server"]:
-        sql_client = sql_kwargs.pop("client", "error")
-        assert sql_client in ["mariadb", "psycopg", "psycopg2", "pymysql"], "Did not specify a supported \"client\" for \"DB sql server\""
+        sql_client = sql_kwargs.pop("client", "no client error")
         sql = importlib.import_module(sql_client)
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
@@ -1755,17 +1754,20 @@ def start_picosnitch():
                 cur.execute(''' PRAGMA user_version = 2 ''')
                 con.commit()
         con.close()
-        if sys.argv[1] in ["start", "start-no-daemon", "restart"]:
-            if sql_kwargs := tmp_snitch["Config"]["DB sql server"]:
-                sql_client = sql_kwargs.pop("client", "error")
-                assert sql_client in ["mariadb", "psycopg", "psycopg2", "pymysql"], "Did not specify a supported \"client\" for \"DB sql server\""
-                sql = importlib.import_module(sql_client)
+        if sql_kwargs := tmp_snitch["Config"]["DB sql server"]:
+            sql_client = sql_kwargs.pop("client", "no client error")
+            sql = importlib.import_module(sql_client)
+            if sql_client not in ["mariadb", "psycopg", "psycopg2", "pymysql"]:
+                print(f"Warning, using {sql_client} for \"DB sql server\" \"client\" may not be supported, ensure it implements PEP 249", file=sys.stderr)
+            try:
                 con = sql.connect(**sql_kwargs)
                 cur = con.cursor()
                 cur.execute(''' CREATE TABLE IF NOT EXISTS connections
                                 (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, pname text, pcmdline text, psha256 text, conns integer, send integer, recv integer) ''')
                 con.commit()
                 con.close()
+            except Exception as e:
+                print("Warning: %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno), file=sys.stderr)
         if sys.argv[1] in ["start", "stop", "restart"]:
             if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
                 print("Found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl")
