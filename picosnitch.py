@@ -751,6 +751,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
     if sql_kwargs := snitch["Config"]["DB sql server"]:
         sql_client = sql_kwargs.pop("client", "no client error")
         sql = importlib.import_module(sql_client)
+    log_destinations = int(bool(snitch["Config"]["DB sql log"])) + int(bool(sql_kwargs)) + int(bool(snitch["Config"]["DB text log"]))
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
     # main loop
@@ -805,6 +806,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                 current_write = time.time()
                 transaction += secondary_subprocess_helper(snitch, fan_mod_cnt, new_processes, p_virustotal.q_in, q_primary_in, q_error)
                 new_processes = []
+                transaction_success = False
                 try:
                     if snitch["Config"]["DB sql log"]:
                         con = sqlite3.connect(file_path)
@@ -813,6 +815,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                             # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, proc["domain"], proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], proc["pcmdline"], psha256, event_counter[str(event)], sent bytes, received bytes)
                             con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transaction)
                         con.close()
+                        transaction_success = True
                 except Exception as e:
                     q_error.put("SQLite execute %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transaction)))
                 try:
@@ -822,6 +825,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                             cur.executemany(''' INSERT INTO connections VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ''', transaction)
                         con.commit()
                         con.close()
+                        transaction_success = True
                 except Exception as e:
                     q_error.put("SQL server execute %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transaction)))
                 try:
@@ -830,9 +834,11 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                             for entry in transaction:
                                 clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in entry]
                                 text_file.write(",".join(clean_entry) + "\n")
+                        transaction_success = True
                 except Exception as e:
                     q_error.put("text log %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transaction)))
-                transaction = []
+                if transaction_success or log_destinations == 0:
+                    transaction = []
                 last_write = current_write
         except Exception as e:
             q_error.put("secondary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
