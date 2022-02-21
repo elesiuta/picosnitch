@@ -738,6 +738,9 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
     # maintain a separate copy of the snitch dictionary here and coordinate with the primary_subprocess (sha256 and vt_results)
     get_vt_results(snitch, p_virustotal.q_in, q_primary_in, True)
     # init sql
+    # (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, pname text, pcmdline text, psha256 text, conns integer, send integer, recv integer)
+    # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, proc["domain"], proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], proc["pcmdline"], psha256, event_counter[str(event)], sent bytes, received bytes)
+    sqlite_query = ''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '''
     file_path = os.path.join(BASE_PATH, "snitch.db")
     text_path = os.path.join(BASE_PATH, "conn.log")
     if snitch["Config"]["DB sql log"]:
@@ -750,7 +753,9 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
         con.close()
     if sql_kwargs := snitch["Config"]["DB sql server"]:
         sql_client = sql_kwargs.pop("client", "no client error")
+        table_name = sql_kwargs.pop("table_name", "connections")
         sql = importlib.import_module(sql_client)
+        sql_query = sqlite_query.replace("?", "%s").replace("connections", table_name)
     log_destinations = int(bool(snitch["Config"]["DB sql log"])) + int(bool(sql_kwargs)) + int(bool(snitch["Config"]["DB text log"]))
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
@@ -811,9 +816,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                     if snitch["Config"]["DB sql log"]:
                         con = sqlite3.connect(file_path)
                         with con:
-                            # (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, pname text, pcmdline text, psha256 text, conns integer, send integer, recv integer)
-                            # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, proc["domain"], proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], proc["pcmdline"], psha256, event_counter[str(event)], sent bytes, received bytes)
-                            con.executemany(''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', transaction)
+                            con.executemany(sqlite_query, transaction)
                         con.close()
                         transaction_success = True
                 except Exception as e:
@@ -822,7 +825,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                     if sql_kwargs:
                         con = sql.connect(**sql_kwargs)
                         with con.cursor() as cur:
-                            cur.executemany(''' INSERT INTO connections VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ''', transaction)
+                            cur.executemany(sql_query, transaction)
                         con.commit()
                         con.close()
                         transaction_success = True
@@ -1764,14 +1767,15 @@ def start_picosnitch():
         con.close()
         if sql_kwargs := tmp_snitch["Config"]["DB sql server"]:
             sql_client = sql_kwargs.pop("client", "no client error")
+            table_name = sql_kwargs.pop("table_name", "connections")
             sql = importlib.import_module(sql_client)
             if sql_client not in ["mariadb", "psycopg", "psycopg2", "pymysql"]:
                 print(f"Warning, using {sql_client} for \"DB sql server\" \"client\" may not be supported, ensure it implements PEP 249", file=sys.stderr)
             try:
                 con = sql.connect(**sql_kwargs)
                 cur = con.cursor()
-                cur.execute(''' CREATE TABLE IF NOT EXISTS connections
-                                (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, pname text, pcmdline text, psha256 text, conns integer, send integer, recv integer) ''')
+                cur.execute(f''' CREATE TABLE IF NOT EXISTS {table_name}
+                                 (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, pname text, pcmdline text, psha256 text, conns integer, send integer, recv integer) ''')
                 con.commit()
                 con.close()
             except Exception as e:
