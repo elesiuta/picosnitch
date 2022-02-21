@@ -18,7 +18,7 @@
 - Uses BPF [for accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and fanotify to watch executables for modification
 - Since applications can call others to send/receive data for them, the parent executable and hash is also logged for each connection
 - Focus is on monitoring and detection, and doing that well, this is not a firewall since that would increase complexity, impact performance, and can't be done as securely as [sandboxing](https://wiki.archlinux.org/title/Security#Sandboxing_applications) with something such as [firejail](https://wiki.archlinux.org/title/firejail#Usage), [flatpak](https://github.com/tchx84/Flatseal/blob/master/DOCUMENTATION.md#share), or a virtual machine
-- Even though executables are hashed, they may still be compromised via shared libraries, if this is a concern you may want to see other host-based intrusion detection systems (HIDS) such as [AIDE](https://wiki.archlinux.org/title/AIDE) or something like [debsums (with caveats)](https://manpages.debian.org/unstable/debsums/debsums.1.en.html)
+- Note that applications could also be compromised via shared libraries, loading scripts, extensions, etc., and only the process executable itself is hashed, if this is a concern you may also want to see other host-based intrusion detection systems (HIDS) such as [AIDE](https://wiki.archlinux.org/title/AIDE) or something like [debsums (with caveats)](https://manpages.debian.org/unstable/debsums/debsums.1.en.html) on top of checking for abnormal traffic
 - Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
 
 # [installation](#installation)
@@ -84,6 +84,8 @@
   # will omit connections that match any of these from the connection log
   # domains will match any that start with the provided string, hashes or ports are exact
   # the process name, executable, and hash will still be recorded in record.json
+  # use with caution since applications could still be compromised without affecting hash
+  # e.g. via shared libraries, loading scripts, extensions, etc.
   "Set RLIMIT_NOFILE": null, # Set the maximum number of open file descriptors (int)
   # it is used for caching process executables and hashes (typical system default is 1024)
   # this is good enough for most people since caching is based on executable device + inode
@@ -106,7 +108,7 @@
   - notifications are handled by a separate subprocess, so they are not subject to the same delays as the connection log
 - use `DB sql server` to write the full connection log to a MariaDB, MySQL, or PostgreSQL server
   - this is independent of `DB sql log` and is used for providing an [off-system copy to prevent tampering](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS) (use [GRANT](https://www.postgresql.org/docs/current/sql-grant.html) to assign privileges)
-  - to configure, add the key `client` to `DB sql server` with value `mariadb`, `psycopg`, `psycopg2`, or `pymysql`
+  - to configure, add the key `client` to `DB sql server` with value `mariadb`, `psycopg`, `psycopg2`, or `pymysql`, you can also optionally set `table_name`
   - assign remaining connection parameters for [mariadb](https://mariadb-corporation.github.io/mariadb-connector-python/usage.html#connecting), [psycopg](https://www.psycopg.org/docs/module.html#psycopg2.connect), or [pymysql](https://pymysql.readthedocs.io/en/latest/modules/connections.html) to `DB sql server` as key/value pairs
 - enable `DB text log` to write the full connection log to `~/.config/picosnitch/conn.log`
   - this may be useful for watching with another program
