@@ -1582,8 +1582,8 @@ def ui_dash():
                     included=False,
                 ),
             ]),
-            dcc.Graph(id="send", config={"scrollZoom":True}),
-            dcc.Graph(id="recv", config={"scrollZoom":True}),
+            dcc.Graph(id="send", config={"scrollZoom": False}),
+            dcc.Graph(id="recv", config={"scrollZoom": False}),
             html.Footer(f"picosnitch v{VERSION} ({run_status}) (using {file_path})"),
         ])
     app = dash.Dash(__name__)
