@@ -1508,7 +1508,7 @@ def ui_dash():
         elif size > 10**3:
             return f"{dim} ({round(size/10**3, 2)!s} kB)"
         else:
-            return f"{dim} ({int(size)!s} B)"
+            return f"{dim} ({size!s} B)"
     def trim_cmdline(cmdline, trim) -> str:
         if trim and len(cmdline) > 64:
             return f"{cmdline[:32]}...{cmdline[-29:]}"
@@ -1643,19 +1643,19 @@ def ui_dash():
             else:
                 whereis_options = [{"label": f"is {x[0]}", "value": x[0]} for x in whereis_values]
         con.close()
-        df_send = df.pivot_table(index="contime", columns=dim, values="send", fill_value=0, dropna=True).groupby(level=0).sum()
-        df_recv = df.pivot_table(index="contime", columns=dim, values="recv", fill_value=0, dropna=True).groupby(level=0).sum()
-        df_send_total = df_send.sum()
-        df_recv_total = df_recv.sum()
-        if smoothing:
-            df_send = df_send.rolling(4).mean()
-            df_recv = df_recv.rolling(4).mean()
+        df_send = df.pivot_table(index="contime", columns=dim, values="send", fill_value=0, dropna=False, aggfunc=sum)
+        df_recv = df.pivot_table(index="contime", columns=dim, values="recv", fill_value=0, dropna=False, aggfunc=sum)
         if dim == "uid":
             df_send.rename(columns=get_user, inplace=True)
             df_recv.rename(columns=get_user, inplace=True)
         elif dim in ["cmdline", "pcmdline"]:
             df_send.rename(columns=lambda x: trim_cmdline(x, trim), inplace=True)
             df_recv.rename(columns=lambda x: trim_cmdline(x, trim), inplace=True)
+        df_send_total = df_send.sum()
+        df_recv_total = df_recv.sum()
+        if smoothing:
+            df_send = df_send.rolling(4).mean()
+            df_recv = df_recv.rolling(4).mean()
         df_send.rename(columns=lambda dim: get_totals(df_send_total, dim), inplace=True)
         df_recv.rename(columns=lambda dim: get_totals(df_recv_total, dim), inplace=True)
         fig_send = px.line(df_send, line_shape="linear", render_mode="svg", labels={
