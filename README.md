@@ -11,28 +11,42 @@
 
 # [picosnitch](https://elesiuta.github.io/picosnitch/)
 ![screenshot.png](https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/screenshot.png)
+
+## [about](#about)
 - Receive notifications whenever a new program connects to the network, or when it's modified
 - Monitors your bandwidth, breaking down traffic by executable, hash, parent, domain, port, or user over time
 - Can optionally check hashes or executables using [VirusTotal](https://www.virustotal.com)
 - Executable hashes are cached based on device + inode for improved performance, and works with applications running inside containers
 - Uses BPF [for accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and fanotify to watch executables for modification
 - Since applications can call others to send/receive data for them, the parent executable and hash is also logged for each connection
-- Focus is on monitoring and detection, and doing that well, this is not a firewall since that would increase complexity, impact performance, and can't be done as securely as [sandboxing](https://wiki.archlinux.org/title/Security#Sandboxing_applications) with something such as [firejail](https://wiki.archlinux.org/title/firejail#Usage), [flatpak](https://github.com/tchx84/Flatseal/blob/master/DOCUMENTATION.md#share), or a virtual machine
-- Note that applications could also be compromised via shared libraries, loading scripts, extensions, etc., and only the process executable itself is hashed, if this is a concern you may also want to see other host-based intrusion detection systems (HIDS) such as [AIDE](https://wiki.archlinux.org/title/AIDE) or something like [debsums (with caveats)](https://manpages.debian.org/unstable/debsums/debsums.1.en.html) on top of checking for abnormal traffic
 - Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
+
+## [limitations](#limitations)
+- While picosnitch aims to be as reliable as possible, there are some fundamental limitations for these types of tools which you should be aware of in order to decide if this approach suits your purpose, and how to use it effectively
+- Detecting open sockets, monitoring traffic, and identifying the process should be fairly reliable with BPF, however  accurately identifying the application behind it can be difficult, especially if has malicious intent
+- The process name is trivial to change, the path can be set to anything with mount namespaces, including impersonating an already existing executable (or replacing it), and cmdline arguments can be faked by calling itself or a script with bogus arguments
+- Hashing the executables can help, however it is an imperfect solution as only the process executable itself is hashed, so applications could also be compromised via shared libraries, loading scripts, extensions, etc., this could be improved by supplementing with other host-based intrusion detection systems (HIDS) such as [AIDE](https://wiki.archlinux.org/title/AIDE) or something like [debsums (with caveats)](https://manpages.debian.org/unstable/debsums/debsums.1.en.html) on top of checking for abnormal traffic
+- Applications such as AppImages which use FUSE may not be readable as root, preventing the executable from being hashed, you may want to avoid them in order to reduce log noise that malicious programs could use to hide
+- If a process is too short lived, picosnitch may not be able to open a file descriptor in time in order to hash it
+- The device and inode of the opened file descriptor is checked against what was reported by the BPF program to detect if the executable was replaced, however BTRFS uses non-unique inodes, negating this protection
+- If for any reason the executable fails to hash, the traffic will still be logged with whatever information was available and you will be notified of an error
+- Too many processes or connections could cause the connection data to be lost if callbacks are not processed fast enough, this will be detected, logging the error and triggering a notification
+- Depending on your level of concern for privacy/security, you may want to keep an off-system copy of your logs to protect them
+- For these reasons (and probably others), if you want a more secure method to isolate or deny traffic per application, you need to [sandbox](https://wiki.archlinux.org/title/Security#Sandboxing_applications) them with something such as [firejail](https://wiki.archlinux.org/title/firejail#Usage), [flatpak](https://github.com/tchx84/Flatseal/blob/master/DOCUMENTATION.md#share), or a virtual machine
 
 # [installation](#installation)
 
-### [PPA](https://launchpad.net/~elesiuta/+archive/ubuntu/picosnitch) for Ubuntu and derivatives
+## [AUR](https://aur.archlinux.org/packages/picosnitch/) for Arch and derivatives
+- install `picosnitch` [manually](https://wiki.archlinux.org/title/Arch_User_Repository#Installing_and_upgrading_packages) or using your preferred [AUR helper](https://wiki.archlinux.org/title/AUR_helpers)
+
+## [PPA](https://launchpad.net/~elesiuta/+archive/ubuntu/picosnitch) for Ubuntu and derivatives
 - `sudo add-apt-repository ppa:elesiuta/picosnitch`
 - `sudo apt update`
 - `sudo apt install picosnitch`
 - extra dependencies for dash (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
+- if you encounter issues, try a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#ubuntu---binary) ([alternative PPA if upstream repo is still broken](https://launchpad.net/~hadret/+archive/ubuntu/bpfcc))
 
-### [AUR](https://aur.archlinux.org/packages/picosnitch/) for Arch and derivatives
-- install `picosnitch` [manually](https://wiki.archlinux.org/title/Arch_User_Repository#Installing_and_upgrading_packages) or using your preferred [AUR helper](https://wiki.archlinux.org/title/AUR_helpers)
-
-### [PyPI](https://pypi.org/project/picosnitch/) for any Linux distribution with Python >= 3.8
+## [PyPI](https://pypi.org/project/picosnitch/) for any Linux distribution with Python >= 3.8
 - install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
   - it should be called `python-bcc` or `python-bpfcc`
 - install picosnitch using [pip](https://pip.pypa.io/)
