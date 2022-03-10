@@ -63,7 +63,6 @@ assert sys.version_info >= (3, 8), "Python version >= 3.8 is required"
 assert sys.platform.startswith("linux"), "Did not detect a supported operating system"
 
 # set constants and RLIMIT_NOFILE if configured
-PAGE_CNT: typing.Final[int] = 64
 if os.getuid() == 0:
     if os.getenv("SUDO_UID"):
         home_user = pwd.getpwuid(int(os.getenv("SUDO_UID"))).pw_name
@@ -336,6 +335,7 @@ def read_snitch() -> dict:
             "Log addresses": True,
             "Log commands": True,
             "Log ignore": [],
+            "Perf ring buffer (pages)": 64,
             "Set RLIMIT_NOFILE": None,
             "VT API key": "",
             "VT file upload": False,
@@ -857,6 +857,8 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
+    EVERY_EXE: typing.Final[bool] = config["Every exe (not just conns)"]
+    PAGE_CNT: typing.Final[int] = config["Perf ring buffer (pages)"]
     libc = ctypes.CDLL(ctypes.util.find_library("c"))
     _FAN_MARK_ADD = 0x1
     _FAN_MARK_REMOVE = 0x2
@@ -895,11 +897,11 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
             except Exception:
                 cmd = ""
             if fd and (st_dev, st_ino) != get_fstat(fd):
-                if config["Every exe (not just conns)"] or port != -1:
+                if EVERY_EXE or port != -1:
                     q_error.put(f"Exe inode changed for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino}) before FD could be opened, using port: {port}")
                 st_dev, st_ino = get_fstat(fd)
                 sig = f"{st_dev} {st_ino}"
-                if config["Every exe (not just conns)"] or port != -1:
+                if EVERY_EXE or port != -1:
                     q_error.put(f"New inode for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino} exe: {exe})")
             fd_dict[sig] = (fd, fd_path, exe, cmd)
             try:
@@ -916,7 +918,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
             pstat = os.stat(f"/proc/{proc['ppid']}/exe")
             st_dev, st_ino, pid, fd, exe, cmd = get_fd(stat.st_dev, stat.st_ino, proc["pid"], proc["port"])
             pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(pstat.st_dev, pstat.st_ino, proc["ppid"], -1)
-            if config["Every exe (not just conns)"] or proc["port"] != -1:
+            if EVERY_EXE or proc["port"] != -1:
                 snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                                      "ppid": ppid, "pname": proc["pname"], "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                                      "uid": proc["uid"], "send": 0, "recv": 0, "port": proc["port"], "ip": proc["ip"], "domain": domain_dict[proc["ip"]]}))
@@ -932,7 +934,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
                 raise Exception()
         except Exception:
             config["Bandwidth monitor"] = False
-            q_error.put("BPF.support_kfunc() was False, cannot enable bandwidth monitor")
+            q_error.put("BPF.support_kfunc() was not True, cannot enable bandwidth monitor, check BCC version or Kernel Configuration")
     b = BPF(text=bpf_text)
     b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
     b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
@@ -940,8 +942,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         b.attach_uprobe(name="c", sym="getaddrinfo", fn_name="dns_entry")
         b.attach_uretprobe(name="c", sym="getaddrinfo", fn_name="dns_return")
     def queue_lost(event, *args):
-        # if you see this, try increasing PAGE_CNT
-        q_error.put(f"BPF callbacks not processing fast enough, missed {event} event")
+        q_error.put(f"BPF callbacks not processing fast enough, missed {event} event, try increasing 'Perf ring buffer (pages)' (power of two) if this continues")
     def queue_ipv4_event(cpu, data, size):
         event = b["ipv4_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
@@ -1001,7 +1002,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         event = b["exec_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, -1)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
-        if config["Every exe (not just conns)"]:
+        if EVERY_EXE:
             snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                                  "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                                  "uid": event.uid, "send": 0, "recv": 0, "port": -1, "ip": "", "domain": ""}))

@@ -30,7 +30,7 @@
 - `sudo apt update`
 - `sudo apt install picosnitch`
 - extra dependencies for dash (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
-- if you encounter issues, try a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#ubuntu---binary) ([alternative PPA if upstream repo is still broken](https://launchpad.net/~hadret/+archive/ubuntu/bpfcc))
+- if you encounter issues, try a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#ubuntu---binary) ([unofficial PPA](https://launchpad.net/~hadret/+archive/ubuntu/bpfcc))
 
 ### [PyPI](https://pypi.org/project/picosnitch/) for any Linux distribution with Python >= 3.8
 - install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
@@ -86,6 +86,8 @@
   # the process name, executable, and hash will still be recorded in record.json
   # use with caution since applications could still be compromised without affecting hash
   # e.g. via shared libraries, loading scripts, extensions, etc.
+  "Perf ring buffer (pages)": 64, # Power of two number of pages for BPF program
+  # only change this if it is giving you errors
   "Set RLIMIT_NOFILE": null, # Set the maximum number of open file descriptors (int)
   # it is used for caching process executables and hashes (typical system default is 1024)
   # this is good enough for most people since caching is based on executable device + inode
