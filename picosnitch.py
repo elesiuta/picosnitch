@@ -266,6 +266,7 @@ class NotificationManager:
     dbus_notifications = False
     notifications_ready = False
     notification_queue = []
+    last_notification = ""
     def __new__(cls, *args, **kwargs):
         if not cls.__instance:
             cls.__instance = super(NotificationManager, cls).__new__(cls, *args, **kwargs)
@@ -288,7 +289,9 @@ class NotificationManager:
     def toast(self, msg: str, file=sys.stdout) -> None:
         try:
             if self.notifications_ready:
-                self.system_notification(msg)
+                if self.last_notification != msg:
+                    self.last_notification = msg
+                    self.system_notification(msg)
             else:
                 print(msg, file=file)
                 self.notification_queue.append(msg)
@@ -297,7 +300,9 @@ class NotificationManager:
                     if self.notifications_ready:
                         for msg in self.notification_queue:
                             try:
-                                self.system_notification(msg)
+                                if self.last_notification != msg:
+                                    self.last_notification = msg
+                                    self.system_notification(msg)
                             except Exception:
                                 pass
                         self.notification_queue = []
