@@ -3,11 +3,8 @@
 [![AUR release](https://img.shields.io/aur/version/picosnitch?color=00a0a0)](https://aur.archlinux.org/packages/picosnitch/)
 [![GitHub commits since latest release](https://img.shields.io/github/commits-since/elesiuta/picosnitch/latest/master?color=00a0a0)](https://github.com/elesiuta/picosnitch/commits/master)
 [![GitHub contributors](https://img.shields.io/github/contributors/elesiuta/picosnitch?color=00a0a0)](https://github.com/elesiuta/picosnitch/graphs/contributors)
-[![File size](https://img.shields.io/github/size/elesiuta/picosnitch/picosnitch.py?color=00a0a0)](https://github.com/elesiuta/picosnitch/blob/master/picosnitch.py)
+[![Source size](https://img.shields.io/github/size/elesiuta/picosnitch/picosnitch.py?color=00a0a0)](https://github.com/elesiuta/picosnitch/blob/master/picosnitch.py)
 [![Python grade](https://img.shields.io/lgtm/grade/python/g/elesiuta/picosnitch.svg?logo=lgtm&logoWidth=18&color=00a0a0)](https://lgtm.com/projects/g/elesiuta/picosnitch/context:python)
-[![PyPI monthly downloads (without mirrors)](https://img.shields.io/pypi/dm/picosnitch?color=00a0a0&label=downloads%20%28pypistats%29)](https://pypistats.org/packages/picosnitch)
-[![PyPI total downloads](https://img.shields.io/badge/dynamic/json?color=00a0a0&label=downloads%20%28pepy%29&query=total_downloads&url=https%3A%2F%2Fapi.pepy.tech%2Fapi%2Fprojects%2Fpicosnitch)](https://pepy.tech/project/picosnitch)
-[![GitHub downloads](https://img.shields.io/github/downloads/elesiuta/picosnitch/total?color=00a0a0&label=downloads%20%28github%29)](https://github.com/elesiuta/picosnitch/releases)
 
 ![screenshot.png](https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/screenshot.png)
 
@@ -30,7 +27,7 @@
 - `sudo apt update`
 - `sudo apt install picosnitch`
 - extra dependencies for dash (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
-- if you encounter issues, try a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#ubuntu---binary) ([unofficial PPA](https://launchpad.net/~hadret/+archive/ubuntu/bpfcc))
+- you will likely require a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#ubuntu---binary) ([unofficial PPA](https://launchpad.net/~hadret/+archive/ubuntu/bpfcc)) since the version in the [Ubuntu repos](https://repology.org/project/bcc-bpf/versions) lags behind its [supported kernel](https://github.com/iovisor/bcc/releases)
 
 ### [PyPI](https://pypi.org/project/picosnitch/) for any Linux distribution with Python >= 3.8
 - install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
@@ -123,7 +120,7 @@
   - a program should not be able to hide from picosnitch (either by omission or spoofing another program) without picosnitch reporting an error
   - see [limitations](#limitations) below for other sources of errors
 
-## [limitations](#limitations)
+### [limitations](#limitations)
 - while picosnitch aims to be as reliable as possible, there are some fundamental limitations for these types of tools which you should be aware of in order to decide if this approach suits your purpose, and how to use it effectively
 - detecting open sockets, monitoring traffic, and identifying the process should be fairly reliable with BPF, however accurately identifying the application behind it can be difficult, especially if has malicious intent
 - the process name is trivial to change, the path can be set to anything with mount namespaces, including impersonating an already existing executable (or replacing it), and cmdline arguments can be faked by calling itself or a script with bogus arguments
