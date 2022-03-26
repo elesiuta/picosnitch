@@ -120,7 +120,7 @@
   - a program should not be able to hide from picosnitch (either by omission or spoofing another program) without picosnitch reporting an error
   - see [limitations](#limitations) below for other sources of errors
 
-### [limitations](#limitations)
+# [limitations](#limitations)
 - while picosnitch aims to be as reliable as possible, there are some fundamental limitations for these types of tools which you should be aware of in order to decide if this approach suits your purpose, and how to use it effectively
 - detecting open sockets, monitoring traffic, and identifying the process should be fairly reliable with BPF, however accurately identifying the application behind it can be difficult, especially if has malicious intent
 - the process name is trivial to change, the path can be set to anything with mount namespaces, including impersonating an already existing executable (or replacing it), and cmdline arguments can be faked by calling itself or a script with bogus arguments
