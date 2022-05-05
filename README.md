@@ -15,6 +15,8 @@
 - Executable hashes are cached based on device + inode for improved performance, and works with applications running inside containers
 - Uses BPF [for accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and fanotify to watch executables for modification
 - Since applications can call others to send/receive data for them, the parent executable and hash is also logged for each connection
+- Gives peace of mind helping you understand what is running on your system so you can identify for yourself any abnormal/malicious activity
+- Pragmatic design focussing on accurate detection and [clear errors](#limitations), the best protection is good backups since a compromised host requires reinstalling your OS
 - Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
 
 # [installation](#installation)
@@ -134,7 +136,8 @@
     - the device and inode of the opened file descriptor is checked against what was reported by the BPF program to detect if the executable was replaced, however BTRFS uses non-unique inodes, negating this protection (this is negligible and only mentioned in an attempt for thoroughness)
   - if for any reason the executable fails to hash, the traffic will still be logged with whatever information was available and you will be notified of an error
 - too many processes or connections could cause the connection data to be lost if callbacks are not processed fast enough, this will be detected, logging the error and triggering a notification
-- instead of playing cat and mouse by trying to cover these edge cases, the focus is on doing what it can do, and do it well, and that is accurately monitoring traffic, and it is up to you to decide whether it looks abnormal, whether it's the amount, time, destination for a specific executable
+- instead of playing cat and mouse by trying to cover any edge cases malware may use to hide, the focus is on accurately handling the common case, with clear and reliable error reporting for anything else
+- in addition to bugs, please report any other caveats I may have missed!
 
 # [building from source](#building-from-source)
 - install dependencies listed under [installation](#installation)
