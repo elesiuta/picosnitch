@@ -389,6 +389,8 @@ def write_snitch(snitch: dict, write_config: bool = False, write_record: bool = 
     error_log_path = os.path.join(BASE_PATH, "error.log")
     if not os.path.isdir(BASE_PATH):
         os.makedirs(BASE_PATH)
+    if os.stat(BASE_PATH).st_uid == 0 and os.getuid() == 0 and os.getenv("SUDO_UID"):
+        os.chown(BASE_PATH, int(os.getenv("SUDO_UID")), int(os.getenv("SUDO_UID")))
     snitch_config = snitch["Config"]
     try:
         if write_config:
