@@ -1482,8 +1482,8 @@ def ui_init() -> int:
 def ui_dash():
     """gui with plotly dash"""
     import dash
-    import dash_core_components as dcc
-    import dash_html_components as html
+    from dash import dcc
+    from dash import html
     from dash.dependencies import Input, Output
     import pandas.io.sql as psql
     import plotly.express as px
