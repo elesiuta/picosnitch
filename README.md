@@ -15,9 +15,8 @@
 - Executable hashes are cached based on device + inode for improved performance, and works with applications running inside containers
 - Uses BPF [for accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and fanotify to watch executables for modification
 - Since applications can call others to send/receive data for them, the parent executable and hash is also logged for each connection
-- Gives peace of mind helping you understand what is running on your system so you can identify for yourself any abnormal/malicious activity
-- Pragmatic design focussing on accurate detection and [clear errors](#limitations), the best protection is good backups since a compromised host requires reinstalling your OS
-- Inspired by programs such as GlassWire, Little Snitch, and OpenSnitch
+- Gives peace of mind helping you understand what is running on your system so you can identify for yourself any abnormal/malicious activity or decide on preventative measures
+- Pragmatic and minimalist design focussing on [accurate detection with clear error reporting when it isn't possible](#limitations)
 
 # [installation](#installation)
 
@@ -36,6 +35,7 @@
   - it should be called `python-bcc` or `python-bpfcc`
 - install picosnitch using [pip](https://pip.pypa.io/)
   - `pip3 install "picosnitch[full]" --upgrade --user`
+  - warning: installing as user makes it easier for another program to modify picosnitch; however, installing with sudo results in [xkcd.com/1987](https://xkcd.com/1987/)
 - create a service file for systemd to run picosnitch (recommended)
   - `picosnitch systemd`
 - optional dependencies (will install from [PyPI](https://pypi.org/) with `[full]` if not already installed)
@@ -123,17 +123,18 @@
   - see [limitations](#limitations) below for other sources of errors
 
 # [limitations](#limitations)
-- while picosnitch aims to be as reliable as possible, no tool is perfect and you should know what the limitations are when deciding whether it is useful for your [threat model](https://www.privacyguides.org/threat-modeling/) and how to use it effectively
-  - for example, if you're a regular person who mostly sticks to trusted sources and wants a better understanding of what is running on their personal desktop or home server to help identify basic non-targeted attacks, this is what picosnitch was designed for and should provide adequate assistance with minimal performance impact or additional effort on your part
-  - otherwise, if you have stricter privacy/security requirements, you may want to keep an off-system copy of your logs to protect them (not necessary for most people, and you would also need to consider what else an attacker with these capabilities could do)
-  - it is also recommended to use [sandboxing](https://wiki.archlinux.org/title/Security#Sandboxing_applications), [such as flatpak](https://www.privacyguides.org/linux-desktop/sandboxing/#flatpak), or a virtual machine depending on the situation
-- detecting open sockets, monitoring traffic, and identifying the process should be fairly reliable with BPF, however accurately identifying the application behind it can be difficult, especially if has malicious intent
+- while picosnitch aims to be as reliable as possible, no tool is perfect and you should know what the limitations are when deciding whether it is useful for your [threat model](https://www.privacyguides.org/basics/threat-modeling/) and how to use it effectively
+  - for example, if you're a regular person who mostly sticks to trusted sources and wants a better understanding of what is running on their personal desktop or home server to help identify basic non-targeted attacks or what preventative measures you'd like to take, this is what picosnitch was designed for and should provide adequate assistance with minimal performance impact or additional effort on your part
+  - otherwise, if you have stricter privacy/security requirements, you may want to keep an [off-system copy of your logs to protect them](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS) (not necessary for most people, and you would also need to consider what else an attacker with these capabilities could do)
+  - it is also recommended to use [sandboxing](https://wiki.archlinux.org/title/Security#Sandboxing_applications), [such as flatpak](https://www.privacyguides.org/linux-desktop/sandboxing/#flatpak), or a virtual machine depending on the situation and your goals
+  - remember, picosnitch is just a slightly more reliable bandwidth monitor; without proper isolation, harmful programs could tamper with it, and regularly checking logs is unrealistic, the most important security measures are staying up to date, sticking to trusted sources, reducing your attack surface, the principle of least privilege, and having good backups
+- detecting open sockets, monitoring traffic, and identifying the process should be fairly reliable with BPF; however, accurately identifying the application behind it can be difficult, especially if has malicious intent
   - the process name is trivial to change, the path can be set to anything with mount namespaces, including impersonating an already existing executable (or replacing it), and cmdline arguments can be faked by calling itself or a script with bogus arguments
-  - hashing the executable helps with this, however it is an imperfect solution since only the process executable itself is hashed and there are still ways a program can hide
+  - hashing the executable helps with this; however, it is an imperfect solution since only the process executable itself is hashed and there are still ways a program can hide
     - this leaves out shared libraries, extensions, or scripts which could become compromised, better tools for detecting this could be [AIDE](https://wiki.archlinux.org/title/AIDE), [fs-verity](https://fedoraproject.org/wiki/Changes/FsVerityRPM), [IMA/EVM](https://wiki.gentoo.org/wiki/Integrity_Measurement_Architecture), or possibly [debsums (with caveats)](https://manpages.debian.org/unstable/debsums/debsums.1.en.html)
     - applications such as AppImages which use FUSE may not be readable as root, preventing the executable from being hashed, you may want to avoid them in order to reduce log noise that malicious programs could use to hide
     - if a process is too short lived, picosnitch may not be able to open a file descriptor in time in order to hash it (should be very rare)
-    - the device and inode of the opened file descriptor is checked against what was reported by the BPF program to detect if the executable was replaced, however BTRFS uses non-unique inodes, negating this protection (this is negligible and only mentioned in an attempt for thoroughness)
+    - the device and inode of the opened file descriptor is checked against what was reported by the BPF program to detect if the executable was replaced; however, BTRFS uses non-unique inodes, negating this protection (this is negligible and only mentioned in an attempt for thoroughness)
   - if for any reason the executable fails to hash, the traffic will still be logged with whatever information was available and you will be notified of an error
 - too many processes or connections could cause the connection data to be lost if callbacks are not processed fast enough, this will be detected, logging the error and triggering a notification
 - instead of playing cat and mouse by trying to cover any edge cases malware may use to hide, the focus is on accurately handling the common case, with clear and reliable error reporting for anything else
