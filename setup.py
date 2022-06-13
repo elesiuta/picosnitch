@@ -8,7 +8,7 @@ setuptools.setup(
     name="picosnitch",
     version=picosnitch.VERSION,
     python_requires=">=3.8",
-    description="Protect your privacy, see which applications make network connections",
+    description="Monitor network traffic per executable using BPF",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://elesiuta.github.io/picosnitch",

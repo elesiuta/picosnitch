@@ -15,7 +15,6 @@
 - Executable hashes are cached based on device + inode for improved performance, and works with applications running inside containers
 - Uses BPF [for accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and fanotify to watch executables for modification
 - Since applications can call others to send/receive data for them, the parent executable and hash is also logged for each connection
-- Gives peace of mind helping you understand what is running on your system so you can identify for yourself any abnormal/malicious activity or decide on preventative measures
 - Pragmatic and minimalist design focussing on [accurate detection with clear error reporting when it isn't possible](#limitations)
 
 # [installation](#installation)
@@ -123,9 +122,9 @@
   - see [limitations](#limitations) below for other sources of errors
 
 # [limitations](#limitations)
-- while picosnitch aims to be as reliable as possible, no tool is perfect and you should know what the limitations are when deciding whether it is useful for your [threat model](https://www.privacyguides.org/basics/threat-modeling/) and how to use it effectively
-  - for example, if you're a regular person who mostly sticks to trusted sources and wants a better understanding of what is running on their personal desktop or home server to help identify basic non-targeted attacks or what preventative measures you'd like to take, this is what picosnitch was designed for and should provide adequate assistance with minimal performance impact or additional effort on your part
-  - otherwise, if you have stricter privacy/security requirements, you may want to keep an [off-system copy of your logs to protect them](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS) (not necessary for most people, and you would also need to consider what else an attacker with these capabilities could do)
+- while picosnitch aims to be as reliable as possible, no tool is perfect and you should know the limitations when deciding whether it is useful and how to use it effectively, whether it's for your [threat model](https://opsec101.org/) or simply [measuring bandwidth](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/#existing-tools-to-measure-bandwidth-usage-on-linux)
+  - for example, picosnitch was designed to be more accurate than existing tools by hashing executables and tracking parents, but there are still ways malicious software could hide its traffic through trusted executables as described below, such as compromising shared libraries
+  - for stricter security requirements, you can keep an [off-system copy of your logs to protect them](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS) (not necessary for most people, and you would also need to consider what else an attacker with these capabilities could do to your system)
   - it is also recommended to use [sandboxing](https://wiki.archlinux.org/title/Security#Sandboxing_applications), [such as flatpak](https://www.privacyguides.org/linux-desktop/sandboxing/#flatpak), or a virtual machine depending on the situation and your goals
   - remember, picosnitch is just a slightly more reliable bandwidth monitor; without proper isolation, harmful programs could tamper with it, and regularly checking logs is unrealistic, the most important security measures are staying up to date, sticking to trusted sources, reducing your attack surface, the principle of least privilege, and having good backups
 - detecting open sockets, monitoring traffic, and identifying the process should be fairly reliable with BPF; however, accurately identifying the application behind it can be difficult, especially if has malicious intent
