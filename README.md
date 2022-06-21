@@ -50,7 +50,7 @@
   - or if you don't use systemd `picosnitch start|stop|restart`
 - web user interface for browsing past connections
   - start with `picosnitch dash`
-  - visit [http://localhost:5100](http://localhost:5100)
+  - visit [http://localhost:5100](http://localhost:5100) (you change this by setting the environment variables `HOST` and `PORT`)
 - terminal user interface for browsing past connections
   - start with `picosnitch view`
   - `space/enter`: filter on entry `backspace`: remove filter `h/H`: cycle through history `t/T`: cycle time range `u/U`: cycle byte units `r`: refresh view `q`: quit
