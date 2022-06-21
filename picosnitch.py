@@ -1481,9 +1481,7 @@ def ui_init() -> int:
 
 def ui_dash():
     """gui with plotly dash"""
-    import dash
-    from dash import dcc
-    from dash import html
+    from dash import Dash, dcc, html
     from dash.dependencies import Input, Output
     import pandas.io.sql as psql
     import plotly.express as px
@@ -1607,7 +1605,7 @@ def ui_dash():
             dcc.Graph(id="recv", config={"scrollZoom": False}),
             html.Footer(f"picosnitch v{VERSION} ({run_status}) (using {file_path})"),
         ])
-    app = dash.Dash(__name__)
+    app = Dash(__name__)
     app.layout = serve_layout
     @app.callback(Output("interval-component", "disabled"), Input("auto-refresh", "value"))
     def toggle_refresh(value):
@@ -1682,7 +1680,7 @@ def ui_dash():
         if clicks:
             os.kill(os.getpid(), signal.SIGTERM)
         return 0
-    app.run_server(host=os.getenv("HOST", "localhost"), port=os.getenv("PORT", "5100"), debug=False)
+    app.run(host=os.getenv("HOST", "localhost"), port=os.getenv("PORT", "5100"), debug=bool(eval(os.getenv("DASH_DEBUG", "False"))))
 
 
 ### startup
