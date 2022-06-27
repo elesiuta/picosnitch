@@ -340,6 +340,7 @@ def read_snitch() -> dict:
             "Log addresses": True,
             "Log commands": True,
             "Log ignore": [],
+            "Log ignore IP": [],
             "Perf ring buffer (pages)": 64,
             "Set RLIMIT_NOFILE": None,
             "VT API key": "",
@@ -604,6 +605,10 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: 
                 break
         if ignored:
             continue
+        if proc["ip"]:
+            daddr = struct.unpack("!I", socket.inet_pton(socket.AF_INET, proc["ip"]))[0]
+            if (any(daddr & netmask == network for network, netmask in snitch["Config"]["Log ignore IP"])):
+                continue
         # create sql entry
         event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, proc["domain"], proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], proc["pcmdline"], psha256)
         if not (proc["send"] or proc["recv"]):
@@ -772,6 +777,15 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
     log_destinations = int(bool(snitch["Config"]["DB sql log"])) + int(bool(sql_kwargs)) + int(bool(snitch["Config"]["DB text log"]))
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
+    # get network address and mask for ignored IP subnets
+    ignored_ips = []
+    for ip_subnet in snitch["Config"]["Log ignore IP"]:
+        try:
+            ip_network = ipaddress.ip_network(ip_subnet)
+            ignored_ips.append((ip_network.network_address, ip_network.netmask))
+        except Exception as e:
+            q_error.put("Log ignore IP error %s%s on line %s for %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, ip_subnet))
+    snitch["Config"]["Log ignore IP"] = ignored_ips
     # main loop
     transaction = []
     new_processes = []
