@@ -580,24 +580,30 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: 
         sha256 = secondary_subprocess_sha_wrapper(snitch, fan_mod_cnt, proc, q_vt, q_out, q_error)
         pproc = {"pid": proc["ppid"], "name": proc["pname"], "exe": proc["pexe"], "fd": proc["pfd"], "dev": proc["pdev"], "ino": proc["pino"]}
         psha256 = secondary_subprocess_sha_wrapper(snitch, fan_mod_cnt, pproc, q_vt, q_out, q_error)
-        # filter from logs
+        # join or omit commands from logs
         if snitch["Config"]["Log commands"]:
             proc["cmdline"] = shlex.join(proc["cmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").strip("\0\t\n ").split("\0"))
             proc["pcmdline"] = shlex.join(proc["pcmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").strip("\0\t\n ").split("\0"))
         else:
             proc["cmdline"] = ""
             proc["pcmdline"] = ""
+        # reverse dns lookup or omit with IP from logs
         if snitch["Config"]["Log addresses"]:
             if not proc["domain"]:
                 proc["domain"] = reverse_dns_lookup(proc["ip"])
         else:
             proc["domain"], proc["ip"] = "", ""
+        # omit entry from logs
+        ignored = False
         for ignore in snitch["Config"]["Log ignore"]:
             if ((proc["port"] == ignore) or
                 (sha256 == ignore) or
                 (type(ignore) == str and proc["domain"].startswith(ignore))
                ):
-                continue
+                ignored = True
+                break
+        if ignored:
+            continue
         # create sql entry
         event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, proc["domain"], proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], proc["pcmdline"], psha256)
         if not (proc["send"] or proc["recv"]):
