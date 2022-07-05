@@ -340,7 +340,6 @@ def read_snitch() -> dict:
             "Log addresses": True,
             "Log commands": True,
             "Log ignore": [],
-            "Log ignore IP": [],
             "Perf ring buffer (pages)": 64,
             "Set RLIMIT_NOFILE": None,
             "VT API key": "",
@@ -605,7 +604,7 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: 
                 break
         if ignored:
             continue
-        if proc["ip"]:
+        if snitch["Config"]["Log ignore IP"] and proc["ip"]:
             daddr = struct.unpack("!I", socket.inet_pton(socket.AF_INET, proc["ip"]))[0]
             if (any(daddr & netmask == network for network, netmask in snitch["Config"]["Log ignore IP"])):
                 continue
@@ -779,12 +778,13 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
     fan_mod_cnt = collections.defaultdict(int)
     # get network address and mask for ignored IP subnets
     ignored_ips = []
-    for ip_subnet in snitch["Config"]["Log ignore IP"]:
+    for ip_subnet in reversed(snitch["Config"]["Log ignore"]):
         try:
             ip_network = ipaddress.ip_network(ip_subnet)
             ignored_ips.append((ip_network.network_address, ip_network.netmask))
+            snitch["Config"]["Log ignore"].remove(ip_subnet)
         except Exception as e:
-            q_error.put("Log ignore IP error %s%s on line %s for %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, ip_subnet))
+            pass
     snitch["Config"]["Log ignore IP"] = ignored_ips
     # main loop
     transaction = []
