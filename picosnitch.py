@@ -605,8 +605,8 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: 
         if ignored:
             continue
         if snitch["Config"]["Log ignore IP"] and proc["ip"]:
-            daddr = struct.unpack("!I", socket.inet_pton(socket.AF_INET, proc["ip"]))[0]
-            if (any(daddr & netmask == network for network, netmask in snitch["Config"]["Log ignore IP"])):
+            daddr = ipaddress.ip_address(proc["ip"])
+            if (any(daddr in network for network in snitch["Config"]["Log ignore IP"])):
                 continue
         # create sql entry
         event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, proc["domain"], proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], proc["pcmdline"], psha256)
@@ -780,8 +780,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
     ignored_ips = []
     for ip_subnet in reversed(snitch["Config"]["Log ignore"]):
         try:
-            ip_network = ipaddress.ip_network(ip_subnet)
-            ignored_ips.append((ip_network.network_address, ip_network.netmask))
+            ignored_ips.append(ipaddress.ip_network(ip_subnet))
             snitch["Config"]["Log ignore"].remove(ip_subnet)
         except Exception as e:
             pass
