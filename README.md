@@ -78,12 +78,10 @@
   # if you just want logs (no hashes) to trace process hierarchy, see execsnoop or forkstat
   "Log addresses": true, # Log remote addresses for each connection
   "Log commands": true, # Log command line args for each executable
-  "Log ignore": [], # List of hashes (str), domains (str), or ports (int)
+  "Log ignore": [], # List of hashes (str), domains (str), IP subnets (str), or ports (int)
   # will omit connections that match any of these from the connection log
-  # domains will match any that start with the provided string, hashes or ports are exact
+  # domains are in reverse domain name notation and will match all subdomains
   # the process name, executable, and hash will still be recorded in record.json
-  # use with caution since applications could still be compromised without affecting hash
-  # e.g. via shared libraries, loading scripts, extensions, etc.
   "Perf ring buffer (pages)": 64, # Power of two number of pages for BPF program
   # only change this if it is giving you errors
   "Set RLIMIT_NOFILE": null, # Set the maximum number of open file descriptors (int)
@@ -107,7 +105,7 @@
   - note, connection times are based on when the group is processed, so they are accurate to within `DB write limit (seconds)` at best, and could be delayed if the previous group is slow to hash
   - notifications are handled by a separate subprocess, so they are not subject to the same delays as the connection log
 - use `DB sql server` to write the full connection log to a MariaDB, MySQL, or PostgreSQL server
-  - this is independent of `DB sql log` and is used for providing an [off-system copy to prevent tampering](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS) (use [GRANT](https://www.postgresql.org/docs/current/sql-grant.html) to assign privileges)
+  - this is independent of `DB sql log` and is used for providing an [off-system copy to prevent tampering](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS) (use [GRANT](https://www.postgresql.org/docs/current/sql-grant.html) to assign privileges and see [limitations](#limitations) for other caveats)
   - to configure, add the key `client` to `DB sql server` with value `mariadb`, `psycopg`, `psycopg2`, or `pymysql`, you can also optionally set `table_name`
   - assign remaining connection parameters for [mariadb](https://mariadb-corporation.github.io/mariadb-connector-python/usage.html#connecting), [psycopg](https://www.psycopg.org/docs/module.html#psycopg2.connect), or [pymysql](https://pymysql.readthedocs.io/en/latest/modules/connections.html) to `DB sql server` as key/value pairs
 - enable `DB text log` to write the full connection log to `~/.config/picosnitch/conn.log`
@@ -124,7 +122,8 @@
 # [limitations](#limitations)
 - while picosnitch aims to be as reliable as possible, no tool is perfect and you should know the limitations when deciding whether it is useful and how to use it effectively, whether it's for your [threat model](https://opsec101.org/) or simply [measuring bandwidth](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/#existing-tools-to-measure-bandwidth-usage-on-linux)
   - for example, picosnitch was designed to be more accurate than existing tools by hashing executables and tracking parents, but there are still ways malicious software could hide its traffic through trusted executables as described below, such as compromising shared libraries
-  - for stricter security requirements, you can keep an [off-system copy of your logs to protect them](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS) (not necessary for most people, and you would also need to consider what else an attacker with these capabilities could do to your system)
+  - for stricter security requirements you can keep an [off-system copy of your logs to protect them](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS)
+    - this is not necessary for most people, and of little benefit without considering what else an adversary with these capabilities could do to your system in order to establish appropriate safeguards for your threat model, such as cross-checking with a [standalone router/firewall](https://en.wikipedia.org/wiki/List_of_router_and_firewall_distributions) to ensure all communication is accounted for, monitoring error logs, etc
   - it is also recommended to use [sandboxing](https://wiki.archlinux.org/title/Security#Sandboxing_applications), [such as flatpak](https://www.privacyguides.org/linux-desktop/sandboxing/#flatpak), or a virtual machine depending on the situation and your goals
   - remember, picosnitch is just a slightly more reliable bandwidth monitor; without proper isolation, harmful programs could tamper with it, and regularly checking logs is unrealistic, the most important security measures are staying up to date, sticking to trusted sources, reducing your attack surface, the principle of least privilege, and having good backups
 - detecting open sockets, monitoring traffic, and identifying the process should be fairly reliable with BPF; however, accurately identifying the application behind it can be difficult, especially if has malicious intent
