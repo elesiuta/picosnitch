@@ -1699,7 +1699,7 @@ def ui_dash():
         if clicks:
             os.kill(os.getpid(), signal.SIGTERM)
         return 0
-    app.run(host=os.getenv("HOST", "localhost"), port=os.getenv("PORT", "5100"), debug=bool(eval(os.getenv("DASH_DEBUG", "False"))))
+    app.run_server(host=os.getenv("HOST", "localhost"), port=os.getenv("PORT", "5100"), debug=bool(eval(os.getenv("DASH_DEBUG", "False"))))
 
 
 ### startup
