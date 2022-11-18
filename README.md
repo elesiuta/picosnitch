@@ -4,7 +4,6 @@
 [![GitHub commits since latest release](https://img.shields.io/github/commits-since/elesiuta/picosnitch/latest/master?color=00a0a0)](https://github.com/elesiuta/picosnitch/commits/master)
 [![GitHub contributors](https://img.shields.io/github/contributors/elesiuta/picosnitch?color=00a0a0)](https://github.com/elesiuta/picosnitch/graphs/contributors)
 [![Source size](https://img.shields.io/github/size/elesiuta/picosnitch/picosnitch.py?color=00a0a0)](https://github.com/elesiuta/picosnitch/blob/master/picosnitch.py)
-[![Python grade](https://img.shields.io/lgtm/grade/python/g/elesiuta/picosnitch.svg?logo=lgtm&logoWidth=18&color=00a0a0)](https://lgtm.com/projects/g/elesiuta/picosnitch/context:python)
 
 ![screenshot.png](https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/screenshot.png)
 
