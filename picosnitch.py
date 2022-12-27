@@ -964,7 +964,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     b = BPF(text=bpf_text)
     b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
     b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
-    if tuple(map(int, bcc.__version__.split("."))) >= (0, 23):
+    if tuple(map(int, bcc.__version__.split(".")[0:2])) >= (0, 23):
         b.attach_uprobe(name="c", sym="getaddrinfo", fn_name="dns_entry")
         b.attach_uretprobe(name="c", sym="getaddrinfo", fn_name="dns_return")
     def queue_lost(event, *args):
@@ -1047,7 +1047,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     b["ipv6_events"].open_perf_buffer(queue_ipv6_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("ipv6", *args))
     b["other_socket_events"].open_perf_buffer(queue_other_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("other", *args))
     b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("exec", *args))
-    if tuple(map(int, bcc.__version__.split("."))) >= (0, 23):
+    if tuple(map(int, bcc.__version__.split(".")[0:2])) >= (0, 23):
         b["dns_events"].open_perf_buffer(queue_dns_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("dns", *args))
     if config["Bandwidth monitor"]:
         b["sendmsg_events"].open_perf_buffer(queue_sendv4_event, page_cnt=PAGE_CNT*4, lost_cb=lambda *args: queue_lost("sendv4", *args))
