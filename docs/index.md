@@ -1,6 +1,8 @@
 [![GitHub release](https://img.shields.io/github/v/release/elesiuta/picosnitch?color=00a0a0)](https://github.com/elesiuta/picosnitch/releases)
 [![PyPI release](https://img.shields.io/pypi/v/picosnitch?color=00a0a0)](https://pypi.org/project/picosnitch)
 [![AUR release](https://img.shields.io/aur/version/picosnitch?color=00a0a0)](https://aur.archlinux.org/packages/picosnitch/)
+[![Copr release](https://img.shields.io/badge/dynamic/json?color=00a0a0&label=copr&query=builds.latest.source_package.version&url=https%3A%2F%2Fcopr.fedorainfracloud.org%2Fapi_3%2Fpackage%3Fownername%3Delesiuta%26projectname%3Dpicosnitch%26packagename%3Dpicosnitch%26with_latest_build%3DTrue)](https://copr.fedorainfracloud.org/coprs/elesiuta/picosnitch/)
+[![OBS package build status](https://img.shields.io/obs/home:elesiuta/picosnitch/Debian_Unstable/x86_64?color=00a0a0&label=open%20build%20service)](https://build.opensuse.org/package/show/home:elesiuta/picosnitch)
 [![GitHub commits since latest release](https://img.shields.io/github/commits-since/elesiuta/picosnitch/latest/master?color=00a0a0)](https://github.com/elesiuta/picosnitch/commits/master)
 [![GitHub contributors](https://img.shields.io/github/contributors/elesiuta/picosnitch?color=00a0a0)](https://github.com/elesiuta/picosnitch/graphs/contributors)
 [![Source size](https://img.shields.io/github/size/elesiuta/picosnitch/picosnitch.py?color=00a0a0)](https://github.com/elesiuta/picosnitch/blob/master/picosnitch.py)
@@ -25,8 +27,24 @@
 - `sudo add-apt-repository ppa:elesiuta/picosnitch`
 - `sudo apt update`
 - `sudo apt install picosnitch`
-- extra dependencies for dash (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
+- install extra dependencies for dash using [pip](https://pip.pypa.io/) (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
 - you will likely require a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#ubuntu---binary) ([unofficial PPA](https://launchpad.net/~hadret/+archive/ubuntu/bpfcc)) since the version in the [Ubuntu repos](https://repology.org/project/bcc-bpf/versions) lags behind its [supported kernel](https://github.com/iovisor/bcc/releases)
+
+### [OBS](https://download.opensuse.org/repositories/home:/elesiuta/) for Debian and derivatives
+- download and install the latest `deb` file for [bullseye](https://download.opensuse.org/repositories/home:/elesiuta/Debian_11/amd64/), [testing](https://download.opensuse.org/repositories/home:/elesiuta/Debian_Testing/amd64/), or [sid](https://download.opensuse.org/repositories/home:/elesiuta/Debian_Unstable/amd64/)
+- install extra dependencies for dash using [pip](https://pip.pypa.io/) (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
+- if you're having issues on bullseye, you may need a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#debian---binary)
+
+### [OBS](https://download.opensuse.org/repositories/home:/elesiuta/) for openSUSE Tumbleweed and derivatives
+- `sudo zypper addrepo https://download.opensuse.org/repositories/home:/elesiuta/openSUSE_Tumbleweed/home:elesiuta.repo`
+- `sudo zypper install picosnitch`
+- or download and install the latest `rpm` file from the [Open Build Service](https://download.opensuse.org/repositories/home:/elesiuta/openSUSE_Tumbleweed/x86_64/)
+- install extra dependencies for dash using [pip](https://pip.pypa.io/) (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
+
+### [Copr](https://copr.fedorainfracloud.org/coprs/elesiuta/picosnitch/) for Fedora, Mageia, Mandriva, and derivatives
+- `sudo dnf copr enable elesiuta/picosnitch`
+- `sudo dnf install picosnitch`
+- install extra dependencies for dash using [pip](https://pip.pypa.io/) (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
 
 ### [PyPI](https://pypi.org/project/picosnitch/) for any Linux distribution with Python >= 3.8
 - install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
