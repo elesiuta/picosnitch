@@ -30,15 +30,15 @@
 - install extra dependencies for dash using [pip](https://pip.pypa.io/) (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
 - you will likely require a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#ubuntu---binary) ([unofficial PPA](https://launchpad.net/~hadret/+archive/ubuntu/bpfcc)) since the version in the [Ubuntu repos](https://repology.org/project/bcc-bpf/versions) lags behind its [supported kernel](https://github.com/iovisor/bcc/releases)
 
-### [OBS](https://download.opensuse.org/repositories/home:/elesiuta/) for Debian and derivatives
-- download and install the latest `deb` file for [bullseye](https://download.opensuse.org/repositories/home:/elesiuta/Debian_11/amd64/), [testing](https://download.opensuse.org/repositories/home:/elesiuta/Debian_Testing/amd64/), or [sid](https://download.opensuse.org/repositories/home:/elesiuta/Debian_Unstable/amd64/)
+### [OBS](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) for Debian and derivatives
+- visit the [OBS picosnitch page](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) and follow the instructions for your distribution
 - install extra dependencies for dash using [pip](https://pip.pypa.io/) (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
 - if you're having issues on bullseye, you may need a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#debian---binary)
 
-### [OBS](https://download.opensuse.org/repositories/home:/elesiuta/) for openSUSE Tumbleweed and derivatives
-- `sudo zypper addrepo https://download.opensuse.org/repositories/home:/elesiuta/openSUSE_Tumbleweed/home:elesiuta.repo`
+### [OBS](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) for openSUSE Tumbleweed and derivatives
+- `sudo zypper addrepo https://download.opensuse.org/repositories/home:elesiuta/openSUSE_Tumbleweed/home:elesiuta.repo`
+- `sudo zypper refresh`
 - `sudo zypper install picosnitch`
-- or download and install the latest `rpm` file from the [Open Build Service](https://download.opensuse.org/repositories/home:/elesiuta/openSUSE_Tumbleweed/x86_64/)
 - install extra dependencies for dash using [pip](https://pip.pypa.io/) (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
 
 ### [Copr](https://copr.fedorainfracloud.org/coprs/elesiuta/picosnitch/) for Fedora, Mageia, Mandriva, and derivatives
