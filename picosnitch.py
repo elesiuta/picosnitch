@@ -647,7 +647,7 @@ def primary_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
 
 
 ### processes
-def primary_subprocess(snitch, snitch_pipe, secondary_pipe, q_error, q_in, _q_out):
+def primary_subprocess(snitch, snitch_pipes, secondary_pipe, q_error, q_in, _q_out):
     """first to receive connection data from monitor, more responsive than secondary, creates notifications and writes exe.log, error.log, and record.json"""
     os.nice(-20)
     # init variables for loop
@@ -660,36 +660,41 @@ def primary_subprocess(snitch, snitch_pipe, secondary_pipe, q_error, q_in, _q_ou
     if snitch["Config"]["Desktop notifications"]:
         NotificationManager().enable_notifications()
     # init signal handlers
-    def write_snitch_and_exit(snitch: dict, q_error: multiprocessing.Queue, snitch_pipe):
+    def write_snitch_and_exit(snitch: dict, q_error: multiprocessing.Queue, snitch_pipes):
         while not q_error.empty():
             error = q_error.get()
             snitch["Error Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
             NotificationManager().toast(error, file=sys.stderr)
         write_snitch(snitch)
-        snitch_pipe.close()
+        for snitch_pipe in snitch_pipes:
+            snitch_pipe.close()
         sys.exit(0)
-    signal.signal(signal.SIGTERM, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
-    signal.signal(signal.SIGINT, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipe))
+    signal.signal(signal.SIGTERM, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipes))
+    signal.signal(signal.SIGINT, lambda *args: write_snitch_and_exit(snitch, q_error, snitch_pipes))
     # init thread to receive new connection data over pipe
-    def snitch_pipe_thread(snitch_pipe, pipe_data: list, listen: threading.Event, ready: threading.Event):
+    def snitch_pipe_thread(snitch_pipes, pipe_data: list, listen: threading.Event, ready: threading.Event):
         while True:
             listen.wait()
             new_processes = pipe_data[0]
             while listen.is_set():
-                snitch_pipe.poll(timeout=5)
-                while snitch_pipe.poll():
-                    new_processes.append(snitch_pipe.recv_bytes())
+                for i in range(5):
+                    if any(snitch_pipe.poll() for snitch_pipe in snitch_pipes):
+                        break
+                    time.sleep(1)
+                for snitch_pipe in snitch_pipes:
+                    while snitch_pipe.poll():
+                        new_processes.append(snitch_pipe.recv_bytes())
             ready.set()
     listen, ready = threading.Event(), threading.Event()
     pipe_data = [[]]
-    thread = threading.Thread(target=snitch_pipe_thread, args=(snitch_pipe, pipe_data, listen, ready,), daemon=True)
+    thread = threading.Thread(target=snitch_pipe_thread, args=(snitch_pipes, pipe_data, listen, ready,), daemon=True)
     thread.start()
     listen.set()
     # main loop
     while True:
         if not parent_process.is_alive():
             q_error.put("picosnitch has stopped")
-            write_snitch_and_exit(snitch, q_error, snitch_pipe)
+            write_snitch_and_exit(snitch, q_error, snitch_pipes)
         try:
             # check for errors
             while not q_error.empty():
@@ -700,7 +705,7 @@ def primary_subprocess(snitch, snitch_pipe, secondary_pipe, q_error, q_in, _q_ou
             listen.clear()
             if not ready.wait(timeout=300):
                 q_error.put("thread timeout error for primary subprocess")
-                write_snitch_and_exit(snitch, q_error, snitch_pipe)
+                write_snitch_and_exit(snitch, q_error, snitch_pipes)
             new_processes = pipe_data[0]
             pipe_data[0] = []
             ready.clear()
@@ -875,7 +880,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
             q_error.put("secondary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
-def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out):
+def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe for primary_subprocess"""
     # initialization
     os.nice(-20)
@@ -883,6 +888,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
+    snitch_pipe_0, snitch_pipe_1, snitch_pipe_2, snitch_pipe_3, snitch_pipe_4, snitch_pipe_5, snitch_pipe_6, snitch_pipe_7 = snitch_pipes
     EVERY_EXE: typing.Final[bool] = config["Every exe (not just conns)"]
     PAGE_CNT: typing.Final[int] = config["Perf ring buffer (pages)"]
     libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -945,7 +951,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
             st_dev, st_ino, pid, fd, exe, cmd = get_fd(stat.st_dev, stat.st_ino, proc["pid"], proc["port"])
             pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(pstat.st_dev, pstat.st_ino, proc["ppid"], -1)
             if EVERY_EXE or proc["port"] != -1:
-                snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+                snitch_pipe_0.send_bytes(pickle.dumps({"pid": pid, "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                                      "ppid": ppid, "pname": proc["pname"], "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                                      "uid": proc["uid"], "send": 0, "recv": 0, "port": proc["port"], "ip": proc["ip"], "domain": domain_dict[proc["ip"]]}))
         except Exception:
@@ -979,7 +985,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+        snitch_pipe_0.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": 0, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
     def queue_ipv6_event(cpu, data, size):
@@ -987,14 +993,14 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         ip = socket.inet_ntop(socket.AF_INET6, event.daddr)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+        snitch_pipe_1.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": 0, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
     def queue_other_event(cpu, data, size):
         event = b["other_socket_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, 0)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+        snitch_pipe_2.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": 0, "port": 0, "ip": "", "domain": ""}))
     def queue_sendv4_event(cpu, data, size):
@@ -1002,7 +1008,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         ip =socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+        snitch_pipe_3.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": event.bytes, "recv": 0, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
     def queue_sendv6_event(cpu, data, size):
@@ -1010,7 +1016,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         ip = socket.inet_ntop(socket.AF_INET6, event.daddr)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+        snitch_pipe_4.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": event.bytes, "recv": 0, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
     def queue_recvv4_event(cpu, data, size):
@@ -1018,7 +1024,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+        snitch_pipe_5.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": event.bytes, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
     def queue_recvv6_event(cpu, data, size):
@@ -1026,7 +1032,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         ip = socket.inet_ntop(socket.AF_INET6, event.daddr)
-        snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+        snitch_pipe_6.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": event.bytes, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
     def queue_exec_event(cpu, data, size):
@@ -1034,7 +1040,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipe, q_error, q_in, _q_out)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, -1)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         if EVERY_EXE:
-            snitch_pipe.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+            snitch_pipe_7.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                                  "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                                  "uid": event.uid, "send": 0, "recv": 0, "port": -1, "ip": "", "domain": ""}))
     def queue_dns_event(cpu, data, size):
@@ -1154,15 +1160,16 @@ def main_process(snitch: dict):
     flags = _FAN_CLASS_CONTENT if FD_CACHE < 8192 else _FAN_CLASS_CONTENT | _FAN_UNLIMITED_MARKS
     fan_fd = libc.fanotify_init(flags, os.O_RDONLY)
     # start subprocesses
-    snitch_primary_pipe, snitch_monitor_pipe = multiprocessing.Pipe(duplex=False)
+    snitch_pipes = [multiprocessing.Pipe(duplex=False) for i in range(8)]
+    snitch_recv_pipes, snitch_send_pipes = zip(*snitch_pipes)
     secondary_recv_pipe, secondary_send_pipe = multiprocessing.Pipe(duplex=False)
     q_error = multiprocessing.Queue()
     p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess,
-                               init_args=(snitch["Config"], fan_fd, snitch_monitor_pipe, q_error,))
+                               init_args=(snitch["Config"], fan_fd, snitch_send_pipes, q_error,))
     p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess,
                                   init_args=(snitch["Config"], q_error,))
     p_primary = ProcessManager(name="snitchprimary", target=primary_subprocess,
-                               init_args=(snitch, snitch_primary_pipe, secondary_send_pipe, q_error,))
+                               init_args=(snitch, snitch_recv_pipes, secondary_send_pipe, q_error,))
     p_secondary = ProcessManager(name="snitchsecondary", target=secondary_subprocess,
                            init_args=(snitch, fan_fd, p_virustotal, secondary_recv_pipe, p_primary.q_in, q_error,))
     # set signals
