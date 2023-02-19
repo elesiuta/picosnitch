@@ -461,6 +461,16 @@ def get_sha256_pid(pid: int, st_dev: int, st_ino: int) -> str:
         return "!!! PID Read Error"
 
 
+@functools.lru_cache(maxsize=PID_CACHE)
+def get_sha256_fuse(q_in: multiprocessing.Queue, q_out: multiprocessing.Queue, path: str, pid: int, st_dev: int, st_ino: int, _mod_cnt: int) -> str:
+    """get sha256 of process executable from a fuse mount"""
+    q_in.put(pickle.dumps((path, pid, st_dev, st_ino)))
+    try:
+        return q_out.get()
+    except Exception:
+        return "!!! FUSE Subprocess Error"
+
+
 def get_fstat(fd: int) -> typing.Tuple[int, int]:
     """get (st_dev, st_ino) or (0, 0) if fails"""
     try:
@@ -533,9 +543,10 @@ def monitor_subprocess_initial_poll() -> list:
     return initial_processes
 
 
-def secondary_subprocess_sha_wrapper(snitch: dict, fan_mod_cnt: dict, proc: dict, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> str:
+def secondary_subprocess_sha_wrapper(snitch: dict, fan_mod_cnt: dict, proc: dict, p_rfuse: ProcessManager, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> str:
     """get sha256 of executable and submit to primary_subprocess or virustotal_subprocess if necessary"""
     sha_fd_error = ""
+    sha_pid_error = ""
     sha256 = get_sha256_fd(proc["fd"], proc["dev"], proc["ino"], fan_mod_cnt["%d %d" % (proc["dev"], proc["ino"])])
     if sha256.startswith("!"):
         # fallback on trying to read directly (if still alive) if fd_cache fails, probable causes include:
@@ -545,11 +556,18 @@ def secondary_subprocess_sha_wrapper(snitch: dict, fan_mod_cnt: dict, proc: dict
         sha_fd_error = sha256
         sha256 = get_sha256_pid(proc["pid"], proc["dev"], proc["ino"])
         if sha256.startswith("!"):
-            # notify user with what went wrong (may be cause for suspicion)
-            sha256_error = sha_fd_error[4:] + " and " + sha256[4:]
-            sha256 = sha_fd_error + " " + sha256
-            q_error.put(sha256_error + " for " + str(proc))
-        else:
+            # fallback to trying to read from fuse mount
+            # this is meant for appimages that are run as the same user as the one running picosnitch, since they are not readable as root
+            sha_pid_error = sha256
+            sha256 = get_sha256_fuse(p_rfuse.q_in, p_rfuse.q_out, proc["fd"], proc["pid"], proc["dev"], proc["ino"], fan_mod_cnt["%d %d" % (proc["dev"], proc["ino"])])
+            if sha256.startswith("!"):
+                # notify user with what went wrong (may be cause for suspicion)
+                sha256_error = sha_fd_error[4:] + " and " + sha_pid_error[4:] + " and " + sha256[4:]
+                sha256 = sha_fd_error + " " + sha_pid_error + " " + sha256
+                q_error.put(sha256_error + " for " + str(proc))
+            elif proc["exe"] not in snitch["SHA256"] or sha256 not in snitch["SHA256"][proc["exe"]]:
+                q_error.put(sha_fd_error[4:] + " and " + sha_pid_error[4:] + " for " + str(proc) + " (fallback fuse successful)")
+        elif proc["exe"] not in snitch["SHA256"] or sha256 not in snitch["SHA256"][proc["exe"]]:
             q_error.put(sha_fd_error[4:] + " for " + str(proc) + " (fallback pid hash successful)")
     if proc["exe"] in snitch["SHA256"]:
         if sha256 not in snitch["SHA256"][proc["exe"]]:
@@ -566,7 +584,7 @@ def secondary_subprocess_sha_wrapper(snitch: dict, fan_mod_cnt: dict, proc: dict
     return sha256
 
 
-def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing.List[bytes], q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> typing.List[tuple]:
+def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: typing.List[bytes], p_rfuse: ProcessManager, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> typing.List[tuple]:
     """iterate over the list of process/connection data to generate a list of entries for the sql database"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     event_counter = collections.defaultdict(int)
@@ -577,9 +595,9 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: 
         if type(proc) != dict:
             q_error.put("sync error between secondary and primary, received '%s' in middle of transfer" % str(proc))
             continue
-        sha256 = secondary_subprocess_sha_wrapper(snitch, fan_mod_cnt, proc, q_vt, q_out, q_error)
+        sha256 = secondary_subprocess_sha_wrapper(snitch, fan_mod_cnt, proc, p_rfuse, q_vt, q_out, q_error)
         pproc = {"pid": proc["ppid"], "name": proc["pname"], "exe": proc["pexe"], "fd": proc["pfd"], "dev": proc["pdev"], "ino": proc["pino"]}
-        psha256 = secondary_subprocess_sha_wrapper(snitch, fan_mod_cnt, pproc, q_vt, q_out, q_error)
+        psha256 = secondary_subprocess_sha_wrapper(snitch, fan_mod_cnt, pproc, p_rfuse, q_vt, q_out, q_error)
         # join or omit commands from logs
         if snitch["Config"]["Log commands"]:
             proc["cmdline"] = shlex.join(proc["cmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").strip("\0\t\n ").split("\0"))
@@ -754,7 +772,7 @@ def primary_subprocess(snitch, snitch_pipes, secondary_pipe, q_error, q_in, _q_o
             q_error.put("primary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
-def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary_pipe, q_primary_in, q_error, _q_in, _q_out):
+def secondary_subprocess(snitch, fan_fd, p_rfuse: ProcessManager, p_virustotal: ProcessManager, secondary_pipe, q_primary_in, q_error, _q_in, _q_out):
     """second to receive connection data from monitor, less responsive than primary, coordinates connection data with virustotal subprocess and checks fanotify, updates connection logs and reports sha256/vt_results back to primary_subprocess if needed"""
     parent_process = multiprocessing.parent_process()
     # maintain a separate copy of the snitch dictionary here and coordinate with the primary_subprocess (sha256 and vt_results)
@@ -840,7 +858,7 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
             # process connection data
             if time.time() - last_write > snitch["Config"]["DB write limit (seconds)"] and (transaction or new_processes):
                 current_write = time.time()
-                transaction += secondary_subprocess_helper(snitch, fan_mod_cnt, new_processes, p_virustotal.q_in, q_primary_in, q_error)
+                transaction += secondary_subprocess_helper(snitch, fan_mod_cnt, new_processes, p_rfuse, p_virustotal.q_in, q_primary_in, q_error)
                 new_processes = []
                 transaction_success = False
                 try:
@@ -878,6 +896,31 @@ def secondary_subprocess(snitch, fan_fd, p_virustotal: ProcessManager, secondary
                 last_write = current_write
         except Exception as e:
             q_error.put("secondary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+
+
+def rfuse_subprocess(config: dict, q_error, q_in, q_out):
+    """runs as user to read executables for FUSE/AppImage (since real, effective, and saved UID must match)"""
+    parent_process = multiprocessing.parent_process()
+    try:
+        os.setgid(int(os.getenv("SUDO_UID")))
+        os.setuid(int(os.getenv("SUDO_UID")))
+    except Exception:
+        pass
+    while True:
+        if not parent_process.is_alive():
+            return 0
+        try:
+            path, pid, st_dev, st_ino = pickle.loads(q_in.get(block=True, timeout=15))
+            sha256 = get_sha256_fd.__wrapped__(path, st_dev, st_ino, 0)
+            if sha256.startswith("!"):
+                sha256 = get_sha256_pid.__wrapped__(pid, st_dev, st_ino)
+                if sha256.startswith("!"):
+                    sha256 = "!!! FUSE Read Error"
+            q_out.put(sha256)
+        except queue.Empty:
+            pass
+        except Exception as e:
+            q_error.put("rfuse subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
 def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out):
@@ -1166,14 +1209,16 @@ def main_process(snitch: dict):
     q_error = multiprocessing.Queue()
     p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess,
                                init_args=(snitch["Config"], fan_fd, snitch_send_pipes, q_error,))
+    p_rfuse = ProcessManager(name="snitchrfuse", target=rfuse_subprocess,
+                             init_args=(snitch["Config"], q_error,))
     p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess,
                                   init_args=(snitch["Config"], q_error,))
     p_primary = ProcessManager(name="snitchprimary", target=primary_subprocess,
                                init_args=(snitch, snitch_recv_pipes, secondary_send_pipe, q_error,))
     p_secondary = ProcessManager(name="snitchsecondary", target=secondary_subprocess,
-                           init_args=(snitch, fan_fd, p_virustotal, secondary_recv_pipe, p_primary.q_in, q_error,))
+                           init_args=(snitch, fan_fd, p_rfuse, p_virustotal, secondary_recv_pipe, p_primary.q_in, q_error,))
     # set signals
-    subprocesses = [p_monitor, p_virustotal, p_primary, p_secondary]
+    subprocesses = [p_monitor, p_rfuse, p_virustotal, p_primary, p_secondary]
     def clean_exit():
         _ = [p.terminate() for p in subprocesses]
         sys.exit(0)
