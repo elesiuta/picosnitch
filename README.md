@@ -10,20 +10,25 @@
 ![screenshot.png](https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/screenshot.png)
 
 # [picosnitch](https://elesiuta.github.io/picosnitch/)
-- Receive notifications whenever a new program connects to the network, or when it's modified
-- Monitors your bandwidth, breaking down traffic by executable, hash, parent, domain, port, or user over time
-- Can optionally check hashes or executables using [VirusTotal](https://www.virustotal.com)
-- Executable hashes are cached based on device + inode for improved performance, and works with applications running inside containers
-- Uses BPF [for accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and fanotify to watch executables for modification
-- Since applications can call others to send/receive data for them, the parent executable and hash is also logged for each connection
-- Pragmatic and minimalist design focussing on [accurate detection with clear error reporting when it isn't possible](#limitations)
+- 🔔 Receive notifications whenever a new program connects to the network, or when it's modified
+- 📈 Monitors your bandwidth, breaking down traffic by executable, hash, parent, domain, port, or user over time
+- 🛡️ Can optionally check hashes or executables using [VirusTotal](https://www.virustotal.com)
+- 🚀 Executable hashes are cached based on device + inode for improved performance, and works with applications running inside containers
+- 🕵️ Uses BPF [for accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and [fanotify](https://man7.org/linux/man-pages/man7/fanotify.7.html) to watch executables for modification
+- 👨‍👦 Since applications can call others to send/receive data for them, the parent executable and hash is also logged for each connection
+- 🧰 Pragmatic and minimalist design focussing on [accurate detection with clear error reporting when it isn't possible](#limitations)
 
 # [installation](#installation)
 
-### [AUR](https://aur.archlinux.org/packages/picosnitch/) for Arch and derivatives
-- install `picosnitch` [manually](https://wiki.archlinux.org/title/Arch_User_Repository#Installing_and_upgrading_packages) or using your preferred [AUR helper](https://wiki.archlinux.org/title/AUR_helpers)
+### [AUR](https://aur.archlinux.org/packages/picosnitch/) for Arch and derivatives <img src="https://cdn.simpleicons.org/archlinux" width="16" height="16">
+<details><summary>Details</summary>
 
-### [PPA](https://launchpad.net/~elesiuta/+archive/ubuntu/picosnitch) for Ubuntu and derivatives
+- install `picosnitch` [manually](https://wiki.archlinux.org/title/Arch_User_Repository#Installing_and_upgrading_packages) or using your preferred [AUR helper](https://wiki.archlinux.org/title/AUR_helpers)
+</details>
+
+### [PPA](https://launchpad.net/~elesiuta/+archive/ubuntu/picosnitch) for Ubuntu and derivatives <img src="https://cdn.simpleicons.org/ubuntu" width="16" height="16">
+<details><summary>Details</summary>
+
 - `sudo add-apt-repository ppa:elesiuta/picosnitch`
 - `sudo apt update`
 - `sudo apt install picosnitch`
@@ -31,30 +36,42 @@
   - `sudo apt install python3-pip`
   - `pip3 install dash pandas plotly --user`
 - you will likely require a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#ubuntu---binary) ([unofficial PPA](https://launchpad.net/~hadret/+archive/ubuntu/bpfcc)) since the version in the [Ubuntu repos](https://repology.org/project/bcc-bpf/versions) lags behind its [supported kernel](https://github.com/iovisor/bcc/releases)
+</details>
 
-### [OBS](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) for Debian and derivatives
+### [OBS](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) for Debian and derivatives <img src="https://cdn.simpleicons.org/debian" width="16" height="16">
+<details><summary>Details</summary>
+
 - visit the [OBS picosnitch page](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) and follow the instructions for your distribution
 - install extra dependencies for dash using [pip](https://pip.pypa.io/) (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
   - `sudo apt install python3-pip`
   - `pip3 install dash pandas plotly --user`
 - if you're having issues on bullseye, you may need a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#debian---binary)
+</details>
 
-### [OBS](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) for openSUSE Tumbleweed and derivatives
+### [OBS](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) for openSUSE Tumbleweed and derivatives <img src="https://cdn.simpleicons.org/opensuse" width="16" height="16">
+<details><summary>Details</summary>
+
 - `sudo zypper addrepo https://download.opensuse.org/repositories/home:elesiuta/openSUSE_Tumbleweed/home:elesiuta.repo`
 - `sudo zypper refresh`
 - `sudo zypper install picosnitch`
 - install extra dependencies for dash using [pip](https://pip.pypa.io/) (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
   - `sudo zypper install python3-pip`
   - `pip3 install dash pandas plotly --user`
+</details>
 
-### [Copr](https://copr.fedorainfracloud.org/coprs/elesiuta/picosnitch/) for Fedora, Mageia, Mandriva, and derivatives
+### [Copr](https://copr.fedorainfracloud.org/coprs/elesiuta/picosnitch/) for Fedora, Mageia, Mandriva, and derivatives <img src="https://cdn.simpleicons.org/fedora" width="16" height="16">
+<details><summary>Details</summary>
+
 - `sudo dnf copr enable elesiuta/picosnitch`
 - `sudo dnf install picosnitch`
 - install extra dependencies for dash using [pip](https://pip.pypa.io/) (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
   - `sudo dnf install python3-pip`
   - `pip3 install dash pandas plotly --user`
+</details>
 
-### [PyPI](https://pypi.org/project/picosnitch/) for any Linux distribution with Python >= 3.8
+### [PyPI](https://pypi.org/project/picosnitch/) for any Linux distribution with Python >= 3.8 <img src="https://cdn.simpleicons.org/linux" width="16" height="16">
+<details><summary>Details</summary>
+
 - install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
   - it should be called `python-bcc` or `python-bpfcc`
 - install picosnitch using [pip](https://pip.pypa.io/)
@@ -67,6 +84,20 @@
   - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro and should be installed from their repo)
   - for sql server: one of [psycopg](https://pypi.org/project/psycopg/), [pymysql](https://pypi.org/project/PyMySQL/), [mariadb](https://pypi.org/project/mariadb/), or [psycopg2](https://pypi.org/project/psycopg2/) (latter two not included with `[full]`)
   - for VirusTotal: [requests](https://pypi.org/project/requests/)
+</details>
+
+### [GitHub](https://github.com/elesiuta/picosnitch) for installing from source <img src="https://cdn.simpleicons.org/python" width="16" height="16">
+<details><summary>Details</summary>
+
+- clone the repo or download `picosnitch.py` and `setup.py`
+- install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
+  - it should be called `python-bcc` or `python-bpfcc`
+- install [psutil](https://pypi.org/project/psutil/)
+- install `python-setuptools`
+- install picosnitch with `python setup.py install --user`
+- see other options with `python setup.py [build|install] --help`
+- you can also run the script `picosnitch.py` directly
+</details>
 
 # [usage](#usage)
 - running picosnitch
@@ -160,10 +191,3 @@
 - too many processes or connections could cause the connection data to be lost if callbacks are not processed fast enough, this will be detected, logging the error and triggering a notification
 - instead of playing cat and mouse by trying to cover any edge cases malware may use to hide, the focus is on accurately handling the common case, with clear and reliable error reporting for anything else
 - in addition to bugs, please report any other caveats I may have missed!
-
-# [building from source](#building-from-source)
-- install dependencies listed under [installation](#installation)
-- install `python-setuptools`
-- install picosnitch with `python setup.py install --user`
-- see other options with `python setup.py [build|install] --help`
-- you can also run the script `picosnitch.py` directly
