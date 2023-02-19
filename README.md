@@ -88,7 +88,7 @@
 ```yaml
 {
   "Bandwidth monitor": true, # Log traffic per connection since last db write
-  "DB retention (days)": 365, # How many days to keep connection logs in snitch.db
+  "DB retention (days)": 90, # How many days to keep connection logs in snitch.db
   "DB sql log": true, # Write connection logs to snitch.db (SQLite)
   "DB sql server": {}, # Write connection logs to a MariaDB, MySQL, or PostgreSQL server
   "DB text log": false, # Write connection logs to conn.log

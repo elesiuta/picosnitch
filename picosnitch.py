@@ -330,7 +330,7 @@ def read_snitch() -> dict:
     template = {
         "Config": {
             "Bandwidth monitor": True,
-            "DB retention (days)": 365,
+            "DB retention (days)": 90,
             "DB sql log": True,
             "DB sql server": {},
             "DB text log": False,
