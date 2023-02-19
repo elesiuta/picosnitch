@@ -566,9 +566,9 @@ def secondary_subprocess_sha_wrapper(snitch: dict, fan_mod_cnt: dict, proc: dict
                 sha256 = sha_fd_error + " " + sha_pid_error + " " + sha256
                 q_error.put(sha256_error + " for " + str(proc))
             elif proc["exe"] not in snitch["SHA256"] or sha256 not in snitch["SHA256"][proc["exe"]]:
-                q_error.put(sha_fd_error[4:] + " and " + sha_pid_error[4:] + " for " + str(proc) + " (fallback fuse successful)")
+                q_error.put("Fallback to FUSE hash successful on " + sha_fd_error[4:] + " and " + sha_pid_error[4:] + " for " + str(proc))
         elif proc["exe"] not in snitch["SHA256"] or sha256 not in snitch["SHA256"][proc["exe"]]:
-            q_error.put(sha_fd_error[4:] + " for " + str(proc) + " (fallback pid hash successful)")
+            q_error.put("Fallback to PID hash successful on " + sha_fd_error[4:] + " for " + str(proc))
     if proc["exe"] in snitch["SHA256"]:
         if sha256 not in snitch["SHA256"][proc["exe"]]:
             snitch["SHA256"][proc["exe"]][sha256] = "SUBMITTED"
