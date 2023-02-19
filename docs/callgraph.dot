@@ -42,6 +42,11 @@ digraph G {
         subgraph cluster_picosnitch {
 
             graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
+            picosnitch__get_sha256_fuse [label="get_sha256_fuse", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
+        }
+        subgraph cluster_picosnitch {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
             picosnitch__get_sha256_pid [label="get_sha256_pid", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
         }
         subgraph cluster_picosnitch {
@@ -88,6 +93,11 @@ digraph G {
 
             graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
             picosnitch__reverse_dns_lookup [label="reverse_dns_lookup", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
+        }
+        subgraph cluster_picosnitch {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
+            picosnitch__rfuse_subprocess [label="rfuse_subprocess", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
         }
         subgraph cluster_picosnitch {
 
@@ -382,6 +392,7 @@ digraph G {
         picosnitch__main_process -> picosnitch__main_process__clean_exit [style="solid", color="#000000"];
         picosnitch__main_process -> picosnitch__monitor_subprocess [style="solid", color="#000000"];
         picosnitch__main_process -> picosnitch__primary_subprocess [style="solid", color="#000000"];
+        picosnitch__main_process -> picosnitch__rfuse_subprocess [style="solid", color="#000000"];
         picosnitch__main_process -> picosnitch__secondary_subprocess [style="solid", color="#000000"];
         picosnitch__main_process -> picosnitch__virustotal_subprocess [style="solid", color="#000000"];
         picosnitch__main_process__clean_exit -> picosnitch__ProcessManager [style="solid", color="#000000"];
@@ -423,6 +434,7 @@ digraph G {
         picosnitch__secondary_subprocess_helper -> picosnitch__reverse_dns_lookup [style="solid", color="#000000"];
         picosnitch__secondary_subprocess_helper -> picosnitch__secondary_subprocess_sha_wrapper [style="solid", color="#000000"];
         picosnitch__secondary_subprocess_sha_wrapper -> picosnitch__get_sha256_fd [style="solid", color="#000000"];
+        picosnitch__secondary_subprocess_sha_wrapper -> picosnitch__get_sha256_fuse [style="solid", color="#000000"];
         picosnitch__secondary_subprocess_sha_wrapper -> picosnitch__get_sha256_pid [style="solid", color="#000000"];
         picosnitch__start_picosnitch -> picosnitch__Daemon__restart [style="solid", color="#000000"];
         picosnitch__start_picosnitch -> picosnitch__Daemon__start [style="solid", color="#000000"];
