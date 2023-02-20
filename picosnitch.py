@@ -1010,9 +1010,15 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         except Exception:
             config["Bandwidth monitor"] = False
             q_error.put("BPF.support_kfunc() was not True, cannot enable bandwidth monitor, check BCC version or Kernel Configuration")
-    b = BPF(text=bpf_text)
-    b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
-    b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
+    try:
+        b = BPF(text=bpf_text)
+        b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
+        b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
+    except Exception as e:
+        q_error.put("Init BPF %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+        time.sleep(5)
+        os.kill(parent_process.pid, signal.SIGTERM)
+        raise e
     use_getaddrinfo_uprobe = False
     if tuple(map(int, bcc.__version__.split(".")[0:2])) >= (0, 23):
         try:
