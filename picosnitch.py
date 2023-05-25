@@ -1563,6 +1563,14 @@ def ui_init() -> int:
 
 def ui_dash():
     """gui with plotly dash"""
+    try:
+        site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
+    except Exception:
+        pass
+    try:
+        site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
+    except Exception:
+        pass
     from dash import Dash, dcc, html
     from dash.dependencies import Input, Output
     import pandas.io.sql as psql
@@ -1923,8 +1931,8 @@ def start_picosnitch():
             print(f"using DBUS_SESSION_BUS_ADDRESS: {os.getenv('DBUS_SESSION_BUS_ADDRESS')}")
             sys.exit(main())
         elif sys.argv[1] == "dash":
-            import dash, pandas, plotly
-            assert dash.__version__ and pandas.__version__ and plotly.__version__
+            # import dash, pandas, plotly
+            # assert dash.__version__ and pandas.__version__ and plotly.__version__
             print(f"serving web gui on http://{os.getenv('HOST', 'localhost')}:{os.getenv('PORT', '5100')}")
             args = ["bash", "-c", f"sudo -i -u {os.getenv('SUDO_USER')} touch {BASE_PATH}/dash; nohup {sys.executable} \"{os.path.abspath(__file__)}\" start-dash > /dev/null 2>&1 &"]
             os.execvp("bash", args)
