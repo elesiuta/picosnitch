@@ -1842,9 +1842,6 @@ def start_picosnitch():
         if sys.argv[1] == "help":
             print(readme)
             return 0
-        elif sys.argv[1] == "dash":
-            if os.getuid() != 0:
-                subprocess.Popen(["bash", "-c", f'let i=0; rm {BASE_PATH}/dash; while [[ ! -f {BASE_PATH}/dash || "$i" -gt 30 ]]; do let i++; sleep 1; done; rm {BASE_PATH}/dash && /usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         elif sys.argv[1] in ["start", "stop", "restart", "start-no-daemon"]:
             if os.getuid() != 0:
                 args = ["sudo", "-E", sys.executable, os.path.abspath(__file__), sys.argv[1]]
@@ -1942,8 +1939,14 @@ def start_picosnitch():
         elif sys.argv[1] == "dash":
             # import dash, pandas, plotly
             # assert dash.__version__ and pandas.__version__ and plotly.__version__
+            try:
+                os.setgid(int(os.getenv("SUDO_UID")))
+                os.setuid(int(os.getenv("SUDO_UID")))
+            except Exception:
+                pass
             print(f"serving web gui on http://{os.getenv('HOST', 'localhost')}:{os.getenv('PORT', '5100')}")
-            args = ["bash", "-c", f"sudo -i -u {os.getenv('SUDO_USER')} touch {BASE_PATH}/dash; nohup {sys.executable} \"{os.path.abspath(__file__)}\" start-dash > /dev/null 2>&1 &"]
+            subprocess.Popen(["bash", "-c", f'let i=0; rm {BASE_PATH}/dash; while [[ ! -f {BASE_PATH}/dash || "$i" -gt 30 ]]; do let i++; sleep 1; done; rm {BASE_PATH}/dash && /usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            args = ["bash", "-c", f"touch {BASE_PATH}/dash; nohup {sys.executable} \"{os.path.abspath(__file__)}\" start-dash > /dev/null 2>&1 &"]
             os.execvp("bash", args)
         elif sys.argv[1] == "start-dash":
             return ui_dash()
