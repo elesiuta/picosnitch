@@ -50,11 +50,9 @@ import threading
 import time
 import typing
 
-# also look in user site for imports while running as root via systemd, this avoids https://xkcd.com/1987/
-try:
-    site.addsitedir(os.getenv("PYTHON_USER_SITE"))
-except Exception:
-    pass
+# add site dirs for system and user installed packages (to import bcc with picosnitch installed via pipx/venv, or dependencies installed via user)
+site.addsitedir("/usr/lib/python3/dist-packages")
+site.addsitedir(os.getenv("PYTHON_USER_SITE"))
 import psutil
 
 # picosnitch version and supported platform
@@ -1570,14 +1568,8 @@ def ui_init() -> int:
 
 def ui_dash():
     """gui with plotly dash"""
-    try:
-        site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
-    except Exception:
-        pass
-    try:
-        site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
-    except Exception:
-        pass
+    site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
+    site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
     from dash import Dash, dcc, html
     from dash.dependencies import Input, Output
     import pandas.io.sql as psql
@@ -1937,8 +1929,10 @@ def start_picosnitch():
             print(f"using DBUS_SESSION_BUS_ADDRESS: {os.getenv('DBUS_SESSION_BUS_ADDRESS')}")
             sys.exit(main())
         elif sys.argv[1] == "dash":
-            # import dash, pandas, plotly
-            # assert dash.__version__ and pandas.__version__ and plotly.__version__
+            site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
+            site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
+            import dash, pandas, plotly
+            assert dash.__version__ and pandas.__version__ and plotly.__version__
             try:
                 os.setgid(int(os.getenv("SUDO_UID")))
                 os.setuid(int(os.getenv("SUDO_UID")))

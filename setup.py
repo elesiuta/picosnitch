@@ -21,7 +21,7 @@ setuptools.setup(
         "enable_notifications": ["dbus-python"],
         "enable_sql": ["psycopg", "pymysql"],
         "enable_virustotal": ["requests"],
-        "full": ["dash", "pandas", "plotly", "dbus-python", "psycopg", "pymysql", "requests"]
+        "full": ["dash", "pandas", "plotly", "psycopg", "pymysql", "requests"]
     },
     classifiers=[
         "Operating System :: POSIX :: Linux",
