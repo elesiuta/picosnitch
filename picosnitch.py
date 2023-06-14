@@ -387,9 +387,10 @@ def write_snitch(snitch: dict, write_config: bool = False, write_record: bool = 
     record_path = os.path.join(BASE_PATH, "record.json")
     exe_log_path = os.path.join(BASE_PATH, "exe.log")
     error_log_path = os.path.join(BASE_PATH, "error.log")
+    assert os.getuid() == 0, "Requires root privileges to write config and log files"
     if not os.path.isdir(BASE_PATH):
         os.makedirs(BASE_PATH)
-    if os.stat(BASE_PATH).st_uid == 0 and os.getuid() == 0 and os.getenv("SUDO_UID"):
+    if os.stat(BASE_PATH).st_uid == 0 and os.getenv("SUDO_UID"):
         os.chown(BASE_PATH, int(os.getenv("SUDO_UID")), int(os.getenv("SUDO_UID")))
     snitch_config = snitch["Config"]
     try:
@@ -1838,16 +1839,18 @@ def start_picosnitch():
         elif sys.argv[1] == "dash":
             if os.getuid() != 0:
                 subprocess.Popen(["bash", "-c", f'let i=0; rm {BASE_PATH}/dash; while [[ ! -f {BASE_PATH}/dash || "$i" -gt 30 ]]; do let i++; sleep 1; done; rm {BASE_PATH}/dash && /usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if os.getuid() != 0:
-            args = ["sudo", "-E", sys.executable, os.path.abspath(__file__), sys.argv[1]]
-            os.execvp("sudo", args)
-        with open("/proc/self/status", "r") as f:
-            proc_status = f.read()
-            capeff = int(proc_status[proc_status.find("CapEff:")+8:].splitlines()[0].strip(), base=16)
-            cap_sys_admin = 2**21
-            assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
-        assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
+        elif sys.argv[1] in ["start", "stop", "restart", "start-no-daemon"]:
+            if os.getuid() != 0:
+                args = ["sudo", "-E", sys.executable, os.path.abspath(__file__), sys.argv[1]]
+                os.execvp("sudo", args)
+            with open("/proc/self/status", "r") as f:
+                proc_status = f.read()
+                capeff = int(proc_status[proc_status.find("CapEff:")+8:].splitlines()[0].strip(), base=16)
+                cap_sys_admin = 2**21
+                assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
+            assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
         tmp_snitch = read_snitch()
+        assert os.path.exists(os.path.join(BASE_PATH, "snitch.db")) or os.getuid() == 0, "Requires root privileges to create database"
         con = sqlite3.connect(os.path.join(BASE_PATH, "snitch.db"))
         cur = con.cursor()
         cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
