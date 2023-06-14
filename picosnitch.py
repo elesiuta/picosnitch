@@ -62,6 +62,10 @@ VERSION: typing.Final[str] = "0.12.0"
 assert sys.version_info >= (3, 8), "Python version >= 3.8 is required"
 assert sys.platform.startswith("linux"), "Did not detect a supported operating system"
 
+# warning about -O (optimize) flag since asserts are disabled and some are critical
+if sys.flags.optimize > 0:
+    print("Warning: picosnitch does not function properly with the -O (optimize) flag", file=sys.stderr)
+
 # set constants and RLIMIT_NOFILE if configured
 if os.getuid() == 0:
     if os.getenv("SUDO_UID"):
