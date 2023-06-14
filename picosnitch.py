@@ -1891,8 +1891,8 @@ def start_picosnitch():
             except Exception as e:
                 print("Warning: %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno), file=sys.stderr)
         if sys.argv[1] in ["start", "stop", "restart"]:
-            if os.path.exists("/usr/lib/systemd/system/picosnitch.service"):
-                print("Found /usr/lib/systemd/system/picosnitch.service but you are not using systemctl")
+            if os.path.exists("/usr/lib/systemd/system/picosnitch.service") or os.path.exists("/etc/systemd/system/picosnitch.service"):
+                print("Found picosnitch.service but you are not using systemctl")
                 if sys.stdin.isatty():
                     confirm = input(f"Did you intend to run `systemctl {sys.argv[1]} picosnitch` (y/N)? ")
                     if confirm.lower().startswith("y"):
