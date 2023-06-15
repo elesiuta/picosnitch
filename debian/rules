@@ -1,7 +1,4 @@
 #!/usr/bin/make -f
 
 %:
-	dh $@ --with python3 --buildsystem=pybuild
-
-override_dh_auto_build:
-	python3 setup.py build
+	dh $@ --with python-virtualenv --use-system-packages --extras full

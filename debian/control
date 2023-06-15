@@ -2,7 +2,7 @@ Source: picosnitch
 Section: net
 Priority: optional
 Maintainer: Eric Lesiuta <elesiuta@gmail.com>
-Build-Depends: debhelper (>= 10), python3 (>= 3.8), python3-all, python3-setuptools, dh-python, python3-psutil
+Build-Depends: debhelper (>= 10), python3 (>= 3.8), python3-all, python3-setuptools, dh-virtualenv, python3-pip, python3-dev, libffi-dev, python3-psutil
 Standards-Version: 3.9.5
 Homepage: https://elesiuta.github.io/picosnitch/
 
@@ -10,6 +10,6 @@ Package: picosnitch
 Architecture: any
 Pre-Depends: dpkg (>= 1.16.1), python3 (>= 3.8), ${misc:Pre-Depends}
 Depends: ${python:Depends}, ${misc:Depends}, python3-bpfcc, python3-dbus, python3-psutil, python3-requests
-Suggests: python3-pandas, python3-plotly, python3-psycopg2, python3-pymysql, libmariadb-dev
+Suggests: python3-psycopg2, python3-pymysql, libmariadb-dev
 Description: picosnitch
  Monitor network traffic per executable using BPF
