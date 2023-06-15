@@ -1681,6 +1681,7 @@ def ui_dash():
                     id="time_i",
                     options=[{"label": time_period[i], "value": i} for i in range(len(time_period))],
                     value=8,
+                    inline=True,
                 ),
             ]),
             html.Div([
