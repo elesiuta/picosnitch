@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Archive
         run: tar --exclude=".git" --exclude="picosnitch.tar.gz" -czf - * > picosnitch.tar.gz
       - name: Hash
@@ -19,4 +19,3 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: picosnitch.tar.gz
-
