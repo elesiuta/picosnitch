@@ -13,8 +13,9 @@ Requires:       python3
 Requires:       bcc
 Requires:       python3-psutil
 Requires:       python3-requests
-Suggests:       python3-pandas
+Requires:       python3-pandas
 Suggests:       python3-plotly
+Suggests:       pipx
 
 %if 0%{?fedora}%{?suse_version}%{?mageia}
 BuildRequires:  python3-wheel
@@ -32,12 +33,10 @@ BuildRequires:  systemd-units
 BuildRequires:  util-linux-core
 %endif
 
-%description 
+%description
 Monitors your bandwidth, breaking down traffic by executable, hash, parent, domain, port, or user over time
 
-%global debug_package %{nil}
-
-%prep 
+%prep
 %setup -c -q -n %{name}
 
 %build
@@ -50,10 +49,10 @@ install -D -m 644 debian/picosnitch.service %{buildroot}%{_unitdir}/%{name}.serv
 
 %post
 %systemd_post %{name}.service
- 
+
 %preun
 %systemd_preun %{name}.service
- 
+
 %postun
 %systemd_postun_with_restart %{name}.service
 
