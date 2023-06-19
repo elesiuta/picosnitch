@@ -84,6 +84,8 @@ if os.getuid() == 0:
         os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{pwd.getpwnam(home_user).pw_uid}/bus"
 else:
     home_dir = os.path.expanduser("~")
+    if sys.executable.startswith("/snap/"):
+        home_dir = home_dir.split("/snap/picosnitch")[0]
 BASE_PATH: typing.Final[str] = os.path.join(home_dir, ".config", "picosnitch")
 try:
     file_path = os.path.join(BASE_PATH, "config.json")
@@ -1025,7 +1027,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         os.kill(parent_process.pid, signal.SIGTERM)
         raise e
     use_getaddrinfo_uprobe = False
-    if tuple(map(int, bcc.__version__.split(".")[0:2])) >= (0, 23):
+    if bcc.__version__ == "EAD-HASH-NOTFOUND+GITDIR-N" or tuple(map(int, bcc.__version__.split(".")[0:2])) >= (0, 23):
         try:
             b.attach_uprobe(name="c", sym="getaddrinfo", fn_name="dns_entry")
             b.attach_uretprobe(name="c", sym="getaddrinfo", fn_name="dns_return")
@@ -1832,6 +1834,10 @@ def start_picosnitch():
     WantedBy=multi-user.target
     """)
     if len(sys.argv) == 2:
+        if sys.executable.startswith("/snap/"):
+            if sys.argv[1] in ["start", "stop", "restart", "systemd"]:
+                print("Command not supported by picosnitch snap, use `snap <command> picosnitch` or `systemctl <command> snap.picosnitch.daemon`", file=sys.stderr)
+                return 2
         if sys.argv[1] == "help":
             print(readme)
             return 0
@@ -1919,7 +1925,7 @@ def start_picosnitch():
             print("Wrote /usr/lib/systemd/system/picosnitch.service\nYou can now run picosnitch using systemctl")
             return 0
         elif sys.argv[1] == "start-no-daemon":
-            assert not os.path.exists("/run/picosnitch.pid")
+            assert not os.path.exists("/run/picosnitch.pid"), "pid file already exists"
             def delpid():
                 os.remove("/run/picosnitch.pid")
             atexit.register(delpid)
@@ -1940,6 +1946,9 @@ def start_picosnitch():
             except Exception:
                 pass
             print(f"serving web gui on http://{os.getenv('HOST', 'localhost')}:{os.getenv('PORT', '5100')}")
+            if sys.executable.startswith("/snap/"):
+                subprocess.Popen(["bash", "-c", f'/usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return ui_dash()
             subprocess.Popen(["bash", "-c", f'let i=0; rm {BASE_PATH}/dash; while [[ ! -f {BASE_PATH}/dash || "$i" -gt 30 ]]; do let i++; sleep 1; done; rm {BASE_PATH}/dash && /usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             args = ["bash", "-c", f"touch {BASE_PATH}/dash; nohup {sys.executable} \"{os.path.abspath(__file__)}\" start-dash > /dev/null 2>&1 &"]
             os.execvp("bash", args)

@@ -1,0 +1,89 @@
+name: picosnitch
+summary: picosnitch
+description: |
+  Monitors your bandwidth, breaking down traffic by executable,
+  hash, parent, domain, port, or user over time.
+confinement: strict
+grade: stable
+base: core22
+version: '0.12.0'
+
+architectures:
+  - build-on: amd64
+
+parts:
+  picosnitch:
+    plugin: python
+    source: .
+    override-pull: |
+      craftctl default
+    python-packages:
+      - wheel
+      - psutil
+      - requests
+      - pandas
+      - plotly
+      - dash
+    stage-packages:
+      - python3-dbus
+    after:
+      - bcc
+
+  bcc:
+    plugin: cmake
+    cmake-parameters:
+      - '-DCMAKE_INSTALL_PREFIX=/usr'
+      - '-DPYTHON_CMD=/usr/bin/python3'
+      - '-DCMAKE_VERBOSE_MAKEFILE=ON'
+    source: https://github.com/iovisor/bcc/releases/download/v0.27.0/bcc-src-with-submodule.tar.gz
+    build-packages:
+      - bison
+      - build-essential
+      - elfutils
+      - flex
+      - git
+      - libclang-14-dev
+      - libdebuginfod-dev
+      - libedit-dev
+      - libelf-dev
+      - libllvm14
+      - liblzma-dev
+      - libfl-dev
+      - llvm-14-dev
+      - zip
+      - zlib1g-dev
+      - python3
+      - python3-packaging
+      - python3-pip
+      - python3-setuptools
+    prime:
+      - usr/bin*
+      - usr/lib*
+
+environment:
+  PYTHONPATH: $SNAP/usr/lib/python3/dist-packages:$SNAP/usr/lib/python3.10/dist-packages
+
+plugs:
+  dot-config-picosnitch:
+    interface: personal-files
+    read:
+      - $HOME/.config/picosnitch
+    write:
+      - $HOME/.config/picosnitch
+
+apps:
+  picosnitch:
+    command: bin/picosnitch
+    plugs:
+    - dot-config-picosnitch
+    - network
+    - network-bind
+    - mount-observe
+    - system-observe
+    - system-trace
+
+  daemon:
+    command: "bin/picosnitch start-no-daemon"
+    daemon: simple
+    restart-condition: always
+    restart-delay: 5s
