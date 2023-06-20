@@ -1331,7 +1331,7 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     update_query = True
     execute_query = True
     current_query, current_screen = "", [""]
-    vt_status = collections.defaultdict(lambda: "???")
+    vt_status = collections.defaultdict(str)
     while True:
         # adjust cursor
         pri_i %= len(p_col)
@@ -1380,9 +1380,9 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                                 suspicious = status.split("'suspicious': ")[1].split(",")[0]
                                 malicious = status.split("'malicious': ")[1].split(",")[0]
                                 if suspicious == "0" and malicious == "0":
-                                    vt_status[sha256] = "clean"
+                                    vt_status[sha256] = " (clean)"
                                 else:
-                                    vt_status[sha256] = "suspicious"
+                                    vt_status[sha256] = " (suspicious)"
             except Exception:
                 pass
             print(f"\033]0;picosnitch v{VERSION} ({run_status})\a", end="", flush=True)
@@ -1461,7 +1461,7 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                     except Exception:
                         name = f"??? ({name})"
                 if (not is_subquery and p_col[pri_i].endswith("sha256")) or (is_subquery and s_col[sec_i].endswith("sha256")):
-                    name = f"{name} ({vt_status[name]})"
+                    name = f"{name}{vt_status[name]}"
                 value = f"{conns:>10} {round_bytes(send, byte_units):>10.10} {round_bytes(recv, byte_units):>10.10}"
                 stdscr.addstr(line - offset, 0, f"{name!s:<{curses.COLS-32}.{curses.COLS-32}}{value}")
             line += 1
