@@ -28,6 +28,7 @@ parts:
       - pymysql
     stage-packages:
       - python3-dbus
+      - libdebuginfod-dev
     after:
       - bcc
 
@@ -41,7 +42,6 @@ parts:
     build-packages:
       - bison
       - build-essential
-      - elfutils
       - flex
       - git
       - libclang-14-dev
