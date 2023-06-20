@@ -24,6 +24,8 @@ parts:
       - pandas
       - plotly
       - dash
+      - psycopg
+      - pymysql
     stage-packages:
       - python3-dbus
     after:
@@ -66,8 +68,6 @@ environment:
 plugs:
   dot-config-picosnitch:
     interface: personal-files
-    read:
-      - $HOME/.config/picosnitch
     write:
       - $HOME/.config/picosnitch
 
