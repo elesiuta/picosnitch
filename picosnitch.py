@@ -1331,6 +1331,7 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     update_query = True
     execute_query = True
     current_query, current_screen = "", [""]
+    vt_status = collections.defaultdict(lambda: "???")
     while True:
         # adjust cursor
         pri_i %= len(p_col)
@@ -1369,6 +1370,21 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                     run_status = "pid: " + f.read().strip()
             except Exception:
                 run_status = "not running"
+            try:
+                with open(os.path.join(BASE_PATH, "record.json"), "r") as f:
+                    sha256_record = json.load(f)["SHA256"]
+                for exe, hashes in sha256_record.items():
+                    for sha256, status in hashes.items():
+                        if sha256 not in vt_status:
+                            if "harmless" in status:
+                                suspicious = status.split("'suspicious': ")[1].split(",")[0]
+                                malicious = status.split("'malicious': ")[1].split(",")[0]
+                                if suspicious == "0" and malicious == "0":
+                                    vt_status[sha256] = "clean"
+                                else:
+                                    vt_status[sha256] = "suspicious"
+            except Exception:
+                pass
             print(f"\033]0;picosnitch v{VERSION} ({run_status})\a", end="", flush=True)
             while True:
                 try:
@@ -1436,7 +1452,7 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             else:
                 stdscr.attrset(curses.color_pair(0))
             if first_line <= line - offset < curses.LINES - 1:
-                # special cases (cmdline null chars, uid, maybe add sha256 and vt results or debsums lookup?)
+                # special cases (cmdline null chars, uid, sha256 and vt results)
                 if type(name) == str:
                     name = name.replace("\0", "")
                 elif (not is_subquery and p_col[pri_i] == "uid") or (is_subquery and s_col[sec_i] == "uid"):
@@ -1444,6 +1460,8 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                         name = f"{pwd.getpwuid(name).pw_name} ({name})"
                     except Exception:
                         name = f"??? ({name})"
+                if (not is_subquery and p_col[pri_i].endswith("sha256")) or (is_subquery and s_col[sec_i].endswith("sha256")):
+                    name = f"{name} ({vt_status[name]})"
                 value = f"{conns:>10} {round_bytes(send, byte_units):>10.10} {round_bytes(recv, byte_units):>10.10}"
                 stdscr.addstr(line - offset, 0, f"{name!s:<{curses.COLS-32}.{curses.COLS-32}}{value}")
             line += 1
