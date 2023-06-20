@@ -766,6 +766,8 @@ def primary_subprocess(snitch, snitch_pipes, secondary_pipe, q_error, q_in, _q_o
                     if msg["suspicious"]:
                         snitch["Exe Log"].append(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg['sha256']:<16.16} {msg['exe']} (suspicious)")
                         NotificationManager().toast(f"Suspicious VT results: {msg['exe']}")
+                    else:
+                        snitch["Exe Log"].append(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg['sha256']:<16.16} {msg['exe']} (clean)")
             # write the snitch dictionary to record.json, error.log, and exe.log (limit writes to reduce disk wear)
             if snitch["Error Log"] or snitch["Exe Log"] or time.time() - last_write > 30:
                 new_record = pickle.dumps([snitch["Executables"], snitch["Names"], snitch["Parent Executables"], snitch["Parent Names"], snitch["SHA256"]])
