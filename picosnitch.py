@@ -1389,6 +1389,7 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             while True:
                 try:
                     cur.execute(current_query)
+                    current_screen = cur.fetchall()
                     break
                 except sqlite3.OperationalError:
                     stdscr.clear()
@@ -1403,9 +1404,8 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                             stdscr.addstr(i, 0, splash_lines[i])
                     stdscr.refresh()
                 except KeyboardInterrupt:
-                    con.close()
-                    return 0
-            current_screen = cur.fetchall()
+                    current_screen = []
+                    break
             execute_query = False
         help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  u/U: units  r: refresh  q: quit {' ':<{curses.COLS}}"
         status_bar = f"history: {time_history}  time range: {time_period[time_i]}  line: {cursor-first_line+1}/{len(current_screen)}{' ':<{curses.COLS}}"
