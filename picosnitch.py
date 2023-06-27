@@ -1418,7 +1418,7 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
             execute_query = False
             running_query = True
         help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  u/U: units  r: refresh  q: quit {' ':<{curses.COLS}}"
-        status_bar = f"history: {time_history}  time range: {time_period[time_i]}  line: {cursor-first_line+1}/{len(current_screen)}{' ':<{curses.COLS}}"
+        status_bar = f"history: {time_history}  time range: {time_period[time_i]}  line: {min(cursor-first_line+1, len(current_screen))}/{len(current_screen)}{' ':<{curses.COLS}}"
         if is_subquery:
             l_tabs = " ".join(reversed([s_screens[sec_i-i] for i in range (1, len(s_screens))]))
             r_tabs = " ".join([s_screens[(sec_i+i) % len(s_screens)] for i in range(1, len(s_screens))])
