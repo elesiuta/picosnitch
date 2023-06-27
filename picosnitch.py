@@ -1273,10 +1273,29 @@ def main_process(snitch: dict):
 
 
 ### user interface
-def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
+def ui_loop(stdscr: curses.window, splash: str) -> int:
     """for curses wrapper"""
+    # thread for querying database
+    file_path = os.path.join(BASE_PATH, "snitch.db")
+    q_query_results = queue.Queue()
+    kill_thread_query = threading.Event()
+    def fetch_query_results(current_query: str):
+        con = sqlite3.connect(file_path, timeout=1)
+        cur = con.cursor()
+        while True and not kill_thread_query.is_set():
+            try:
+                cur.execute(current_query)
+                break
+            except sqlite3.OperationalError:
+                time.sleep(0.5)
+        results = cur.fetchmany(25)
+        while results and not kill_thread_query.is_set():
+            q_query_results.put(results)
+            results = cur.fetchmany(25)
+        con.close()
+    thread_query = threading.Thread()
+    thread_query.start()
     # init and splash screen
-    cur = con.cursor()
     curses.cbreak()
     curses.noecho()
     curses.curs_set(0)
@@ -1330,6 +1349,7 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
     is_subquery = False
     update_query = True
     execute_query = True
+    running_query = False
     current_query, current_screen = "", [""]
     vt_status = collections.defaultdict(str)
     while True:
@@ -1365,6 +1385,14 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
                 current_query = f"SELECT {p_col[pri_i]}, SUM(\"conns\"), SUM(\"send\"), SUM(\"recv\") FROM connections{time_query} GROUP BY {p_col[pri_i]}"
             update_query = False
         if execute_query:
+            current_screen = []
+            kill_thread_query.set()
+            thread_query.join()
+            kill_thread_query.clear()
+            while q_query_results.qsize() > 0:
+                _ = q_query_results.get_nowait()
+            thread_query = threading.Thread(target=fetch_query_results, args=(current_query,), daemon=True)
+            thread_query.start()
             try:
                 with open("/run/picosnitch.pid", "r") as f:
                     run_status = "pid: " + f.read().strip()
@@ -1386,27 +1414,9 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             except Exception:
                 pass
             print(f"\033]0;picosnitch v{VERSION} ({run_status})\a", end="", flush=True)
-            while True:
-                try:
-                    cur.execute(current_query)
-                    current_screen = cur.fetchall()
-                    break
-                except sqlite3.OperationalError:
-                    stdscr.clear()
-                    for i in range(len(splash_lines)):
-                        if "\u001b[33m" in splash_lines[i]:
-                            part1 = splash_lines[i].split("\u001b[33m")
-                            part2 = part1[1].split("\033[0m")
-                            stdscr.addstr(i, 0, part1[0], curses.color_pair(4))
-                            stdscr.addstr(i, len(part1[0]), part2[0], curses.color_pair(2))
-                            stdscr.addstr(i, len(part1[0]) + len(part2[0]), part2[1], curses.color_pair(4))
-                        else:
-                            stdscr.addstr(i, 0, splash_lines[i])
-                    stdscr.refresh()
-                except KeyboardInterrupt:
-                    current_screen = []
-                    break
+            current_screen += q_query_results.get()
             execute_query = False
+            running_query = True
         help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  u/U: units  r: refresh  q: quit {' ':<{curses.COLS}}"
         status_bar = f"history: {time_history}  time range: {time_period[time_i]}  line: {cursor-first_line+1}/{len(current_screen)}{' ':<{curses.COLS}}"
         if is_subquery:
@@ -1472,7 +1482,24 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             execute_query = True
             continue
         # user input
-        ch = stdscr.getch()
+        if running_query:
+            if not thread_query.is_alive():
+                running_query = False
+            stdscr.nodelay(True)
+            new_results = False
+            while True:
+                try:
+                    current_screen += q_query_results.get(timeout=0.1)
+                    new_results = True
+                except queue.Empty:
+                    ch = stdscr.getch()
+                    if ch != -1:
+                        break
+                    if new_results:
+                        break
+            stdscr.nodelay(False)
+        else:
+            ch = stdscr.getch()
         if ch == ord("\n") or ch == ord(" "):
             toggle_subquery = True
             if not is_subquery:
@@ -1548,7 +1575,6 @@ def ui_loop(stdscr: curses.window, splash: str, con: sqlite3.Connection) -> int:
             stdscr.refresh()
             cursor = first_line
         elif ch == 27 or ch == ord("q"):
-            con.close()
             return 0
 
 
@@ -1577,11 +1603,10 @@ def ui_init() -> int:
     cur.execute(''' PRAGMA user_version ''')
     assert cur.fetchone()[0] == 2, f"Incorrect database version of snitch.db for picosnitch v{VERSION}"
     con.close()
-    con = sqlite3.connect(file_path, timeout=1)
     # start curses
     for err_count in reversed(range(30)):
         try:
-            return curses.wrapper(ui_loop, splash, con)
+            return curses.wrapper(ui_loop, splash)
         except curses.error:
             print("CURSES DISPLAY ERROR: try resizing your terminal, ui will close in %s seconds" % (err_count + 1), file=sys.stderr)
             time.sleep(1)
