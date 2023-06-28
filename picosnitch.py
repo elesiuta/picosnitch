@@ -1655,10 +1655,10 @@ def ui_dash():
             return f"{dim} ({round(size/10**3, 2)!s} kB)"
         else:
             return f"{dim} ({size!s} B)"
-    def trim_cmdline(cmdline, trim) -> str:
-        if trim and len(cmdline) > 64:
-            return f"{cmdline[:32]}...{cmdline[-29:]}"
-        return cmdline
+    def trim_label(label, trim) -> str:
+        if trim and len(label) > 64:
+            return f"{label[:32]}...{label[-29:]}"
+        return label
     def serve_layout():
         try:
             with open("/run/picosnitch.pid", "r") as f:
@@ -1674,26 +1674,46 @@ def ui_dash():
             html.Div(html.Button("Stop Dash", id="exit"), style={"float": "right"}),
             html.Div([
                 dcc.Dropdown(
-                    id="smoothing",
+                    id="resampling",
                     options=[
-                        {"label": "Use Rolling Window", "value": True},
-                        {"label": "Raw Values", "value": False},
+                        {"label": "Resampling (100 points)", "value": 100},
+                        {"label": "Resampling (500 points)", "value": 500},
+                        {"label": "Resampling (1000 points)", "value": 1000},
+                        {"label": "Resampling (2000 points)", "value": 2000},
+                        {"label": "Resampling (3000 points)", "value": 3000},
+                        {"label": "Resampling (4000 points)", "value": 4000},
+                        {"label": "Resampling (5000 points)", "value": 5000},
+                        {"label": "Resampling (10000 points)", "value": 10000},
+                        {"label": "Resampling (None)", "value": False},
                     ],
-                    value=True,
+                    value=2000,
                     clearable=False,
                 ),
-            ], style={"display":"inline-block", "width": "20%"}),
+            ], style={"display":"inline-block", "width": "15%"}),
             html.Div([
                 dcc.Dropdown(
-                    id="trim-cmds",
+                    id="smoothing",
                     options=[
-                        {"label": "Trim Commands", "value": True},
-                        {"label": "Show Full Commands", "value": False},
+                        {"label": "Rolling Window (2 points)", "value": 2},
+                        {"label": "Rolling Window (4 points)", "value": 4},
+                        {"label": "Rolling Window (8 points)", "value": 8},
+                        {"label": "Rolling Window (None)", "value": False},
+                    ],
+                    value=4,
+                    clearable=False,
+                ),
+            ], style={"display":"inline-block", "width": "15%"}),
+            html.Div([
+                dcc.Dropdown(
+                    id="trim-labels",
+                    options=[
+                        {"label": "Trim Long Labels (64 chars)", "value": True},
+                        {"label": "Show Full Labels", "value": False},
                     ],
                     value=True,
                     clearable=False,
                 ),
-            ], style={"display":"inline-block", "width": "20%"}),
+            ], style={"display":"inline-block", "width": "15%"}),
             html.Div([
                 dcc.Dropdown(
                     id="auto-refresh",
@@ -1704,7 +1724,7 @@ def ui_dash():
                     value=False,
                     clearable=False,
                 ),
-            ], style={"display":"inline-block", "width": "20%"}),
+            ], style={"display":"inline-block", "width": "15%"}),
             html.Div(),
             html.Div([
                 dcc.Dropdown(
@@ -1758,14 +1778,14 @@ def ui_dash():
         return {x: time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (x-2)).strftime("%Y-%m-%d %H:%M:%S") for x in range(2,100,10)}
     @app.callback(
             Output("send", "figure"), Output("recv", "figure"), Output("whereis", "options"), Output("store_send", "data"), Output("store_recv", "data"),
-            Input("smoothing", "value"), Input("trim-cmds", "value"),
+            Input("smoothing", "value"), Input("trim-labels", "value"), Input("resampling", "value"),
             Input("select", "value"), Input("where", "value"), Input("whereis", "value"), Input("time_i", "value"), Input("time_j", "value"),
             Input('send', 'relayoutData'), Input('recv', 'relayoutData'), Input('send', 'restyleData'), Input('recv', 'restyleData'),
             Input("interval-component", "n_intervals"),
             State("store_send", "data"), State("store_recv", "data"), State("send", "figure"), State("recv", "figure"),
             prevent_initial_call=True,
             )
-    def update(smoothing, trim, dim, where, whereis, time_i, time_j, relayout_send, relayout_recv, restyle_send, restyle_recv, _, store_send, store_recv, fig_send, fig_recv):
+    def update(smoothing, trim, resampling, dim, where, whereis, time_i, time_j, relayout_send, relayout_recv, restyle_send, restyle_recv, _, store_send, store_recv, fig_send, fig_recv):
         if not callback_context.triggered:
             raise PreventUpdate
         input_id = callback_context.triggered[0]["prop_id"].split(".")[0]
@@ -1829,10 +1849,8 @@ def ui_dash():
             whereis_values = cur.fetchall()
             if where == "uid":
                 whereis_options = [{"label": f"is {get_user(x[0])}", "value": x[0]} for x in whereis_values]
-            elif where in ["cmdline", "pcmdline"]:
-                whereis_options = [{"label": f"is {trim_cmdline(x[0], trim)}", "value": x[0]} for x in whereis_values]
             else:
-                whereis_options = [{"label": f"is {x[0]}", "value": x[0]} for x in whereis_values]
+                whereis_options = [{"label": f"is {trim_label(x[0], trim)}", "value": x[0]} for x in whereis_values]
         con.close()
         # structure the data for plotting
         df_send = df.pivot_table(index="contime", columns=dim, values="send", fill_value=0, dropna=False, aggfunc=sum)
@@ -1840,23 +1858,24 @@ def ui_dash():
         if dim == "uid":
             df_send.rename(columns=get_user, inplace=True)
             df_recv.rename(columns=get_user, inplace=True)
-        elif dim in ["cmdline", "pcmdline"]:
-            df_send.rename(columns=lambda x: trim_cmdline(x, trim), inplace=True)
-            df_recv.rename(columns=lambda x: trim_cmdline(x, trim), inplace=True)
+        else:
+            df_send.rename(columns=lambda x: trim_label(x, trim), inplace=True)
+            df_recv.rename(columns=lambda x: trim_label(x, trim), inplace=True)
         df_send_total = df_send.sum()
         df_recv_total = df_recv.sum()
         # resample the data if it is too large for performance, and smooth if requested
-        if len(df_send) > 10000:
-            df_send.index = pd.to_datetime(df_send.index)
-            n = len(df_send) // 10000
-            df_send = df_send.resample(f'{n}T').mean().fillna(0)
-        if len(df_recv) > 10000:
-            df_recv.index = pd.to_datetime(df_recv.index)
-            n = len(df_recv) // 10000
-            df_recv = df_recv.resample(f'{n}T').mean().fillna(0)
+        if resampling:
+            if len(df_send) > resampling:
+                df_send.index = pd.to_datetime(df_send.index)
+                n = len(df_send) // resampling
+                df_send = df_send.resample(f'{n}T').mean().fillna(0)
+            if len(df_recv) > resampling:
+                df_recv.index = pd.to_datetime(df_recv.index)
+                n = len(df_recv) // resampling
+                df_recv = df_recv.resample(f'{n}T').mean().fillna(0)
         if smoothing:
-            df_send = df_send.rolling(4).mean()
-            df_recv = df_recv.rolling(4).mean()
+            df_send = df_send.rolling(smoothing).mean()
+            df_recv = df_recv.rolling(smoothing).mean()
         # update the store and figure
         store_send["min_x"] = df_send.index.min()
         store_send["max_x"] = df_send.index.max()
