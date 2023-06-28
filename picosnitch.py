@@ -1617,8 +1617,10 @@ def ui_dash():
     """gui with plotly dash"""
     site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
     site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
-    from dash import Dash, dcc, html
-    from dash.dependencies import Input, Output
+    from dash import Dash, dcc, html, callback_context, no_update
+    from dash.dependencies import Input, Output, State
+    from dash.exceptions import PreventUpdate
+    import pandas as pd
     import pandas.io.sql as psql
     import plotly.express as px
     file_path = os.path.join(BASE_PATH, "snitch.db")
@@ -1738,8 +1740,10 @@ def ui_dash():
                     included=False,
                 ),
             ]),
-            dcc.Graph(id="send", config={"scrollZoom": False}),
-            dcc.Graph(id="recv", config={"scrollZoom": False}),
+            dcc.Store(id="store_send", data={"rev": 0, "visible": {}}),
+            dcc.Store(id="store_recv", data={"rev": 0, "visible": {}}),
+            dcc.Graph(id="send", config={"scrollZoom": True}),
+            dcc.Graph(id="recv", config={"scrollZoom": True}),
             html.Footer(f"picosnitch v{VERSION} ({run_status}) (using {file_path})"),
         ])
     app = Dash(__name__)
@@ -1750,8 +1754,49 @@ def ui_dash():
     @app.callback(Output("time_j", "marks"), Input("time_i", "value"), Input("time_j", "value"))
     def update_time_slider(time_i, _):
         return {x: time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (x-2)).strftime("%Y-%m-%d %H:%M:%S") for x in range(2,100,10)}
-    @app.callback(Output("send", "figure"), Output("recv", "figure"), Output("whereis", "options"), Input("smoothing", "value"), Input("trim-cmds", "value"), Input("select", "value"), Input("where", "value"), Input("whereis", "value"), Input("time_i", "value"), Input("time_j", "value"), Input("interval-component", "n_intervals"))
-    def update(smoothing, trim, dim, where, whereis, time_i, time_j, _):
+    @app.callback(
+            Output("send", "figure"), Output("recv", "figure"), Output("whereis", "options"), Output("store_send", "data"), Output("store_recv", "data"),
+            Input("smoothing", "value"), Input("trim-cmds", "value"),
+            Input("select", "value"), Input("where", "value"), Input("whereis", "value"), Input("time_i", "value"), Input("time_j", "value"),
+            Input('send', 'relayoutData'), Input('recv', 'relayoutData'), Input('send', 'restyleData'), Input('recv', 'restyleData'),
+            Input("interval-component", "n_intervals"),
+            State("store_send", "data"), State("store_recv", "data"), State("send", "figure"), State("recv", "figure"),
+            prevent_initial_call=True,
+            )
+    def update(smoothing, trim, dim, where, whereis, time_i, time_j, relayout_send, relayout_recv, restyle_send, restyle_recv, _, store_send, store_recv, fig_send, fig_recv):
+        if not callback_context.triggered:
+            raise PreventUpdate
+        input_id = callback_context.triggered[0]["prop_id"].split(".")[0]
+        # prevent zooming outside of the data range
+        if input_id == "send" and relayout_send is not None and 'xaxis.range[0]' in relayout_send:
+            if store_send["min_x"] > relayout_send['xaxis.range[0]'] or store_send["max_x"] < relayout_send['xaxis.range[1]']:
+                store_send["rev"] += 1
+                fig_send["layout"]["xaxis"]["range"] = [max(relayout_send['xaxis.range[0]'], store_send["min_x"]), min(relayout_send['xaxis.range[1]'], store_send["max_x"])]
+                fig_send["layout"]["uirevision"] = store_send["rev"]
+                return fig_send, no_update, no_update, store_send, no_update
+            raise PreventUpdate
+        if input_id == "recv" and relayout_recv is not None and 'xaxis.range[0]' in relayout_recv:
+            if store_recv["min_x"] > relayout_recv['xaxis.range[0]'] or store_recv["max_x"] < relayout_recv['xaxis.range[1]']:
+                store_recv["rev"] += 1
+                fig_recv["layout"]["xaxis"]["range"] = [max(relayout_recv['xaxis.range[0]'], store_recv["min_x"]), min(relayout_recv['xaxis.range[1]'], store_recv["max_x"])]
+                fig_recv["layout"]["uirevision"] = store_recv["rev"]
+                return no_update, fig_recv, no_update, no_update, store_recv
+            raise PreventUpdate
+        # get visibility of legend items (traces)
+        if input_id == "send" and restyle_send is not None and "visible" in restyle_send[0]:
+            for visible, index in zip(restyle_send[0]["visible"], restyle_send[1]):
+                store_send["visible"][store_send["columns"][index]] = visible
+            return no_update, no_update, no_update, store_send, no_update
+        if input_id == "recv" and restyle_recv is not None and "visible" in restyle_recv[0]:
+            for visible, index in zip(restyle_recv[0]["visible"], restyle_recv[1]):
+                store_recv["visible"][store_recv["columns"][index]] = visible
+            return no_update, no_update, no_update, no_update, store_recv
+        # prevent update for other layout/style changes
+        if input_id in ["send", "recv"]:
+            if (relayout_send is not None and ("dragmode" in relayout_send or "xaxis.autorange" in relayout_send)) or \
+               (relayout_recv is not None and ("dragmode" in relayout_recv or "xaxis.autorange" in relayout_recv)):
+                raise PreventUpdate
+        # generate the query string using the selected options
         if time_j == 0:
             time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%Y-%m-%d %H:%M:%S")
             time_history_end = "now"
@@ -1769,6 +1814,7 @@ def ui_dash():
             query = f"SELECT {dim}, contime, send, recv FROM connections WHERE {where} IS \"{whereis}\"{time_query}"
         else:
             query = f"SELECT {dim}, contime, send, recv FROM connections{time_query}"
+        # run query and populate whereis options
         con = sqlite3.connect(file_path)
         df = psql.read_sql(query, con)
         whereis_options = []
@@ -1786,6 +1832,7 @@ def ui_dash():
             else:
                 whereis_options = [{"label": f"is {x[0]}", "value": x[0]} for x in whereis_values]
         con.close()
+        # structure the data for plotting
         df_send = df.pivot_table(index="contime", columns=dim, values="send", fill_value=0, dropna=False, aggfunc=sum)
         df_recv = df.pivot_table(index="contime", columns=dim, values="recv", fill_value=0, dropna=False, aggfunc=sum)
         if dim == "uid":
@@ -1796,22 +1843,55 @@ def ui_dash():
             df_recv.rename(columns=lambda x: trim_cmdline(x, trim), inplace=True)
         df_send_total = df_send.sum()
         df_recv_total = df_recv.sum()
+        # resample the data if it is too large for performance, and smooth if requested
+        if len(df_send) > 10000:
+            df_send.index = pd.to_datetime(df_send.index)
+            n = len(df_send) // 10000
+            df_send = df_send.resample(f'{n}T').mean().fillna(0)
+        if len(df_recv) > 10000:
+            df_recv.index = pd.to_datetime(df_recv.index)
+            n = len(df_recv) // 10000
+            df_recv = df_recv.resample(f'{n}T').mean().fillna(0)
         if smoothing:
             df_send = df_send.rolling(4).mean()
             df_recv = df_recv.rolling(4).mean()
+        # update the store and figure
+        store_send["min_x"] = df_send.index.min()
+        store_send["max_x"] = df_send.index.max()
+        store_recv["min_x"] = df_recv.index.min()
+        store_recv["max_x"] = df_recv.index.max()
+        store_send["columns"] = df_send.columns
+        store_recv["columns"] = df_recv.columns
+        store_send["rev"] += 1
+        store_recv["rev"] += 1
         df_send.rename(columns=lambda dim: get_totals(df_send_total, dim), inplace=True)
         df_recv.rename(columns=lambda dim: get_totals(df_recv_total, dim), inplace=True)
         fig_send = px.line(df_send, line_shape="linear", render_mode="svg", labels={
             "contime": "", "value": "Data Sent (bytes)", dim: dim_labels[dim]})
-        fig_send.update_layout(uirevision=dim)
-        fig_send.update_yaxes(autorange=True, fixedrange=True)
+        fig_send.update_layout(uirevision=store_send["rev"])
+        fig_send.update_yaxes(fixedrange=True)
         fig_send.update_traces(fill="tozeroy", line_simplify=True)
         fig_recv = px.line(df_recv, line_shape="linear", render_mode="svg", labels={
             "contime": "", "value": "Data Received (bytes)", dim: dim_labels[dim]})
-        fig_recv.update_layout(uirevision=dim)
-        fig_recv.update_yaxes(autorange=True, fixedrange=True)
+        fig_recv.update_layout(uirevision=store_recv["rev"])
+        fig_recv.update_yaxes(fixedrange=True)
         fig_recv.update_traces(fill="tozeroy", line_simplify=True)
-        return fig_send, fig_recv, whereis_options
+        # carry over visibility settings manually (instead keeping uirevision fixed) since column indices may not line up
+        for i in range(len(fig_send.data)):
+            fig_send.data[i].visible = True
+            if store_send["columns"][i] in store_send["visible"]:
+                fig_send.data[i].visible = store_send["visible"][store_send["columns"][i]]
+        for i in range(len(fig_recv.data)):
+            fig_recv.data[i].visible = True
+            if store_recv["columns"][i] in store_recv["visible"]:
+                fig_recv.data[i].visible = store_recv["visible"][store_recv["columns"][i]]
+        for column in list(store_send["visible"].keys()):
+            if column not in store_send["columns"]:
+                _ = store_send["visible"].pop(column)
+        for column in list(store_recv["visible"].keys()):
+            if column not in store_recv["columns"]:
+                _ = store_recv["visible"].pop(column)
+        return fig_send, fig_recv, whereis_options, store_send, store_recv
     @app.callback(Output("exit", "n_clicks"), Input("exit", "n_clicks"))
     def exit(clicks):
         if clicks:
