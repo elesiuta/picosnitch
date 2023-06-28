@@ -1619,6 +1619,10 @@ def ui_dash():
     """gui with plotly dash"""
     site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
     site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
+    site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash-bootstrap-components/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
+    site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash-bootstrap-components/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
+    site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash-bootstrap-templates/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
+    site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash-bootstrap-templates/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
     from dash import Dash, dcc, html, callback_context, no_update
     from dash.dependencies import Input, Output, State
     from dash.exceptions import PreventUpdate
@@ -1671,7 +1675,7 @@ def ui_dash():
                 interval=10000,
                 disabled=True,
             ),
-            html.Div(html.Button("Stop Dash", id="exit"), style={"float": "right"}),
+            html.Div(html.Button("Stop Dash", id="exit", className="btn btn-primary btn-sm mt-1"), style={"float": "right"}),
             html.Div([
                 dcc.Dropdown(
                     id="resampling",
@@ -1768,7 +1772,15 @@ def ui_dash():
             dcc.Graph(id="recv", config={"scrollZoom": True}),
             html.Footer(f"picosnitch v{VERSION} ({run_status}) (using {file_path})"),
         ])
-    app = Dash(__name__)
+    try:
+        # try to use dash-bootstrap-components if available and theme exists
+        import dash_bootstrap_components as dbc
+        from dash_bootstrap_templates import load_figure_template
+        theme = os.getenv("DASH_THEME", "slate")
+        load_figure_template(theme.lower())
+        app = Dash(__name__, external_stylesheets=[getattr(dbc.themes, theme.upper())])
+    except Exception:
+        app = Dash(__name__)
     app.layout = serve_layout
     @app.callback(Output("interval-component", "disabled"), Input("auto-refresh", "value"))
     def toggle_refresh(value):
