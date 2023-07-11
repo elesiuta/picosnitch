@@ -1420,21 +1420,22 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
         sum_send = sum(b for _, _, b, _ in current_screen)
         sum_recv = sum(b for _, _, _, b in current_screen)
         help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  u/U: units  r: refresh  q: quit {' ':<{curses.COLS}}"
-        status_bar = f"history: {time_history}  time range: {time_period[time_i]}  line: {min(cursor-first_line+1, len(current_screen))}/{len(current_screen)}  totals: {round_bytes(sum_send, byte_units).strip()}/{round_bytes(sum_recv, byte_units).strip()}{' ':<{curses.COLS}}"
+        status_bar = f"history: {time_history}  time range: {time_period[time_i]}  line: {min(cursor-first_line+1, len(current_screen))}/{len(current_screen)}  totals: {round_bytes(sum_send, byte_units).strip()} / {round_bytes(sum_recv, byte_units).strip()}{' ':<{curses.COLS}}"
         if is_subquery:
-            l_tabs = " ".join(reversed([s_screens[sec_i-i] for i in range (1, len(s_screens))]))
-            r_tabs = " ".join([s_screens[(sec_i+i) % len(s_screens)] for i in range(1, len(s_screens))])
+            l_tabs = " | ".join(reversed([s_screens[sec_i-i] for i in range (1, len(s_screens))]))
+            r_tabs = " | ".join([s_screens[(sec_i+i) % len(s_screens)] for i in range(1, len(s_screens))])
             c_tab = s_screens[sec_i]
             column_names = f"{f'{s_names[sec_i]} (where {p_names[pri_i].lower()} = {primary_value})':<{curses.COLS - 32}.{curses.COLS - 32}}  Connects       Sent   Received"
         else:
-            l_tabs = " ".join(reversed([p_screens[pri_i-i] for i in range(1, len(p_screens))]))
-            r_tabs = " ".join([p_screens[(pri_i+i) % len(p_screens)] for i in range(1, len(p_screens))])
+            l_tabs = " | ".join(reversed([p_screens[pri_i-i] for i in range(1, len(p_screens))]))
+            r_tabs = " | ".join([p_screens[(pri_i+i) % len(p_screens)] for i in range(1, len(p_screens))])
             c_tab = p_screens[pri_i]
             column_names = f"{p_names[pri_i]:<{curses.COLS - 32}}  Connects       Sent   Received"
-        l_width = (curses.COLS - len(c_tab) - 14) // 2
-        r_width = curses.COLS - len(c_tab) - 14 - l_width
-        l_tabs = f" ...{l_tabs[-l_width:]:>{l_width}} "
-        r_tabs = f" {r_tabs:<{r_width}.{r_width}}... "
+        edges_width = len("<- ... |  | ... ->")
+        l_width = (curses.COLS - len(c_tab) - edges_width) // 2
+        r_width = curses.COLS - len(c_tab) - edges_width - l_width
+        l_tabs = f" ...{l_tabs[-l_width:]:>{l_width}} | "
+        r_tabs = f" | {r_tabs:<{r_width}.{r_width}}... "
         # display screen
         stdscr.clear()
         stdscr.attrset(curses.color_pair(3) | curses.A_BOLD)
@@ -1442,9 +1443,9 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
         stdscr.addstr(1, 0, status_bar)
         stdscr.addstr(2, 0, "<-")
         stdscr.addstr(2, 2, l_tabs, curses.color_pair(3))
-        stdscr.addstr(2, 2 + l_width + 5, c_tab, curses.color_pair(3) | curses.A_BOLD | curses.A_UNDERLINE)
-        stdscr.addstr(2, 2 + l_width + 5 + len(c_tab), r_tabs, curses.color_pair(3))
-        stdscr.addstr(2, 2 + l_width + 5 + len(c_tab) + r_width + 5, "->")
+        stdscr.addstr(2, 2 + len(l_tabs), c_tab, curses.color_pair(3) | curses.A_BOLD | curses.A_UNDERLINE)
+        stdscr.addstr(2, 2 + len(l_tabs) + len(c_tab), r_tabs, curses.color_pair(3))
+        stdscr.addstr(2, 2 + len(l_tabs) + len(c_tab) + len(r_tabs), "->")
         stdscr.addstr(3, 0, column_names)
         line = first_line
         cursor = min(cursor, len(current_screen) + first_line - 1)
