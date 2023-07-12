@@ -341,6 +341,9 @@ def read_snitch() -> dict:
             "DB sql server": {},
             "DB text log": False,
             "DB write limit (seconds)": 10,
+            "Dash refresh (seconds)": 10,
+            "Dash scroll zoom": True,
+            "Dash theme": "",
             "Desktop notifications": True,
             "Every exe (not just conns)": False,
             "Log addresses": True,
@@ -1643,6 +1646,8 @@ def ui_dash():
     import pandas as pd
     import pandas.io.sql as psql
     import plotly.express as px
+    with open(os.path.join(BASE_PATH, "config.json"), "r", encoding="utf-8", errors="surrogateescape") as json_file:
+        config = json.load(json_file)
     file_path = os.path.join(BASE_PATH, "snitch.db")
     all_dims = ["exe", "name", "cmdline", "sha256", "domain", "ip", "port", "uid", "pexe", "pname", "pcmdline", "psha256"]
     dim_labels = {"exe": "Executable", "name": "Process Name", "cmdline": "Command", "sha256": "SHA256", "domain": "Domain", "ip": "Destination IP", "port": "Destination Port", "uid": "User", "pexe": "Parent Executable", "pname": "Parent Name", "pcmdline": "Parent Command", "psha256": "Parent SHA256"}
@@ -1686,7 +1691,7 @@ def ui_dash():
         return html.Div([
             dcc.Interval(
                 id="interval-component",
-                interval=10000,
+                interval=1000 * config["Dash refresh (seconds)"],
                 disabled=True,
             ),
             html.Div(html.Button("Stop Dash", id="exit", className="btn btn-primary btn-sm mt-1"), style={"float": "right"}),
@@ -1736,7 +1741,7 @@ def ui_dash():
                 dcc.Dropdown(
                     id="auto-refresh",
                     options=[
-                        {"label": "Auto-Refresh (10 seconds)", "value": True},
+                        {"label": f"Auto-Refresh ({config['Dash refresh (seconds)']} seconds)", "value": True},
                         {"label": "Disable Auto-Refresh", "value": False},
                     ],
                     value=False,
@@ -1782,17 +1787,16 @@ def ui_dash():
             ]),
             dcc.Store(id="store_send", data={"rev": 0, "visible": {}}),
             dcc.Store(id="store_recv", data={"rev": 0, "visible": {}}),
-            dcc.Graph(id="send", config={"scrollZoom": True}),
-            dcc.Graph(id="recv", config={"scrollZoom": True}),
+            dcc.Graph(id="send", config={"scrollZoom": config["Dash scroll zoom"]}),
+            dcc.Graph(id="recv", config={"scrollZoom": config["Dash scroll zoom"]}),
             html.Footer(f"picosnitch v{VERSION} ({run_status}) (using {file_path})"),
         ])
     try:
         # try to use dash-bootstrap-components if available and theme exists
         import dash_bootstrap_components as dbc
         from dash_bootstrap_templates import load_figure_template
-        theme = os.getenv("DASH_THEME", "slate")
-        load_figure_template(theme.lower())
-        app = Dash(__name__, external_stylesheets=[getattr(dbc.themes, theme.upper())])
+        load_figure_template(config["Dash theme"].lower())
+        app = Dash(__name__, external_stylesheets=[getattr(dbc.themes, config["Dash theme"].upper())])
     except Exception:
         app = Dash(__name__)
     app.layout = serve_layout
