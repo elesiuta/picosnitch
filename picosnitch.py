@@ -1279,7 +1279,7 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
     file_path = os.path.join(BASE_PATH, "snitch.db")
     q_query_results = queue.Queue()
     kill_thread_query = threading.Event()
-    def fetch_query_results(current_query: str):
+    def fetch_query_results(current_query: str, q_query_results: queue.Queue, kill_thread_query: threading.Event):
         con = sqlite3.connect(file_path, timeout=1)
         cur = con.cursor()
         while True and not kill_thread_query.is_set():
@@ -1380,24 +1380,29 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
                 else:
                     time_query = f" WHERE contime > datetime(\"{time_history_start}\") AND contime < datetime(\"{time_history_end}\")"
             if is_subquery:
-                current_query = f"SELECT {s_col[sec_i]}, SUM(\"conns\"), SUM(\"send\"), SUM(\"recv\") FROM connections WHERE {p_col[pri_i]} IS \"{primary_value}\"{time_query} GROUP BY {s_col[sec_i]}"
+                current_query = f"SELECT {s_col[sec_i]}, SUM(conns), SUM(send), SUM(recv) FROM connections WHERE {p_col[pri_i]} IS \"{primary_value}\"{time_query} GROUP BY {s_col[sec_i]}"
             else:
-                current_query = f"SELECT {p_col[pri_i]}, SUM(\"conns\"), SUM(\"send\"), SUM(\"recv\") FROM connections{time_query} GROUP BY {p_col[pri_i]}"
+                current_query = f"SELECT {p_col[pri_i]}, SUM(conns), SUM(send), SUM(recv) FROM connections{time_query} GROUP BY {p_col[pri_i]}"
             update_query = False
         if execute_query:
             current_screen = []
+            # kill old thread with flag, may still be executing current query so don't wait for join, just let gc handle it
             kill_thread_query.set()
-            thread_query.join()
-            kill_thread_query.clear()
             while q_query_results.qsize() > 0:
                 _ = q_query_results.get_nowait()
-            thread_query = threading.Thread(target=fetch_query_results, args=(current_query,), daemon=True)
+            # start new thread, reinitialize queue and kill flag
+            q_query_results = queue.Queue()
+            kill_thread_query = threading.Event()
+            thread_query = threading.Thread(target=fetch_query_results, args=(current_query, q_query_results, kill_thread_query), daemon=True)
             thread_query.start()
+            # check daemon pid for status bar
             try:
                 with open("/run/picosnitch.pid", "r") as f:
                     run_status = "pid: " + f.read().strip()
             except Exception:
                 run_status = "not running"
+            print(f"\033]0;picosnitch v{VERSION} ({run_status})\a", end="", flush=True)
+            # check if any new virustotal results
             try:
                 with open(os.path.join(BASE_PATH, "record.json"), "r") as f:
                     sha256_record = json.load(f)["SHA256"]
@@ -1413,12 +1418,14 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
                                     vt_status[sha256] = " (suspicious)"
             except Exception:
                 pass
-            print(f"\033]0;picosnitch v{VERSION} ({run_status})\a", end="", flush=True)
-            current_screen += q_query_results.get()
+            # check if any query results are ready
+            if q_query_results.qsize() > 0:
+                current_screen += q_query_results.get_nowait()
+            sum_send = sum(b for _, _, b, _ in current_screen)
+            sum_recv = sum(b for _, _, _, b in current_screen)
             execute_query = False
             running_query = True
-        sum_send = sum(b for _, _, b, _ in current_screen)
-        sum_recv = sum(b for _, _, _, b in current_screen)
+        # update headers for screen
         help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  u/U: units  r: refresh  q: quit {' ':<{curses.COLS}}"
         status_bar = f"history: {time_history}  time range: {time_period[time_i]}  line: {min(cursor-first_line+1, len(current_screen))}/{len(current_screen)}  totals: {round_bytes(sum_send, byte_units).strip()} / {round_bytes(sum_recv, byte_units).strip()}{' ':<{curses.COLS}}"
         if is_subquery:
@@ -1436,7 +1443,7 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
         r_width = curses.COLS - len(c_tab) - edges_width - l_width
         l_tabs = f" ...{l_tabs[-l_width:]:>{l_width}} | "
         r_tabs = f" | {r_tabs:<{r_width}.{r_width}}... "
-        # display screen
+        # display headers on screen
         stdscr.clear()
         stdscr.attrset(curses.color_pair(3) | curses.A_BOLD)
         stdscr.addstr(0, 0, help_bar)
@@ -1447,12 +1454,14 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
         stdscr.addstr(2, 2 + len(l_tabs) + len(c_tab), r_tabs, curses.color_pair(3))
         stdscr.addstr(2, 2 + len(l_tabs) + len(c_tab) + len(r_tabs), "->")
         stdscr.addstr(3, 0, column_names)
+        # display query results on screen
         line = first_line
         cursor = min(cursor, len(current_screen) + first_line - 1)
         offset = max(0, cursor - curses.LINES + 3)
         for name, conns, send, recv in current_screen:
             if line == cursor:
                 stdscr.attrset(curses.color_pair(1) | curses.A_BOLD)
+                # if space/enter was pressed on previous loop, check current line to update filter
                 if toggle_subquery:
                     if is_subquery:
                         if s_col[sec_i] not in p_col:
@@ -1479,12 +1488,13 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
                 stdscr.addstr(line - offset, 0, f"{name!s:<{curses.COLS-32}.{curses.COLS-32}}{value}")
             line += 1
         stdscr.refresh()
+        # if space/enter was pressed on previous loop, continue loop with updated filter to execute new query
         if toggle_subquery:
             toggle_subquery = False
             update_query = True
             execute_query = True
             continue
-        # user input
+        # check for any new query results while waiting for user input
         if running_query:
             if not thread_query.is_alive():
                 running_query = False
@@ -1492,17 +1502,20 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
             new_results = False
             while True:
                 try:
-                    current_screen += q_query_results.get(timeout=0.1)
+                    current_screen += q_query_results.get(timeout=0.01)
                     new_results = True
                 except queue.Empty:
                     ch = stdscr.getch()
                     if ch != -1:
                         break
                     if new_results:
+                        sum_send = sum(b for _, _, b, _ in current_screen)
+                        sum_recv = sum(b for _, _, _, b in current_screen)
                         break
             stdscr.nodelay(False)
         else:
             ch = stdscr.getch()
+        # process user input
         if ch == ord("\n") or ch == ord(" "):
             toggle_subquery = True
             if not is_subquery:
