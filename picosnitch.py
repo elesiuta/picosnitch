@@ -336,7 +336,7 @@ def read_snitch() -> dict:
     template = {
         "Config": {
             "Bandwidth monitor": True,
-            "DB retention (days)": 90,
+            "DB retention (days)": 30,
             "DB sql log": True,
             "DB sql server": {},
             "DB text log": False,
@@ -349,7 +349,7 @@ def read_snitch() -> dict:
             "Log addresses": True,
             "Log commands": True,
             "Log ignore": [],
-            "Perf ring buffer (pages)": 64,
+            "Perf ring buffer (pages)": 256,
             "Set RLIMIT_NOFILE": None,
             "VT API key": "",
             "VT file upload": False,
