@@ -2010,6 +2010,16 @@ def start_picosnitch():
             if sys.argv[1] in ["start", "stop", "restart", "systemd"]:
                 print("Command not supported by picosnitch snap, use `snap <command> picosnitch` or `systemctl <command> snap.picosnitch.daemon`", file=sys.stderr)
                 return 2
+        elif sys.executable.startswith("/nix/"):
+            if sys.argv[1] in ["start", "stop", "restart", "start-no-daemon"]:
+                if sys.argv[1] in ["start", "stop", "restart"]:
+                    print("WARNING: built in daemon mode is not supported on Nix, use picosnitch start-no-daemon or systemctl instead", file=sys.stderr)
+                if os.getuid() != 0:
+                    print("ERROR: picosnitch requires root privileges to run", file=sys.stderr)
+                    return 1
+            elif sys.argv[1] == "systemd":
+                print("Command not supported on Nix, add `services.picosnitch.enable = true;` to your Nix configuration", file=sys.stderr)
+                return 2
         if sys.argv[1] == "help":
             print(readme)
             return 0
@@ -2121,7 +2131,7 @@ def start_picosnitch():
             except Exception:
                 pass
             print(f"serving web gui on http://{os.getenv('HOST', 'localhost')}:{os.getenv('PORT', '5100')}")
-            if sys.executable.startswith("/snap/"):
+            if sys.executable.startswith("/snap/") or sys.executable.startswith("/nix/"):
                 subprocess.Popen(["bash", "-c", f'/usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 return ui_dash()
             subprocess.Popen(["bash", "-c", f'let i=0; rm {BASE_PATH}/dash; while [[ ! -f {BASE_PATH}/dash || "$i" -gt 30 ]]; do let i++; sleep 1; done; rm {BASE_PATH}/dash && /usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
