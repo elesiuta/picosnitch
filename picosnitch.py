@@ -2038,6 +2038,7 @@ def start_picosnitch():
             user_version = cur.fetchone()[0]
             if user_version <= 1:
                 assert not os.path.exists("/run/picosnitch.pid"), "cannot upgrade database while picosnitch daemon is running"
+                print("Upgrading database, please wait...")
             if user_version == 0:
                 cur.execute(''' ALTER TABLE connections RENAME COLUMN events TO conns ''')
                 cur.execute(''' ALTER TABLE connections ADD COLUMN send integer DEFAULT 0 NOT NULL ''')
