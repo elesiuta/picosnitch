@@ -1784,6 +1784,7 @@ def ui_dash():
                     min=0, max=100, step=1, value=0,
                     included=False,
                 ),
+                html.Div(id="selected_time_range", style={"border": "1px solid #ccc", "padding": "5px", "text-align": "center"}),
             ]),
             dcc.Store(id="store_send", data={"rev": 0, "visible": {}}),
             dcc.Store(id="store_recv", data={"rev": 0, "visible": {}}),
@@ -1806,6 +1807,18 @@ def ui_dash():
     @app.callback(Output("time_j", "marks"), Input("time_i", "value"), Input("time_j", "value"))
     def update_time_slider(time_i, _):
         return {x: time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (x-2)).strftime("%Y-%m-%d %H:%M:%S") for x in range(2,100,10)}
+    @app.callback(Output("selected_time_range", "children"), Input("time_i", "value"), Input("time_j", "value"))
+    def display_time_range(time_i, time_j):
+        # may switch later to handleLabel with dash-daq https://dash.plotly.com/dash-core-components/slider https://dash.plotly.com/dash-daq/slider#handle-label
+        if time_j == 0 and time_i != 0:
+            time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%a. %b. %d, %Y at %H:%M:%S")
+            time_history_end = datetime.datetime.now().strftime("%a. %b. %d, %Y at %H:%M:%S")
+        elif time_i != 0:
+            time_history_start = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-1)).strftime("%a. %b. %d, %Y at %H:%M:%S")
+            time_history_end = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-2)).strftime("%a. %b. %d, %Y at %H:%M:%S")
+        else:
+            return "all records"
+        return f"{time_history_start} to {time_history_end}"
     @app.callback(
             Output("send", "figure"), Output("recv", "figure"), Output("whereis", "options"), Output("store_send", "data"), Output("store_recv", "data"),
             Input("smoothing", "value"), Input("trim-labels", "value"), Input("resampling", "value"),
