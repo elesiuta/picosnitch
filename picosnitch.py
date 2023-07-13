@@ -341,7 +341,6 @@ def read_snitch() -> dict:
             "DB sql server": {},
             "DB text log": False,
             "DB write limit (seconds)": 10,
-            "Dash refresh (seconds)": 10,
             "Dash scroll zoom": True,
             "Dash theme": "",
             "Desktop notifications": True,
@@ -1696,7 +1695,7 @@ def ui_dash():
         return html.Div([
             dcc.Interval(
                 id="interval-component",
-                interval=1000 * config["Dash refresh (seconds)"],
+                interval=10000,
                 disabled=True,
             ),
             html.Div(html.Button("Stop Dash", id="exit", className="btn btn-primary btn-sm mt-1"), style={"float": "right"}),
@@ -1746,10 +1745,16 @@ def ui_dash():
                 dcc.Dropdown(
                     id="auto-refresh",
                     options=[
-                        {"label": f"Auto-Refresh ({config['Dash refresh (seconds)']} seconds)", "value": True},
-                        {"label": "Disable Auto-Refresh", "value": False},
+                        {"label": "Disable Auto-Refresh", "value": 0},
+                        {"label": "Auto-Refresh (1 second)", "value": 1},
+                        {"label": "Auto-Refresh (5 seconds)", "value": 5},
+                        {"label": "Auto-Refresh (10 seconds)", "value": 10},
+                        {"label": "Auto-Refresh (30 seconds)", "value": 30},
+                        {"label": "Auto-Refresh (1 minute)", "value": 60},
+                        {"label": "Auto-Refresh (5 minutes)", "value": 300},
+                        {"label": "Auto-Refresh (10 minutes)", "value": 600},
                     ],
-                    value=False,
+                    value=0,
                     clearable=False,
                 ),
             ], style={"display":"inline-block", "width": "15%"}),
@@ -1806,9 +1811,9 @@ def ui_dash():
     except Exception:
         app = Dash(__name__)
     app.layout = serve_layout
-    @app.callback(Output("interval-component", "disabled"), Input("auto-refresh", "value"))
+    @app.callback(Output("interval-component", "disabled"), Output("interval-component", "interval"), Input("auto-refresh", "value"))
     def toggle_refresh(value):
-        return not value
+        return value == 0, 1000 * value
     @app.callback(Output("time_j", "marks"), Input("time_i", "value"), Input("time_j", "value"), Input("interval-component", "n_intervals"))
     def update_time_slider(time_i, time_j, _):
         return {x: time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (x-2)).strftime("%Y-%m-%d T %H:%M:%S") for x in range(2,100,10)}
