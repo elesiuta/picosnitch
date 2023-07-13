@@ -1320,14 +1320,16 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
         else:
             stdscr.addstr(i, 0, splash_lines[i])
     stdscr.refresh()
-    # screens from queries (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer)
+    # time lookup functions
+    # time_i is the index of the time period, time_j is the number of time period steps to go back
+    # time_i=0 means all records and time_j=0 means current time (no rounding), due to rounding for time_j>0, time_j=1 may extend partially into the future
     time_i = 0
     time_j = 0
     time_period = ["all", "1 minute", "3 minutes", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "1 hour", "3 hours", "6 hours", "12 hours", "1 day", "3 days", "7 days", "30 days", "365 days"]
     time_minutes = [0, 1, 3, 5, 10, 15, 30, 60, 180, 360, 720, 1440, 4320, 10080, 43200, 525600]
     time_deltas = [datetime.timedelta(minutes=x) for x in time_minutes]
-    time_r = ["second"] + ["minute"]*6 + ["hour"]*4 + ["day"]*3 + ["month"] + ["year"]
-    time_resolution = collections.OrderedDict({
+    time_round_units = ["second"] + ["minute"]*6 + ["hour"]*4 + ["day"]*3 + ["month"] + ["year"]
+    time_round_functions = collections.OrderedDict({
         "second": lambda x: x.replace(microsecond=0),
         "minute": lambda x: x.replace(microsecond=0, second=0),
         "hour": lambda x: x.replace(microsecond=0, second=0, minute=0),
@@ -1335,6 +1337,8 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
         "month": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1),
         "year": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1, month=1),
     })
+    time_round_func = lambda resolution_index, time: time_round_functions[time_round_units[resolution_index]](time)
+    # screens from queries (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer)
     pri_i = 0
     p_screens = ["Executables", "Process Names", "Commands", "SHA256", "Entry Time", "Domains", "Destination IPs", "Destination Ports", "Users", "Parent Executables", "Parent Names", "Parent Commands", "Parent SHA256"]
     p_names = ["Executable", "Process Name", "Command", "SHA256", "Entry Time", "Domain", "Destination IP", "Destination Port", "User", "Parent Executable", "Parent Name", "Parent Command", "Parent SHA256"]
@@ -1370,10 +1374,10 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
             if time_j == 0:
                 time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%Y-%m-%d %H:%M:%S")
                 time_history_end = "now"
-                time_history = time_resolution["second"](datetime.datetime.now())
+                time_history = time_round_functions["second"](datetime.datetime.now())
             elif time_i != 0:
-                time_history_start = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-1)).strftime("%Y-%m-%d %H:%M:%S")
-                time_history_end = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-2)).strftime("%Y-%m-%d %H:%M:%S")
+                time_history_start = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j-1)).strftime("%Y-%m-%d %H:%M:%S")
+                time_history_end = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j-2)).strftime("%Y-%m-%d %H:%M:%S")
                 time_history = f"{time_history_start} -> {time_history_end}"
             if time_i == 0:
                 time_query = ""
@@ -1654,8 +1658,8 @@ def ui_dash():
     time_period = ["all", "1 minute", "3 minutes", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "1 hour", "3 hours", "6 hours", "12 hours", "1 day", "3 days", "7 days", "30 days", "365 days"]
     time_minutes = [0, 1, 3, 5, 10, 15, 30, 60, 180, 360, 720, 1440, 4320, 10080, 43200, 525600]
     time_deltas = [datetime.timedelta(minutes=x) for x in time_minutes]
-    time_r = ["second"] + ["minute"]*6 + ["hour"]*4 + ["day"]*3 + ["month"] + ["year"]
-    time_resolution = collections.OrderedDict({
+    time_round_units = ["second"] + ["minute"]*6 + ["hour"]*4 + ["day"]*3 + ["month"] + ["year"]
+    time_round_functions = collections.OrderedDict({
         "second": lambda x: x.replace(microsecond=0),
         "minute": lambda x: x.replace(microsecond=0, second=0),
         "hour": lambda x: x.replace(microsecond=0, second=0, minute=0),
@@ -1663,6 +1667,7 @@ def ui_dash():
         "month": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1),
         "year": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1, month=1),
     })
+    time_round_func = lambda resolution_index, time: time_round_functions[time_round_units[resolution_index]](time)
     def get_user(uid) -> str:
         try:
             return f"{pwd.getpwuid(uid).pw_name} ({uid})"
@@ -1806,16 +1811,18 @@ def ui_dash():
         return not value
     @app.callback(Output("time_j", "marks"), Input("time_i", "value"), Input("time_j", "value"))
     def update_time_slider(time_i, _):
-        return {x: time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (x-2)).strftime("%Y-%m-%d T %H:%M:%S") for x in range(2,100,10)}
+        return {x: time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (x-2)).strftime("%Y-%m-%d T %H:%M:%S") for x in range(2,100,10)}
     @app.callback(Output("selected_time_range", "children"), Input("time_i", "value"), Input("time_j", "value"))
     def display_time_range(time_i, time_j):
         # may switch later to handleLabel with dash-daq https://dash.plotly.com/dash-core-components/slider https://dash.plotly.com/dash-daq/slider#handle-label
+        # time_i is the index of the time period, time_j is the number of time period steps to go back
+        # time_i=0 means all records and time_j=0 means current time (no rounding), due to rounding for time_j>0, time_j=1 may extend partially into the future
         if time_j == 0 and time_i != 0:
             time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%a. %b. %d, %Y at %H:%M:%S")
             time_history_end = datetime.datetime.now().strftime("%a. %b. %d, %Y at %H:%M:%S")
         elif time_i != 0:
-            time_history_start = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-1)).strftime("%a. %b. %d, %Y at %H:%M:%S")
-            time_history_end = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-2)).strftime("%a. %b. %d, %Y at %H:%M:%S")
+            time_history_start = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j-1)).strftime("%a. %b. %d, %Y at %H:%M:%S")
+            time_history_end = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j-2)).strftime("%a. %b. %d, %Y at %H:%M:%S")
         else:
             return "all records"
         return f"{time_history_start} to {time_history_end}"
@@ -1861,13 +1868,13 @@ def ui_dash():
             if (relayout_send is not None and ("dragmode" in relayout_send or "xaxis.autorange" in relayout_send)) or \
                (relayout_recv is not None and ("dragmode" in relayout_recv or "xaxis.autorange" in relayout_recv)):
                 raise PreventUpdate
-        # generate the query string using the selected options
+        # generate the query string using the selected options (time_i is the index of the time period, time_j is the number of time period steps to go back)
         if time_j == 0:
             time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%Y-%m-%d %H:%M:%S")
             time_history_end = "now"
         elif time_i != 0:
-            time_history_start = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-1)).strftime("%Y-%m-%d %H:%M:%S")
-            time_history_end = time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (time_j-2)).strftime("%Y-%m-%d %H:%M:%S")
+            time_history_start = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j-1)).strftime("%Y-%m-%d %H:%M:%S")
+            time_history_end = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j-2)).strftime("%Y-%m-%d %H:%M:%S")
         if time_i == 0:
             time_query = ""
         else:
