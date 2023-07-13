@@ -1809,11 +1809,11 @@ def ui_dash():
     @app.callback(Output("interval-component", "disabled"), Input("auto-refresh", "value"))
     def toggle_refresh(value):
         return not value
-    @app.callback(Output("time_j", "marks"), Input("time_i", "value"), Input("time_j", "value"))
-    def update_time_slider(time_i, _):
+    @app.callback(Output("time_j", "marks"), Input("time_i", "value"), Input("time_j", "value"), Input("interval-component", "n_intervals"))
+    def update_time_slider(time_i, time_j, _):
         return {x: time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (x-2)).strftime("%Y-%m-%d T %H:%M:%S") for x in range(2,100,10)}
-    @app.callback(Output("selected_time_range", "children"), Input("time_i", "value"), Input("time_j", "value"))
-    def display_time_range(time_i, time_j):
+    @app.callback(Output("selected_time_range", "children"), Input("time_i", "value"), Input("time_j", "value"), Input("interval-component", "n_intervals"))
+    def display_time_range(time_i, time_j, _):
         # may switch later to handleLabel with dash-daq https://dash.plotly.com/dash-core-components/slider https://dash.plotly.com/dash-daq/slider#handle-label
         # time_i is the index of the time period, time_j is the number of time period steps to go back
         # time_i=0 means all records and time_j=0 means current time (no rounding), due to rounding for time_j>0, time_j=1 may extend partially into the future
