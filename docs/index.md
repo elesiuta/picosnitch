@@ -32,9 +32,9 @@
 - `sudo add-apt-repository ppa:elesiuta/picosnitch`
 - `sudo apt update`
 - `sudo apt install picosnitch`
-- install extra dependencies for dash using [pip](https://pip.pypa.io/) (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
-  - `sudo apt install python3-pip`
-  - `pip3 install dash pandas plotly --user`
+- optionally install [dash](https://pypi.org/project/dash/) with [pip](https://pip.pypa.io/) or [pipx](https://pypa.github.io/pipx/)
+  - `sudo apt install pipx`
+  - `pipx install dash`
 - you may require a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#ubuntu---binary) ([unofficial PPA](https://launchpad.net/~hadret/+archive/ubuntu/bpfcc)) since the version in the [Ubuntu repos](https://repology.org/project/bcc-bpf/versions) sometimes lags behind its [supported kernel](https://github.com/iovisor/bcc/releases)
 </details>
 
@@ -42,9 +42,9 @@
 <details><summary>Details</summary>
 
 - visit the [OBS picosnitch page](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) and follow the instructions for your distribution
-- install extra dependencies for dash using [pip](https://pip.pypa.io/) (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
-  - `sudo apt install python3-pip`
-  - `pip3 install dash pandas plotly --user`
+- optionally install [dash](https://pypi.org/project/dash/) with [pip](https://pip.pypa.io/) or [pipx](https://pypa.github.io/pipx/)
+  - `sudo apt install pipx`
+  - `pipx install dash`
 - if you're having issues on bullseye, you may need a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#debian---binary)
 </details>
 
@@ -54,9 +54,9 @@
 - `sudo zypper addrepo https://download.opensuse.org/repositories/home:elesiuta/openSUSE_Tumbleweed/home:elesiuta.repo`
 - `sudo zypper refresh`
 - `sudo zypper install picosnitch`
-- install extra dependencies for dash using [pip](https://pip.pypa.io/) (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
-  - `sudo zypper install python3-pip`
-  - `pip3 install dash pandas plotly --user`
+- optionally install [dash](https://pypi.org/project/dash/) with [pip](https://pip.pypa.io/) or [pipx](https://pypa.github.io/pipx/)
+  - `sudo zypper install pipx`
+  - `pipx install dash`
 </details>
 
 ### [Copr](https://copr.fedorainfracloud.org/coprs/elesiuta/picosnitch/) for Fedora, Mageia, Mandriva, and derivatives <img src="https://cdn.simpleicons.org/fedora" width="16" height="16">
@@ -64,9 +64,9 @@
 
 - `sudo dnf copr enable elesiuta/picosnitch`
 - `sudo dnf install picosnitch`
-- install extra dependencies for dash using [pip](https://pip.pypa.io/) (optional): [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
-  - `sudo dnf install python3-pip`
-  - `pip3 install dash pandas plotly --user`
+- optionally install [dash](https://pypi.org/project/dash/) with [pip](https://pip.pypa.io/) or [pipx](https://pypa.github.io/pipx/)
+  - `sudo dnf install pipx`
+  - `pipx install dash`
 </details>
 
 ### [Nixpkgs](https://search.nixos.org/packages?show=picosnitch) for Nix <img src="https://cdn.simpleicons.org/nixos" width="16" height="16">
@@ -86,9 +86,8 @@
 
 - install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
   - it should be called `python-bcc` or `python-bpfcc`
-- install picosnitch using [pip](https://pip.pypa.io/)
-  - `pip3 install "picosnitch[full]" --upgrade --user`
-  - warning: installing as user makes it easier for another program to modify picosnitch; however, installing with sudo results in [xkcd.com/1987](https://xkcd.com/1987/)
+- install picosnitch using [pip](https://pip.pypa.io/) or [pipx](https://pypa.github.io/pipx/)
+  - `pipx install "picosnitch[full]"`
 - create a service file for systemd to run picosnitch (recommended)
   - `picosnitch systemd`
 - optional dependencies (will install from [PyPI](https://pypi.org/) with `[full]` if not already installed)
@@ -131,13 +130,16 @@
 ```yaml
 {
   "Bandwidth monitor": true, # Log traffic per connection since last db write
-  "DB retention (days)": 90, # How many days to keep connection logs in snitch.db
+  "DB retention (days)": 30, # How many days to keep connection logs in snitch.db
   "DB sql log": true, # Write connection logs to snitch.db (SQLite)
   "DB sql server": {}, # Write connection logs to a MariaDB, MySQL, or PostgreSQL server
   "DB text log": false, # Write connection logs to conn.log
   "DB write limit (seconds)": 10, # Minimum time between writing connection logs
   # increasing it decreases disk writes by grouping connections into larger time windows
   # reducing time precision, decreasing database size, and increasing hash latency
+  "Dash refresh (seconds)": 10, # Auto refresh frequency (if enabled from dropdown)
+  "Dash scroll zoom": true, # Enable scroll zooming on plots
+  "Dash theme": "", # Select a theme from https://bootswatch.com/
   "Desktop notifications": true, # Try connecting to dbus to show notifications
   "Every exe (not just conns)": false, # Check every running executable with picosnitch
   # these are treated as "connections" with a port of -1
@@ -150,8 +152,9 @@
   # will omit connections that match any of these from the connection log
   # domains are in reverse domain name notation and will match all subdomains
   # the process name, executable, and hash will still be recorded in record.json
-  "Perf ring buffer (pages)": 64, # Power of two number of pages for BPF program
-  # only change this if it is giving you errors
+  "Perf ring buffer (pages)": 256, # Power of two number of pages for BPF program
+  # only change this if it is giving you errors (e.g. missed events)
+  # picosnitch opens a perf buffer for each event type, so this is multiplied by up to 21
   "Set RLIMIT_NOFILE": null, # Set the maximum number of open file descriptors (int)
   # it is used for caching process executables and hashes (typical system default is 1024)
   # this is good enough for most people since caching is based on executable device + inode
