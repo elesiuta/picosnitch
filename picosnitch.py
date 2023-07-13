@@ -1883,8 +1883,8 @@ def ui_dash():
                 whereis_options = [{"label": f"is {trim_label(x[0], trim)}", "value": x[0]} for x in whereis_values]
         con.close()
         # structure the data for plotting
-        df_send = df.pivot_table(index="contime", columns=dim, values="send", fill_value=0, dropna=False, aggfunc=sum)
-        df_recv = df.pivot_table(index="contime", columns=dim, values="recv", fill_value=0, dropna=False, aggfunc=sum)
+        df_send = df.groupby(["contime", dim])["send"].sum().unstack(dim, fill_value=0)
+        df_recv = df.groupby(["contime", dim])["recv"].sum().unstack(dim, fill_value=0)
         if dim == "uid":
             df_send.rename(columns=get_user, inplace=True)
             df_recv.rename(columns=get_user, inplace=True)
