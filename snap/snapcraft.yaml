@@ -10,13 +10,17 @@ version: '0.12.0'
 
 architectures:
   - build-on: amd64
+  - build-on: arm64
+  - build-on: armhf
+  - build-on: i386
+  - build-on: ppc64el
+  - build-on: s390x
 
 parts:
   picosnitch:
     plugin: python
-    source: .
-    override-pull: |
-      craftctl default
+    source: https://github.com/elesiuta/picosnitch.git
+    source-tag: 'v${SNAPCRAFT_PROJECT_VERSION}'
     python-packages:
       - wheel
       - psutil
