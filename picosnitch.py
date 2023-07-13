@@ -1806,7 +1806,7 @@ def ui_dash():
         return not value
     @app.callback(Output("time_j", "marks"), Input("time_i", "value"), Input("time_j", "value"))
     def update_time_slider(time_i, _):
-        return {x: time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (x-2)).strftime("%Y-%m-%d %H:%M:%S") for x in range(2,100,10)}
+        return {x: time_resolution[time_r[time_i]](datetime.datetime.now() - time_deltas[time_i] * (x-2)).strftime("%Y-%m-%d T %H:%M:%S") for x in range(2,100,10)}
     @app.callback(Output("selected_time_range", "children"), Input("time_i", "value"), Input("time_j", "value"))
     def display_time_range(time_i, time_j):
         # may switch later to handleLabel with dash-daq https://dash.plotly.com/dash-core-components/slider https://dash.plotly.com/dash-daq/slider#handle-label
