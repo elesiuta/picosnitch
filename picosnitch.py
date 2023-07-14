@@ -1868,9 +1868,9 @@ def ui_dash():
     def update(smoothing, trim, resampling, dim, where, whereis, time_i, time_j, relayout_send, relayout_recv, restyle_send, restyle_recv, _, store_send, store_recv, fig_send, fig_recv):
         if not callback_context.triggered or (callback_context.triggered[0]["prop_id"] == "time_j.value" and time_i == 0):
             raise PreventUpdate
-        input_id = callback_context.triggered[0]["prop_id"].split(".")[0]
+        input_id = callback_context.triggered[0]["prop_id"]
         # sync zoom level between figs and prevent zooming outside of the data range
-        if input_id == "send" and relayout_send is not None and 'xaxis.range[0]' in relayout_send:
+        if input_id == "send.relayoutData" and relayout_send is not None and 'xaxis.range[0]' in relayout_send:
             # update fig_recv to match fig_send zoom
             store_recv["rev"] += 1
             fig_recv["layout"]["xaxis"]["range"] = [max(relayout_send['xaxis.range[0]'], store_recv["min_x"]), min(relayout_send['xaxis.range[1]'], store_recv["max_x"])]
@@ -1882,7 +1882,7 @@ def ui_dash():
                 fig_send["layout"]["uirevision"] = store_send["rev"]
                 return fig_send, fig_recv, no_update, store_send, store_recv
             return no_update, fig_recv, no_update, no_update, store_recv
-        if input_id == "recv" and relayout_recv is not None and 'xaxis.range[0]' in relayout_recv:
+        if input_id == "recv.relayoutData" and relayout_recv is not None and 'xaxis.range[0]' in relayout_recv:
             # update fig_send to match fig_recv zoom
             store_send["rev"] += 1
             fig_send["layout"]["xaxis"]["range"] = [max(relayout_recv['xaxis.range[0]'], store_send["min_x"]), min(relayout_recv['xaxis.range[1]'], store_send["max_x"])]
@@ -1895,14 +1895,14 @@ def ui_dash():
                 return fig_send, fig_recv, no_update, store_send, store_recv
             return fig_send, no_update, no_update, store_send, no_update
         # get visibility of legend items (traces)
-        if input_id == "send" and restyle_send is not None and "visible" in restyle_send[0]:
+        if input_id == "send.restyleData" and restyle_send is not None and "visible" in restyle_send[0]:
             for visible, index in zip(restyle_send[0]["visible"], restyle_send[1]):
                 store_send["visible"][store_send["columns"][index]] = visible
                 # update recv fig to match
                 store_recv["visible"][store_recv["columns"][index]] = visible
                 fig_recv["data"][index]["visible"] = visible
             return no_update, fig_recv, no_update, store_send, store_recv
-        if input_id == "recv" and restyle_recv is not None and "visible" in restyle_recv[0]:
+        if input_id == "recv.restyleData" and restyle_recv is not None and "visible" in restyle_recv[0]:
             for visible, index in zip(restyle_recv[0]["visible"], restyle_recv[1]):
                 store_recv["visible"][store_recv["columns"][index]] = visible
                 # update send fig to match
@@ -1910,7 +1910,7 @@ def ui_dash():
                 fig_send["data"][index]["visible"] = visible
             return fig_send, no_update, no_update, store_send, store_recv
         # prevent update for other layout/style changes
-        if input_id in ["send", "recv"]:
+        if input_id.split(".")[0] in ["send", "recv"]:
             if (relayout_send is not None and ("dragmode" in relayout_send or "xaxis.autorange" in relayout_send)) or \
                (relayout_recv is not None and ("dragmode" in relayout_recv or "xaxis.autorange" in relayout_recv)):
                 raise PreventUpdate
