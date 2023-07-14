@@ -1910,14 +1910,19 @@ def ui_dash():
         # structure the data for plotting
         df_send = df.groupby(["contime", dim])["send"].sum().unstack(dim, fill_value=0)
         df_recv = df.groupby(["contime", dim])["recv"].sum().unstack(dim, fill_value=0)
+        # store column names before renaming
+        store_send["columns"] = df_send.columns
+        store_recv["columns"] = df_recv.columns
+        # rename columns with nicer labels (add data totals, username, and trim if requested)
+        df_send_total = df_send.sum()
+        df_recv_total = df_recv.sum()
+        df_send.rename(columns=lambda dim: get_totals(df_send_total, dim), inplace=True)
+        df_recv.rename(columns=lambda dim: get_totals(df_recv_total, dim), inplace=True)
         if dim == "uid":
             df_send.rename(columns=get_user, inplace=True)
             df_recv.rename(columns=get_user, inplace=True)
-        else:
-            df_send.rename(columns=lambda x: trim_label(x, trim), inplace=True)
-            df_recv.rename(columns=lambda x: trim_label(x, trim), inplace=True)
-        df_send_total = df_send.sum()
-        df_recv_total = df_recv.sum()
+        df_send.rename(columns=lambda x: trim_label(x, trim), inplace=True)
+        df_recv.rename(columns=lambda x: trim_label(x, trim), inplace=True)
         # resample the data if it is too large for performance, and smooth if requested
         if resampling:
             if len(df_send) > resampling:
@@ -1936,12 +1941,8 @@ def ui_dash():
         store_send["max_x"] = df_send.index.max()
         store_recv["min_x"] = df_recv.index.min()
         store_recv["max_x"] = df_recv.index.max()
-        store_send["columns"] = df_send.columns
-        store_recv["columns"] = df_recv.columns
         store_send["rev"] += 1
         store_recv["rev"] += 1
-        df_send.rename(columns=lambda dim: get_totals(df_send_total, dim), inplace=True)
-        df_recv.rename(columns=lambda dim: get_totals(df_recv_total, dim), inplace=True)
         fig_send = px.line(df_send, line_shape="linear", render_mode="svg", labels={
             "contime": "", "value": "Data Sent (bytes)", dim: dim_labels[dim]})
         fig_send.update_layout(uirevision=store_send["rev"])
