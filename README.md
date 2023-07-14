@@ -1,12 +1,3 @@
-[![GitHub release](https://img.shields.io/github/v/release/elesiuta/picosnitch?color=00a0a0)](https://github.com/elesiuta/picosnitch/releases)
-[![PyPI release](https://img.shields.io/pypi/v/picosnitch?color=00a0a0)](https://pypi.org/project/picosnitch)
-[![AUR release](https://img.shields.io/aur/version/picosnitch?color=00a0a0)](https://aur.archlinux.org/packages/picosnitch/)
-[![Copr release](https://img.shields.io/badge/dynamic/json?color=00a0a0&label=copr&query=builds.latest.source_package.version&url=https%3A%2F%2Fcopr.fedorainfracloud.org%2Fapi_3%2Fpackage%3Fownername%3Delesiuta%26projectname%3Dpicosnitch%26packagename%3Dpicosnitch%26with_latest_build%3DTrue)](https://copr.fedorainfracloud.org/coprs/elesiuta/picosnitch/)
-[![OBS package build status](https://img.shields.io/obs/home:elesiuta/picosnitch/Debian_Unstable/x86_64?color=00a0a0&label=open%20build%20service)](https://build.opensuse.org/package/show/home:elesiuta/picosnitch)
-[![GitHub commits since latest release](https://img.shields.io/github/commits-since/elesiuta/picosnitch/latest/master?color=00a0a0)](https://github.com/elesiuta/picosnitch/commits/master)
-[![GitHub contributors](https://img.shields.io/github/contributors/elesiuta/picosnitch?color=00a0a0)](https://github.com/elesiuta/picosnitch/graphs/contributors)
-[![Source size](https://img.shields.io/github/size/elesiuta/picosnitch/picosnitch.py?color=00a0a0)](https://github.com/elesiuta/picosnitch/blob/master/picosnitch.py)
-
 ![screenshot.png](https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/screenshot.png)
 
 # [Picosnitch](https://elesiuta.github.io/picosnitch/)
@@ -137,9 +128,10 @@
   "DB write limit (seconds)": 10, # Minimum time between writing connection logs
   # increasing it decreases disk writes by grouping connections into larger time windows
   # reducing time precision, decreasing database size, and increasing hash latency
-  "Dash refresh (seconds)": 10, # Auto refresh frequency (if enabled from dropdown)
   "Dash scroll zoom": true, # Enable scroll zooming on plots
-  "Dash theme": "", # Select a theme from https://bootswatch.com/
+  "Dash theme": "", # Select a theme name from https://bootswatch.com/
+  # requires installing https://pypi.org/project/dash-bootstrap-components/
+  # and https://pypi.org/project/dash-bootstrap-templates/ with pip or pipx
   "Desktop notifications": true, # Try connecting to dbus to show notifications
   "Every exe (not just conns)": false, # Check every running executable with picosnitch
   # these are treated as "connections" with a port of -1
