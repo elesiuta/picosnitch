@@ -1644,6 +1644,8 @@ def ui_dash():
     site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash-bootstrap-components/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
     site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash-bootstrap-templates/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
     site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash-bootstrap-templates/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
+    site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/geoip2/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
+    site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/geoip2/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
     from dash import Dash, dcc, html, callback_context, no_update
     from dash.dependencies import Input, Output, State
     from dash.exceptions import PreventUpdate
@@ -1673,8 +1675,8 @@ def ui_dash():
             return f"{pwd.getpwuid(uid).pw_name} ({uid})"
         except Exception:
             return f"??? ({uid})"
-    def get_totals(df, dim) -> str:
-        size = df[dim]
+    def get_totals(df_sum, dim) -> str:
+        size = df_sum[dim]
         if size > 10**9:
             return f"{dim} ({round(size/10**9, 2)!s} GB)"
         elif size > 10**6:
@@ -1683,6 +1685,42 @@ def ui_dash():
             return f"{dim} ({round(size/10**3, 2)!s} kB)"
         else:
             return f"{dim} ({size!s} B)"
+    try:
+        import geoip2.database
+        # download latest database if out of date or does not exist, then create geoip_reader
+        geoip_mmdb = os.path.join(BASE_PATH, "dbip-country-lite.mmdb")
+        geoip_url = datetime.datetime.now().strftime("https://download.db-ip.com/free/dbip-country-lite-%Y-%m.mmdb.gz")
+        if not os.path.isfile(geoip_mmdb) or datetime.datetime.fromtimestamp(os.path.getmtime(geoip_mmdb)).strftime("%Y%m") != datetime.datetime.now().strftime("%Y%m"):
+            try:
+                import urllib.request
+                request = urllib.request.Request(geoip_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(request) as response, open(geoip_mmdb + ".gz", "wb") as f:
+                    f.write(response.read())
+                import gzip
+                with gzip.open(geoip_mmdb + ".gz", "rb") as f_in, open(geoip_mmdb, "wb") as f_out:
+                    f_out.write(f_in.read())
+                os.remove(geoip_mmdb + ".gz")
+            except Exception:
+                if not os.path.isfile(geoip_mmdb):
+                    raise Exception("Could not download GeoIP database")
+                print("Could not update GeoIP database, using old version", file=sys.stderr)
+        geoip_reader = geoip2.database.Reader(geoip_mmdb)
+    except Exception:
+        geoip_reader = None
+    def get_geoip(ip: str) -> str:
+        try:
+            country_code = geoip_reader.country(ip).country.iso_code
+            base = 0x1f1e6 - ord("A")
+            country_flag = chr(base + ord(country_code[0].upper())) + chr(base + ord(country_code[1].upper()))
+            return f"{ip} ({country_flag}{country_code})"
+        except Exception:
+            try:
+                if ipaddress.ip_address(ip).is_private:
+                    return f"{ip} ({chr(0x1f3e0)})"  # home emoji
+                else:
+                    return f"{ip} ({chr(0x1f310)})"  # globe emoji
+            except Exception:
+                return f"{ip} ({chr(0x2753)})"  # question emoji
     def trim_label(label, trim) -> str:
         if trim and len(label) > 64:
             return f"{label[:32]}...{label[-29:]}"
@@ -1949,16 +1987,21 @@ def ui_dash():
         # store column names before renaming
         store_send["columns"] = df_send.columns
         store_recv["columns"] = df_recv.columns
-        # rename columns with nicer labels (add data totals, username, and trim if requested)
+        # rename columns with nicer labels (add data totals, username, geoip lookup, and trim if requested)
         df_send_total = df_send.sum()
         df_recv_total = df_recv.sum()
-        df_send.rename(columns=lambda dim: get_totals(df_send_total, dim), inplace=True)
-        df_recv.rename(columns=lambda dim: get_totals(df_recv_total, dim), inplace=True)
+        df_send_new_columns = [get_totals(df_send_total, col) for col in df_send.columns]
+        df_recv_new_columns = [get_totals(df_recv_total, col) for col in df_recv.columns]
         if dim == "uid":
-            df_send.rename(columns=get_user, inplace=True)
-            df_recv.rename(columns=get_user, inplace=True)
-        df_send.rename(columns=lambda x: trim_label(x, trim), inplace=True)
-        df_recv.rename(columns=lambda x: trim_label(x, trim), inplace=True)
+            df_send_new_columns = [col.replace(str(uid), get_user(uid), 1) for col, uid in zip(df_send_new_columns, df_send.columns)]
+            df_recv_new_columns = [col.replace(str(uid), get_user(uid), 1) for col, uid in zip(df_recv_new_columns, df_recv.columns)]
+        elif dim == "ip" and geoip_reader is not None:
+            df_send_new_columns = [col.replace(str(ip), get_geoip(ip), 1) for col, ip in zip(df_send_new_columns, df_send.columns)]
+            df_recv_new_columns = [col.replace(str(ip), get_geoip(ip), 1) for col, ip in zip(df_recv_new_columns, df_recv.columns)]
+        df_send_new_columns = [trim_label(col, trim) for col in df_send_new_columns]
+        df_recv_new_columns = [trim_label(col, trim) for col in df_recv_new_columns]
+        df_send.columns = df_send_new_columns
+        df_recv.columns = df_recv_new_columns
         # resample the data if it is too large for performance, and smooth if requested
         if resampling:
             if len(df_send) > resampling:
