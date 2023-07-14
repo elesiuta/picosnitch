@@ -1693,9 +1693,16 @@ def ui_dash():
         if not os.path.isfile(geoip_mmdb) or datetime.datetime.fromtimestamp(os.path.getmtime(geoip_mmdb)).strftime("%Y%m") != datetime.datetime.now().strftime("%Y%m"):
             try:
                 import urllib.request
-                request = urllib.request.Request(geoip_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(request) as response, open(geoip_mmdb + ".gz", "wb") as f:
-                    f.write(response.read())
+                try:
+                    request = urllib.request.Request(geoip_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(request) as response, open(geoip_mmdb + ".gz", "wb") as f:
+                        f.write(response.read())
+                except Exception:
+                    # try previous month if current month is not available
+                    geoip_url = (datetime.datetime.now() - datetime.timedelta(days=30)).strftime("https://download.db-ip.com/free/dbip-country-lite-%Y-%m.mmdb.gz")
+                    request = urllib.request.Request(geoip_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(request) as response, open(geoip_mmdb + ".gz", "wb") as f:
+                        f.write(response.read())
                 import gzip
                 with gzip.open(geoip_mmdb + ".gz", "rb") as f_in, open(geoip_mmdb, "wb") as f_out:
                     f_out.write(f_in.read())
