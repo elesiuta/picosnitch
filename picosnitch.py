@@ -1869,30 +1869,46 @@ def ui_dash():
         if not callback_context.triggered or (callback_context.triggered[0]["prop_id"] == "time_j.value" and time_i == 0):
             raise PreventUpdate
         input_id = callback_context.triggered[0]["prop_id"].split(".")[0]
-        # prevent zooming outside of the data range
+        # sync zoom level between figs and prevent zooming outside of the data range
         if input_id == "send" and relayout_send is not None and 'xaxis.range[0]' in relayout_send:
+            # update fig_recv to match fig_send zoom
+            store_recv["rev"] += 1
+            fig_recv["layout"]["xaxis"]["range"] = [max(relayout_send['xaxis.range[0]'], store_recv["min_x"]), min(relayout_send['xaxis.range[1]'], store_recv["max_x"])]
+            fig_recv["layout"]["uirevision"] = store_recv["rev"]
+            # prevent zooming outside of the data range
             if store_send["min_x"] > relayout_send['xaxis.range[0]'] or store_send["max_x"] < relayout_send['xaxis.range[1]']:
                 store_send["rev"] += 1
                 fig_send["layout"]["xaxis"]["range"] = [max(relayout_send['xaxis.range[0]'], store_send["min_x"]), min(relayout_send['xaxis.range[1]'], store_send["max_x"])]
                 fig_send["layout"]["uirevision"] = store_send["rev"]
-                return fig_send, no_update, no_update, store_send, no_update
-            raise PreventUpdate
+                return fig_send, fig_recv, no_update, store_send, store_recv
+            return no_update, fig_recv, no_update, no_update, store_recv
         if input_id == "recv" and relayout_recv is not None and 'xaxis.range[0]' in relayout_recv:
+            # update fig_send to match fig_recv zoom
+            store_send["rev"] += 1
+            fig_send["layout"]["xaxis"]["range"] = [max(relayout_recv['xaxis.range[0]'], store_send["min_x"]), min(relayout_recv['xaxis.range[1]'], store_send["max_x"])]
+            fig_send["layout"]["uirevision"] = store_send["rev"]
+            # prevent zooming outside of the data range
             if store_recv["min_x"] > relayout_recv['xaxis.range[0]'] or store_recv["max_x"] < relayout_recv['xaxis.range[1]']:
                 store_recv["rev"] += 1
                 fig_recv["layout"]["xaxis"]["range"] = [max(relayout_recv['xaxis.range[0]'], store_recv["min_x"]), min(relayout_recv['xaxis.range[1]'], store_recv["max_x"])]
                 fig_recv["layout"]["uirevision"] = store_recv["rev"]
-                return no_update, fig_recv, no_update, no_update, store_recv
-            raise PreventUpdate
+                return fig_send, fig_recv, no_update, store_send, store_recv
+            return fig_send, no_update, no_update, store_send, no_update
         # get visibility of legend items (traces)
         if input_id == "send" and restyle_send is not None and "visible" in restyle_send[0]:
             for visible, index in zip(restyle_send[0]["visible"], restyle_send[1]):
                 store_send["visible"][store_send["columns"][index]] = visible
-            return no_update, no_update, no_update, store_send, no_update
+                # update recv fig to match
+                store_recv["visible"][store_recv["columns"][index]] = visible
+                fig_recv["data"][index]["visible"] = visible
+            return no_update, fig_recv, no_update, store_send, store_recv
         if input_id == "recv" and restyle_recv is not None and "visible" in restyle_recv[0]:
             for visible, index in zip(restyle_recv[0]["visible"], restyle_recv[1]):
                 store_recv["visible"][store_recv["columns"][index]] = visible
-            return no_update, no_update, no_update, no_update, store_recv
+                # update send fig to match
+                store_send["visible"][store_send["columns"][index]] = visible
+                fig_send["data"][index]["visible"] = visible
+            return fig_send, no_update, no_update, store_send, store_recv
         # prevent update for other layout/style changes
         if input_id in ["send", "recv"]:
             if (relayout_send is not None and ("dragmode" in relayout_send or "xaxis.autorange" in relayout_send)) or \
