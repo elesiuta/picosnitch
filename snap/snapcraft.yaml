@@ -24,6 +24,8 @@ parts:
       - pandas
       - plotly
       - dash
+      - dash-bootstrap-components
+      - dash-bootstrap-templates
       - psycopg
       - pymysql
     stage-packages:
