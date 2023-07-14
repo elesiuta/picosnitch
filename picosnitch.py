@@ -1929,8 +1929,8 @@ def ui_dash():
                 n = len(df_recv) // resampling
                 df_recv = df_recv.resample(f'{n}T').mean().fillna(0)
         if smoothing:
-            df_send = df_send.rolling(smoothing).mean()
-            df_recv = df_recv.rolling(smoothing).mean()
+            df_send = df_send.rolling(smoothing, center=True, closed="both", min_periods=smoothing//2).mean()
+            df_recv = df_recv.rolling(smoothing, center=True, closed="both", min_periods=smoothing//2).mean()
         # update the store and figure
         store_send["min_x"] = df_send.index.min()
         store_send["max_x"] = df_send.index.max()
