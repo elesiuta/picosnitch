@@ -9,7 +9,7 @@ Homepage: https://elesiuta.github.io/picosnitch/
 Package: picosnitch
 Architecture: any
 Pre-Depends: dpkg (>= 1.16.1), python3 (>= 3.8), ${misc:Pre-Depends}
-Depends: ${python:Depends}, ${misc:Depends}, python3-bpfcc, python3-dbus, python3-psutil, python3-requests, python3-pandas
+Depends: ${python:Depends}, ${misc:Depends}, python3-bpfcc, python3-dbus, python3-psutil, python3-requests, python3-pandas, python3-geoip2
 Suggests: pipx, python3-plotly, python3-psycopg2, python3-pymysql, libmariadb-dev
 Description: picosnitch
  Monitor network traffic per executable using BPF

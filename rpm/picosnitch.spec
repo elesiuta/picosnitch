@@ -14,6 +14,7 @@ Requires:       bcc
 Requires:       python3-psutil
 Requires:       python3-requests
 Requires:       python3-pandas
+Requires:       python3-geoip2
 Suggests:       python3-plotly
 Suggests:       pipx
 

@@ -18,10 +18,12 @@ setuptools.setup(
     install_requires=["psutil"],
     extras_require={
         "enable_dash": ["dash", "pandas", "plotly"],
+        "enable_geoip": ["geoip2"],
         "enable_notifications": ["dbus-python"],
         "enable_sql": ["psycopg", "pymysql"],
+        "enable_themes": ["dash-bootstrap-components", "dash-bootstrap-templates"]
         "enable_virustotal": ["requests"],
-        "full": ["dash", "pandas", "plotly", "psycopg", "pymysql", "requests"]
+        "full": ["dash", "pandas", "plotly", "geoip2", "psycopg", "pymysql", "dash-bootstrap-components", "dash-bootstrap-templates", "requests"]
     },
     classifiers=[
         "Operating System :: POSIX :: Linux",
