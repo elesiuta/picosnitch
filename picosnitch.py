@@ -1909,11 +1909,6 @@ def ui_dash():
                 store_send["visible"][store_send["columns"][index]] = visible
                 fig_send["data"][index]["visible"] = visible
             return fig_send, no_update, no_update, store_send, store_recv
-        # prevent update for other layout/style changes
-        if input_id.split(".")[0] in ["send", "recv"]:
-            if (relayout_send is not None and ("dragmode" in relayout_send or "xaxis.autorange" in relayout_send)) or \
-               (relayout_recv is not None and ("dragmode" in relayout_recv or "xaxis.autorange" in relayout_recv)):
-                raise PreventUpdate
         # generate the query string using the selected options (time_i is the index of the time period, time_j is the number of time period steps to go back)
         if time_j == 0:
             time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%Y-%m-%d %H:%M:%S")
@@ -1987,11 +1982,13 @@ def ui_dash():
         fig_send = px.line(df_send, line_shape="linear", render_mode="svg", labels={
             "contime": "", "value": "Data Sent (bytes)", dim: dim_labels[dim]})
         fig_send.update_layout(uirevision=store_send["rev"])
+        fig_send.update_xaxes(range=[store_send["min_x"], store_send["max_x"]])
         fig_send.update_yaxes(fixedrange=True)
         fig_send.update_traces(fill="tozeroy", line_simplify=True)
         fig_recv = px.line(df_recv, line_shape="linear", render_mode="svg", labels={
             "contime": "", "value": "Data Received (bytes)", dim: dim_labels[dim]})
         fig_recv.update_layout(uirevision=store_recv["rev"])
+        fig_recv.update_xaxes(range=[store_recv["min_x"], store_recv["max_x"]])
         fig_recv.update_yaxes(fixedrange=True)
         fig_recv.update_traces(fill="tozeroy", line_simplify=True)
         # carry over visibility settings manually (instead keeping uirevision fixed) since column indices may not line up
