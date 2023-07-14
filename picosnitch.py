@@ -30,6 +30,7 @@ import json
 import hashlib
 import importlib
 import importlib.util
+import math
 import multiprocessing
 import os
 import pickle
@@ -1796,6 +1797,7 @@ def ui_dash():
                 ),
                 html.Div(id="selected_time_range", style={"border": "1px solid #ccc", "padding": "5px", "text-align": "center"}),
             ]),
+            dcc.Store(id="store_time", data={"time_i": 8}),
             dcc.Store(id="store_send", data={"rev": 0, "visible": {}}),
             dcc.Store(id="store_recv", data={"rev": 0, "visible": {}}),
             dcc.Graph(id="send", config={"scrollZoom": config["Dash scroll zoom"]}),
@@ -1814,8 +1816,31 @@ def ui_dash():
     @app.callback(Output("interval-component", "disabled"), Output("interval-component", "interval"), Input("auto-refresh", "value"))
     def toggle_refresh(value):
         return value == 0, 1000 * value
+    @app.callback(Output("time_j", "value"), Output("store_time", "data"), Input("time_i", "value"), Input("time_j", "value"), Input("store_time", "data"))
+    def update_time_slider_pos(time_i, time_j, store_time):
+        # only trigger on time_i change
+        if not callback_context.triggered:
+            raise PreventUpdate
+        elif time_i == 0 or time_j == 0:
+            # time_i is "all", so time_j should be current, or time_j is current so time_i store just needs updating
+            return 0, {"time_i": time_i}
+        elif store_time["time_i"] == 0:
+            # time_i was "all", so don't change time_j
+            return no_update, {"time_i": time_i}
+        elif time_j != 0 and time_i != store_time["time_i"]:
+            # time_i changed and time_j is not current time, so scale time_j to new time_i
+            # get the old time end offset (smaller value, closer to present time) in minutes, and use to scale to new time_j
+            old_minute_end_offset = (time_j - 2) * time_minutes[store_time["time_i"]]
+            if store_time["time_i"] > time_i:
+                # new time_i is smaller, time_j is larger, and should be slightly after the old time_j to fall between start (earlier) and end (later)
+                new_time_j = math.ceil(old_minute_end_offset / time_minutes[time_i]) + 2
+            else:
+                # new time_i is larger, ..., should be slightly before the old time_j so the entire old period is mostly within the new period
+                new_time_j = math.floor(old_minute_end_offset / time_minutes[time_i]) + 2
+            return max(0, min(100, new_time_j)), {"time_i": time_i}
+        raise PreventUpdate
     @app.callback(Output("time_j", "marks"), Input("time_i", "value"), Input("time_j", "value"), Input("interval-component", "n_intervals"))
-    def update_time_slider(time_i, time_j, _):
+    def update_time_slider_marks(time_i, time_j, _):
         return {x: time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (x-2)).strftime("%Y-%m-%d T %H:%M:%S") for x in range(2,100,10)}
     @app.callback(Output("selected_time_range", "children"), Input("time_i", "value"), Input("time_j", "value"), Input("interval-component", "n_intervals"))
     def display_time_range(time_i, time_j, _):
@@ -1841,7 +1866,7 @@ def ui_dash():
             prevent_initial_call=True,
             )
     def update(smoothing, trim, resampling, dim, where, whereis, time_i, time_j, relayout_send, relayout_recv, restyle_send, restyle_recv, _, store_send, store_recv, fig_send, fig_recv):
-        if not callback_context.triggered:
+        if not callback_context.triggered or (callback_context.triggered[0]["prop_id"] == "time_j.value" and time_i == 0):
             raise PreventUpdate
         input_id = callback_context.triggered[0]["prop_id"].split(".")[0]
         # prevent zooming outside of the data range
