@@ -2192,6 +2192,8 @@ def start_picosnitch():
             def delpid():
                 os.remove("/run/picosnitch.pid")
             atexit.register(delpid)
+            if sys.executable.startswith("/nix/"):
+                os.makedirs("/run/picosnitch", exist_ok=True)
             with open("/run/picosnitch.pid", "w") as f:
                 f.write(str(os.getpid()) + "\n")
             print("starting picosnitch in simple mode")
