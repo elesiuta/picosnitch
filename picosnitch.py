@@ -2093,7 +2093,7 @@ def start_picosnitch():
         if sys.argv[1] == "help":
             print(readme)
             return 0
-        elif sys.argv[1] in ["start", "stop", "restart", "start-no-daemon"]:
+        elif sys.argv[1] in ["start", "stop", "restart", "start-no-daemon", "systemd"]:
             if os.getuid() != 0:
                 args = ["sudo", "-E", sys.executable, os.path.abspath(__file__), sys.argv[1]]
                 os.execvp("sudo", args)
