@@ -3,6 +3,7 @@
 # [Picosnitch](https://elesiuta.github.io/picosnitch/)
 - 🔔 Receive notifications whenever a new program connects to the network, or when it's modified
 - 📈 Monitors your bandwidth, breaking down traffic by executable, hash, parent, domain, port, or user over time
+- 🌍 Web and terminal interfaces with GeoIP lookups for each connection ([IP Geolocation by DB-IP](https://db-ip.com))
 - 🛡️ Can optionally check hashes or executables using [VirusTotal](https://www.virustotal.com)
 - 🚀 Executable hashes are cached based on device + inode for improved performance, and works with applications running inside containers
 - 🕵️ Uses [BPF](https://ebpf.io/) for [accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and [fanotify](https://man7.org/linux/man-pages/man7/fanotify.7.html) to watch executables for modification
@@ -138,6 +139,7 @@
   # this feature is experimental but should work fairly well, errors should be expected as
   # picosnitch is unable to open file descriptors for some extremely short-lived processes
   # if you just want logs (no hashes) to trace process hierarchy, see execsnoop or forkstat
+  "GeoIP lookup": true, # GeoIP lookup of IP addresses in user interface (terminal and web)
   "Log addresses": true, # Log remote addresses for each connection
   "Log commands": true, # Log command line args for each executable
   "Log ignore": [], # List of hashes (str), domains (str), IP subnets (str), or ports (int)
