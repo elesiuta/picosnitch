@@ -1276,6 +1276,39 @@ def main_process(snitch: dict):
 
 
 ### user interface
+def ui_geolocation():
+    """init a geoip2 reader and return it (along with updating geoip db), or None if not available"""
+    try:
+        import geoip2.database
+        # download latest database if out of date or does not exist, then create geoip_reader
+        geoip_mmdb = os.path.join(BASE_PATH, "dbip-country-lite.mmdb")
+        geoip_url = datetime.datetime.now().strftime("https://download.db-ip.com/free/dbip-country-lite-%Y-%m.mmdb.gz")
+        if not os.path.isfile(geoip_mmdb) or datetime.datetime.fromtimestamp(os.path.getmtime(geoip_mmdb)).strftime("%Y%m") != datetime.datetime.now().strftime("%Y%m"):
+            try:
+                import urllib.request
+                try:
+                    request = urllib.request.Request(geoip_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(request) as response, open(geoip_mmdb + ".gz", "wb") as f:
+                        f.write(response.read())
+                except Exception:
+                    # try previous month if current month is not available
+                    geoip_url = (datetime.datetime.now() - datetime.timedelta(days=30)).strftime("https://download.db-ip.com/free/dbip-country-lite-%Y-%m.mmdb.gz")
+                    request = urllib.request.Request(geoip_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(request) as response, open(geoip_mmdb + ".gz", "wb") as f:
+                        f.write(response.read())
+                import gzip
+                with gzip.open(geoip_mmdb + ".gz", "rb") as f_in, open(geoip_mmdb, "wb") as f_out:
+                    f_out.write(f_in.read())
+                os.remove(geoip_mmdb + ".gz")
+            except Exception:
+                if not os.path.isfile(geoip_mmdb):
+                    raise Exception("Could not download GeoIP database")
+                print("Could not update GeoIP database, using old version", file=sys.stderr)
+        return geoip2.database.Reader(geoip_mmdb)
+    except Exception:
+        return None
+
+
 def ui_loop(stdscr: curses.window, splash: str) -> int:
     """for curses wrapper"""
     # thread for querying database
@@ -1338,6 +1371,22 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
         "year": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1, month=1),
     })
     time_round_func = lambda resolution_index, time: time_round_functions[time_round_units[resolution_index]](time)
+    # geolocation lookup
+    geoip_reader = ui_geolocation()
+    def get_geoip(ip: str) -> str:
+        try:
+            country_code = geoip_reader.country(ip).country.iso_code
+            base = 0x1f1e6 - ord("A")
+            country_flag = chr(base + ord(country_code[0].upper())) + chr(base + ord(country_code[1].upper()))
+            return f"{country_flag} {ip}"
+        except Exception:
+            try:
+                if ipaddress.ip_address(ip).is_private:
+                    return f"{chr(0x1f3e0)} {ip}"  # home emoji
+                else:
+                    return f"{chr(0x1f310)} {ip}"  # globe emoji
+            except Exception:
+                return f"{chr(0x2753)} {ip}"  # question emoji
     # screens from queries (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer)
     pri_i = 0
     p_screens = ["Executables", "Process Names", "Commands", "SHA256", "Entry Time", "Domains", "Destination IPs", "Destination Ports", "Users", "Parent Executables", "Parent Names", "Parent Commands", "Parent SHA256"]
@@ -1481,7 +1530,7 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
             else:
                 stdscr.attrset(curses.color_pair(0))
             if first_line <= line - offset < curses.LINES - 1:
-                # special cases (cmdline null chars, uid, sha256 and vt results)
+                # special cases (cmdline null chars, uid, ip, sha256 and vt results)
                 if type(name) == str:
                     name = name.replace("\0", "")
                 elif (not is_subquery and p_col[pri_i] == "uid") or (is_subquery and s_col[sec_i] == "uid"):
@@ -1489,6 +1538,8 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
                         name = f"{pwd.getpwuid(name).pw_name} ({name})"
                     except Exception:
                         name = f"??? ({name})"
+                if (not is_subquery and p_col[pri_i] == "ip") or (is_subquery and s_col[sec_i] == "ip"):
+                    name = get_geoip(name)
                 if (not is_subquery and p_col[pri_i].endswith("sha256")) or (is_subquery and s_col[sec_i].endswith("sha256")):
                     name = f"{name}{vt_status[name]}"
                 value = f"{conns:>10} {round_bytes(send, byte_units):>10.10} {round_bytes(recv, byte_units):>10.10}"
@@ -1670,6 +1721,7 @@ def ui_dash():
         "year": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1, month=1),
     })
     time_round_func = lambda resolution_index, time: time_round_functions[time_round_units[resolution_index]](time)
+    geoip_reader = ui_geolocation()
     def get_user(uid) -> str:
         try:
             return f"{pwd.getpwuid(uid).pw_name} ({uid})"
@@ -1685,35 +1737,6 @@ def ui_dash():
             return f"{dim} ({round(size/10**3, 2)!s} kB)"
         else:
             return f"{dim} ({size!s} B)"
-    try:
-        import geoip2.database
-        # download latest database if out of date or does not exist, then create geoip_reader
-        geoip_mmdb = os.path.join(BASE_PATH, "dbip-country-lite.mmdb")
-        geoip_url = datetime.datetime.now().strftime("https://download.db-ip.com/free/dbip-country-lite-%Y-%m.mmdb.gz")
-        if not os.path.isfile(geoip_mmdb) or datetime.datetime.fromtimestamp(os.path.getmtime(geoip_mmdb)).strftime("%Y%m") != datetime.datetime.now().strftime("%Y%m"):
-            try:
-                import urllib.request
-                try:
-                    request = urllib.request.Request(geoip_url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(request) as response, open(geoip_mmdb + ".gz", "wb") as f:
-                        f.write(response.read())
-                except Exception:
-                    # try previous month if current month is not available
-                    geoip_url = (datetime.datetime.now() - datetime.timedelta(days=30)).strftime("https://download.db-ip.com/free/dbip-country-lite-%Y-%m.mmdb.gz")
-                    request = urllib.request.Request(geoip_url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(request) as response, open(geoip_mmdb + ".gz", "wb") as f:
-                        f.write(response.read())
-                import gzip
-                with gzip.open(geoip_mmdb + ".gz", "rb") as f_in, open(geoip_mmdb, "wb") as f_out:
-                    f_out.write(f_in.read())
-                os.remove(geoip_mmdb + ".gz")
-            except Exception:
-                if not os.path.isfile(geoip_mmdb):
-                    raise Exception("Could not download GeoIP database")
-                print("Could not update GeoIP database, using old version", file=sys.stderr)
-        geoip_reader = geoip2.database.Reader(geoip_mmdb)
-    except Exception:
-        geoip_reader = None
     def get_geoip(ip: str) -> str:
         try:
             country_code = geoip_reader.country(ip).country.iso_code
