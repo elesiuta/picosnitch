@@ -346,6 +346,7 @@ def read_snitch() -> dict:
             "Dash theme": "",
             "Desktop notifications": True,
             "Every exe (not just conns)": False,
+            "GeoIP lookup": True,
             "Log addresses": True,
             "Log commands": True,
             "Log ignore": [],
@@ -1276,8 +1277,11 @@ def main_process(snitch: dict):
 
 
 ### user interface
-def ui_geolocation():
+def ui_geoip():
     """init a geoip2 reader and return it (along with updating geoip db), or None if not available"""
+    with open(os.path.join(BASE_PATH, "config.json"), "r", encoding="utf-8", errors="surrogateescape") as json_file:
+        if not json.load(json_file)["GeoIP lookup"]:
+            return None
     try:
         import geoip2.database
         # download latest database if out of date or does not exist, then create geoip_reader
@@ -1371,8 +1375,8 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
         "year": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1, month=1),
     })
     time_round_func = lambda resolution_index, time: time_round_functions[time_round_units[resolution_index]](time)
-    # geolocation lookup
-    geoip_reader = ui_geolocation()
+    # geoip lookup
+    geoip_reader = ui_geoip()
     def get_geoip(ip: str) -> str:
         try:
             country_code = geoip_reader.country(ip).country.iso_code
@@ -1721,7 +1725,7 @@ def ui_dash():
         "year": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1, month=1),
     })
     time_round_func = lambda resolution_index, time: time_round_functions[time_round_units[resolution_index]](time)
-    geoip_reader = ui_geolocation()
+    geoip_reader = ui_geoip()
     def get_user(uid) -> str:
         try:
             return f"{pwd.getpwuid(uid).pw_name} ({uid})"
