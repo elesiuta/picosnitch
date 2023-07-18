@@ -1381,16 +1381,16 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
         try:
             country_code = geoip_reader.country(ip).country.iso_code
             base = 0x1f1e6 - ord("A")
-            country_flag = chr(base + ord(country_code[0].upper())) + chr(base + ord(country_code[1].upper()))
-            return f"{country_flag} {ip}"
+            # country_flag = chr(base + ord(country_code[0].upper())) + chr(base + ord(country_code[1].upper()))  # flags aren't supported in most fonts and terminals, disable for now
+            return f"{country_code} {ip}"
         except Exception:
             try:
                 if ipaddress.ip_address(ip).is_private:
-                    return f"{chr(0x1f3e0)} {ip}"  # home emoji
+                    return f"{chr(0x1f3e0)}{chr(0x200b)} {ip}"  # home emoji + ZWSP so line length is counted correctly
                 else:
-                    return f"{chr(0x1f310)} {ip}"  # globe emoji
+                    return f"{chr(0x1f310)}{chr(0x200b)} {ip}"  # globe emoji + ZWSP so line length is counted correctly
             except Exception:
-                return f"{chr(0x2753)} {ip}"  # question emoji
+                return f"{chr(0x2753)}{chr(0x200b)} {ip}"  # question emoji + ZWSP so line length is counted correctly
     # screens from queries (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer)
     pri_i = 0
     p_screens = ["Executables", "Process Names", "Commands", "SHA256", "Entry Time", "Domains", "Destination IPs", "Destination Ports", "Users", "Parent Executables", "Parent Names", "Parent Commands", "Parent SHA256"]
