@@ -21,7 +21,7 @@ setuptools.setup(
         "enable_geoip": ["geoip2"],
         "enable_notifications": ["dbus-python"],
         "enable_sql": ["psycopg", "pymysql"],
-        "enable_themes": ["dash-bootstrap-components", "dash-bootstrap-templates"]
+        "enable_themes": ["dash-bootstrap-components", "dash-bootstrap-templates"],
         "enable_virustotal": ["requests"],
         "full": ["dash", "pandas", "plotly", "geoip2", "psycopg", "pymysql", "dash-bootstrap-components", "dash-bootstrap-templates", "requests"]
     },
