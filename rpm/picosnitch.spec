@@ -37,6 +37,8 @@ BuildRequires:  util-linux-core
 %description
 Monitors your bandwidth, breaking down traffic by executable, hash, parent, domain, port, or user over time
 
+%global debug_package %{nil}
+
 %prep
 %setup -c -q -n %{name}
 
