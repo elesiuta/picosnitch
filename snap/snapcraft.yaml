@@ -41,7 +41,7 @@ parts:
       - '-DCMAKE_INSTALL_PREFIX=/usr'
       - '-DPYTHON_CMD=/usr/bin/python3'
       - '-DCMAKE_VERBOSE_MAKEFILE=ON'
-    source: https://github.com/iovisor/bcc/releases/download/v0.27.0/bcc-src-with-submodule.tar.gz
+    source: https://github.com/iovisor/bcc/releases/download/v0.28.0/bcc-src-with-submodule.tar.gz
     build-packages:
       - bison
       - build-essential
