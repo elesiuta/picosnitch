@@ -127,6 +127,11 @@ digraph G {
         subgraph cluster_picosnitch {
 
             graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
+            picosnitch__ui_geoip [label="ui_geoip", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
+        }
+        subgraph cluster_picosnitch {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
             picosnitch__ui_init [label="ui_init", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
         }
         subgraph cluster_picosnitch {
@@ -321,7 +326,17 @@ digraph G {
             subgraph cluster_picosnitch__ui_dash {
 
                 graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
+                picosnitch__ui_dash__display_time_range [label="display_time_range", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            }
+            subgraph cluster_picosnitch__ui_dash {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
                 picosnitch__ui_dash__exit [label="exit", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            }
+            subgraph cluster_picosnitch__ui_dash {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
+                picosnitch__ui_dash__get_geoip [label="get_geoip", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             }
             subgraph cluster_picosnitch__ui_dash {
 
@@ -346,7 +361,7 @@ digraph G {
             subgraph cluster_picosnitch__ui_dash {
 
                 graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
-                picosnitch__ui_dash__trim_cmdline [label="trim_cmdline", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+                picosnitch__ui_dash__trim_label [label="trim_label", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             }
             subgraph cluster_picosnitch__ui_dash {
 
@@ -356,7 +371,22 @@ digraph G {
             subgraph cluster_picosnitch__ui_dash {
 
                 graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
-                picosnitch__ui_dash__update_time_slider [label="update_time_slider", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+                picosnitch__ui_dash__update_time_slider_marks [label="update_time_slider_marks", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            }
+            subgraph cluster_picosnitch__ui_dash {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
+                picosnitch__ui_dash__update_time_slider_pos [label="update_time_slider_pos", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            }
+            subgraph cluster_picosnitch__ui_loop {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_loop"];
+                picosnitch__ui_loop__fetch_query_results [label="fetch_query_results", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            }
+            subgraph cluster_picosnitch__ui_loop {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_loop"];
+                picosnitch__ui_loop__get_geoip [label="get_geoip", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             }
             subgraph cluster_picosnitch__virustotal_subprocess {
 
@@ -450,10 +480,16 @@ digraph G {
         picosnitch__start_picosnitch__PicoDaemon -> picosnitch__Daemon [style="solid", color="#000000"];
         picosnitch__start_picosnitch__PicoDaemon__run -> picosnitch__main [style="solid", color="#000000"];
         picosnitch__ui_dash -> picosnitch__ui_dash__serve_layout [style="solid", color="#000000"];
+        picosnitch__ui_dash -> picosnitch__ui_geoip [style="solid", color="#000000"];
+        picosnitch__ui_dash__update -> picosnitch__ui_dash__get_geoip [style="solid", color="#000000"];
         picosnitch__ui_dash__update -> picosnitch__ui_dash__get_totals [style="solid", color="#000000"];
         picosnitch__ui_dash__update -> picosnitch__ui_dash__get_user [style="solid", color="#000000"];
-        picosnitch__ui_dash__update -> picosnitch__ui_dash__trim_cmdline [style="solid", color="#000000"];
+        picosnitch__ui_dash__update -> picosnitch__ui_dash__trim_label [style="solid", color="#000000"];
+        picosnitch__ui_dash__update -> picosnitch__ui_geoip [style="solid", color="#000000"];
         picosnitch__ui_init -> picosnitch__ui_loop [style="solid", color="#000000"];
+        picosnitch__ui_loop -> picosnitch__ui_geoip [style="solid", color="#000000"];
+        picosnitch__ui_loop -> picosnitch__ui_loop__fetch_query_results [style="solid", color="#000000"];
+        picosnitch__ui_loop -> picosnitch__ui_loop__get_geoip [style="solid", color="#000000"];
         picosnitch__virustotal_subprocess -> picosnitch__get_fstat [style="solid", color="#000000"];
         picosnitch__virustotal_subprocess -> picosnitch__virustotal_subprocess__get_analysis [style="solid", color="#000000"];
         picosnitch__write_snitch -> picosnitch__NotificationManager__toast [style="solid", color="#000000"];
