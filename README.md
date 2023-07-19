@@ -1,4 +1,7 @@
-![screenshot.png](https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/screenshot.png)
+<p align="center">
+<img src="https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/screenshot.png" width="90%" height="90%" class="center">
+<img src="https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/web_ui.gif" width="45%" height="45%" class="center"><img src="https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/terminal_ui.gif" width="45%" height="45%" class="center">
+</p>
 
 # [Picosnitch](https://elesiuta.github.io/picosnitch/)
 - 🔔 Receive notifications whenever a new program connects to the network, or when it's modified
