@@ -678,7 +678,10 @@ def primary_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -
 ### processes
 def primary_subprocess(snitch, snitch_pipes, secondary_pipe, q_error, q_in, _q_out):
     """first to receive connection data from monitor, more responsive than secondary, creates notifications and writes exe.log, error.log, and record.json"""
-    os.nice(-20)
+    try:
+        os.nice(-20)
+    except Exception:
+        pass
     # init variables for loop
     parent_process = multiprocessing.parent_process()
     snitch_record = pickle.dumps([snitch["Executables"], snitch["Names"], snitch["Parent Executables"], snitch["Parent Names"], snitch["SHA256"]])
@@ -939,7 +942,10 @@ def rfuse_subprocess(config: dict, q_error, q_in, q_out):
 def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe for primary_subprocess"""
     # initialization
-    os.nice(-20)
+    try:
+        os.nice(-20)
+    except Exception:
+        pass
     import bcc
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
@@ -1221,6 +1227,7 @@ def main_process(snitch: dict):
     _FAN_UNLIMITED_MARKS = 0x20
     flags = _FAN_CLASS_CONTENT if FD_CACHE < 8192 else _FAN_CLASS_CONTENT | _FAN_UNLIMITED_MARKS
     fan_fd = libc.fanotify_init(flags, os.O_RDONLY)
+    assert fan_fd >= 0, "fanotify_init() failed"
     # start subprocesses
     snitch_pipes = [multiprocessing.Pipe(duplex=False) for i in range(8)]
     snitch_recv_pipes, snitch_send_pipes = zip(*snitch_pipes)

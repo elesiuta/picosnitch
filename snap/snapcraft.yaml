@@ -73,17 +73,28 @@ plugs:
     interface: personal-files
     write:
       - $HOME/.config/picosnitch
+  run-picosnitch:
+    interface: system-files
+    write:
+      - /run/picosnitch.pid
+  shared-memory:
+    interface: shared-memory
+    private: true
 
 apps:
   picosnitch:
     command: bin/picosnitch
     plugs:
-    - dot-config-picosnitch
-    - network
-    - network-bind
-    - mount-observe
-    - system-observe
-    - system-trace
+      - dot-config-picosnitch
+      - run-picosnitch
+      - shared-memory
+      - block-devices
+      - network
+      - network-bind
+      - network-observe
+      - mount-observe
+      - system-observe
+      - system-trace
 
   daemon:
     command: "bin/picosnitch start-no-daemon"
