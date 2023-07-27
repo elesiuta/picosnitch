@@ -49,9 +49,6 @@
 - `sudo zypper addrepo https://download.opensuse.org/repositories/home:elesiuta/openSUSE_Tumbleweed/home:elesiuta.repo`
 - `sudo zypper refresh`
 - `sudo zypper install picosnitch`
-- optionally install [dash](https://pypi.org/project/dash/) with [pip](https://pip.pypa.io/) or [pipx](https://pypa.github.io/pipx/)
-  - `sudo zypper install pipx`
-  - `pipx install dash`
 </details>
 
 ### [Copr](https://copr.fedorainfracloud.org/coprs/elesiuta/picosnitch/) for Fedora, Mageia, Mandriva, and derivatives <img src="https://cdn.simpleicons.org/fedora" width="16" height="16">
