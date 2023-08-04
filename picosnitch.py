@@ -1463,7 +1463,7 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
             current_screen = []
             # kill old thread with flag, may still be executing current query so don't wait for join, just let gc handle it
             kill_thread_query.set()
-            while q_query_results.qsize() > 0:
+            while not q_query_results.empty():
                 _ = q_query_results.get_nowait()
             # start new thread, reinitialize queue and kill flag
             q_query_results = queue.Queue()
@@ -1494,7 +1494,7 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
             except Exception:
                 pass
             # check if any query results are ready
-            if q_query_results.qsize() > 0:
+            if not q_query_results.empty():
                 current_screen += q_query_results.get_nowait()
             sum_send = sum(b for _, _, b, _ in current_screen)
             sum_recv = sum(b for _, _, _, b in current_screen)
