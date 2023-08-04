@@ -696,6 +696,10 @@ def primary_subprocess(snitch, snitch_pipes, secondary_pipe, q_error, q_in, _q_o
         while not q_error.empty():
             error = q_error.get()
             snitch["Error Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
+            # shorten some common error messages before displaying them and after writing them to error.log
+            error = error.replace("FD Read Error and PID Read Error and FUSE Read Error for", "Read Error for")
+            if len(error) > 50:
+                error = error[:47] + "..."
             NotificationManager().toast(error, file=sys.stderr)
         write_snitch(snitch)
         for snitch_pipe in snitch_pipes:
@@ -732,6 +736,10 @@ def primary_subprocess(snitch, snitch_pipes, secondary_pipe, q_error, q_in, _q_o
             while not q_error.empty():
                 error = q_error.get()
                 snitch["Error Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
+                # shorten some common error messages before displaying them and after writing them to error.log
+                error = error.replace("FD Read Error and PID Read Error and FUSE Read Error for", "Read Error for")
+                if len(error) > 50:
+                    error = error[:47] + "..."
                 NotificationManager().toast(error, file=sys.stderr)
             # get list of new processes and connections since last update
             listen.clear()
