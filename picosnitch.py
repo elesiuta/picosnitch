@@ -1084,7 +1084,6 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
         raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
-        # print(f"sendv4 event: {event.comm.decode()} {event.bytes} {event.lport} {event.dport} {laddr} {raddr}")
         snitch_pipe_0.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": event.bytes, "recv": 0, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
@@ -1094,7 +1093,6 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         laddr = socket.inet_ntop(socket.AF_INET6, event.saddr)
         raddr = socket.inet_ntop(socket.AF_INET6, event.daddr)
-        # print(f"sendv6 event: {event.comm.decode()} {event.bytes} {event.lport} {event.dport} {laddr} {raddr}")
         snitch_pipe_1.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": event.bytes, "recv": 0, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
@@ -1104,7 +1102,6 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
         raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
-        # print(f"recvv4 event: {event.comm.decode()} {event.bytes} {event.lport} {event.dport} {laddr} {raddr}")
         snitch_pipe_2.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": event.bytes, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
@@ -1114,7 +1111,6 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
         laddr = socket.inet_ntop(socket.AF_INET6, event.saddr)
         raddr = socket.inet_ntop(socket.AF_INET6, event.daddr)
-        # print(f"recvv6 event: {event.comm.decode()} {event.bytes} {event.lport} {event.dport} {laddr} {raddr}")
         snitch_pipe_3.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": event.bytes, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
@@ -1122,14 +1118,12 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         event = b["exec_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, -1)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
-        # print(f"exec event: {event.comm.decode()} {cmd} {pexe} {pcmd}")
         if EVERY_EXE:
             snitch_pipe_4.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                                  "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                                  "uid": event.uid, "send": 0, "recv": 0, "lport": -1, "rport": -1, "laddr": "", "raddr": "", "domain": ""}))
     def queue_dns_event(cpu, data, size):
         event = b["dns_events"].event(data)
-        # print(f"dns event: {event.host.decode()}")
         if event.daddr:
             ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
         else:
