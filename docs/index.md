@@ -121,13 +121,12 @@
 
 ```yaml
 {
-  "Bandwidth monitor": true, # Log traffic per connection since last db write
   "DB retention (days)": 30, # How many days to keep connection logs in snitch.db
   "DB sql log": true, # Write connection logs to snitch.db (SQLite)
   "DB sql server": {}, # Write connection logs to a MariaDB, MySQL, or PostgreSQL server
   "DB text log": false, # Write connection logs to conn.log
-  "DB write limit (seconds)": 10, # Minimum time between writing connection logs
-  # increasing it decreases disk writes by grouping connections into larger time windows
+  "DB write limit (seconds)": 10, # Minimum time between connection log entries
+  # increasing it decreases disk writes by grouping traffic into larger time windows
   # reducing time precision, decreasing database size, and increasing hash latency
   "Dash scroll zoom": true, # Enable scroll zooming on plots
   "Dash theme": "", # Select a theme name from https://bootswatch.com/
@@ -148,7 +147,7 @@
   # the process name, executable, and hash will still be recorded in record.json
   "Perf ring buffer (pages)": 256, # Power of two number of pages for BPF program
   # only change this if it is giving you errors (e.g. missed events)
-  # picosnitch opens a perf buffer for each event type, so this is multiplied by up to 21
+  # picosnitch opens a perf buffer for each event type, so this is multiplied by up to 18
   "Set RLIMIT_NOFILE": null, # Set the maximum number of open file descriptors (int)
   # it is used for caching process executables and hashes (typical system default is 1024)
   # this is good enough for most people since caching is based on executable device + inode
@@ -176,7 +175,7 @@
 - Enable `DB text log` to write the full connection log to `~/.config/picosnitch/conn.log`
   - this may be useful for watching with another program
   - it contains the following fields, separated by commas (commas, newlines, and null characters are removed from values)
-  - `executable,name,cmdline,sha256,time,domain,ip,port,uid,parent_exe,parent_name,parent_cmdline,parent_sha256,conns,sent,received`
+  - `entry time, sent bytes, received bytes, executable path, process name, cmdline, sha256, parent executable, parent name, parent cmdline, parent sha256, user id, local port, remote port, local address, remote address, domain`
 - The error log is stored in `~/.config/picosnitch/error.log`
   - errors will also trigger a notification and are usually caused by far too many or extremely short-lived processes/connections, or suspending your system while a new executable is being hashed
   - while it is very unlikely for processes/connections to be missed (unless `Every exe (not just conns)` is enabled), picosnitch was designed such that it should still detect this and log an error giving you some indication of what happened
