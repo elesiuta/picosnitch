@@ -7,6 +7,11 @@ digraph G {
         subgraph cluster_picosnitch {
 
             graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
+            picosnitch__BpfEvent [label="BpfEvent", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
+        }
+        subgraph cluster_picosnitch {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
             picosnitch__Daemon [label="Daemon", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
         }
         subgraph cluster_picosnitch {
@@ -261,22 +266,7 @@ digraph G {
             subgraph cluster_picosnitch__monitor_subprocess {
 
                 graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
-                picosnitch__monitor_subprocess__queue_ipv4_event [label="queue_ipv4_event", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__monitor_subprocess {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
-                picosnitch__monitor_subprocess__queue_ipv6_event [label="queue_ipv6_event", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__monitor_subprocess {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
                 picosnitch__monitor_subprocess__queue_lost [label="queue_lost", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__monitor_subprocess {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
-                picosnitch__monitor_subprocess__queue_other_event [label="queue_other_event", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             }
             subgraph cluster_picosnitch__monitor_subprocess {
 
@@ -430,10 +420,7 @@ digraph G {
         picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
         picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_dns_event [style="solid", color="#000000"];
         picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_exec_event [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_ipv4_event [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_ipv6_event [style="solid", color="#000000"];
         picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_lost [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_other_event [style="solid", color="#000000"];
         picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_recvv4_event [style="solid", color="#000000"];
         picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_recvv6_event [style="solid", color="#000000"];
         picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_sendv4_event [style="solid", color="#000000"];
@@ -441,9 +428,6 @@ digraph G {
         picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess_initial_poll [style="solid", color="#000000"];
         picosnitch__monitor_subprocess__get_fd -> picosnitch__get_fstat [style="solid", color="#000000"];
         picosnitch__monitor_subprocess__queue_exec_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess__queue_ipv4_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess__queue_ipv6_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess__queue_other_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
         picosnitch__monitor_subprocess__queue_recvv4_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
         picosnitch__monitor_subprocess__queue_recvv6_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
         picosnitch__monitor_subprocess__queue_sendv4_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
