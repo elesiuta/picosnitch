@@ -318,6 +318,32 @@ class NotificationManager:
             self.notifications_ready = False
 
 
+class BpfEvent(typing.TypedDict):
+    """Process and connection data for each event captured by the BPF program, and sent to the main & secondary processes"""
+    pid: int
+    name: str
+    fd: int
+    dev: int
+    ino: int
+    exe: str
+    cmdline: str
+    ppid: int
+    pname: str
+    pfd: int
+    pdev: int
+    pino: int
+    pexe: str
+    pcmdline: str
+    uid: int
+    send: int
+    recv: int
+    lport: int
+    rport: int
+    laddr: str
+    raddr: str
+    domain: str
+
+
 class FanotifyEventMetadata(ctypes.Structure):
     """https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/uapi/linux/fanotify.h"""
     _fields_ = [
@@ -536,8 +562,10 @@ def monitor_subprocess_initial_poll() -> list:
             proc = psutil.Process(pid).as_dict(attrs=["name", "exe", "pid", "ppid", "uids"], ad_value="")
             proc["uid"] = proc["uids"][0]
             proc["pname"] = psutil.Process(proc["ppid"]).name()
-            proc["ip"] = ""
-            proc["port"] = -1
+            proc["raddr"] = ""
+            proc["rport"] = -1
+            proc["laddr"] = ""
+            proc["lport"] = -1
             initial_processes.append(proc)
         except Exception:
             pass
@@ -546,8 +574,10 @@ def monitor_subprocess_initial_poll() -> list:
             proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "pid", "ppid", "uids"], ad_value="")
             proc["uid"] = proc["uids"][0]
             proc["pname"] = psutil.Process(proc["ppid"]).name()
-            proc["ip"] = conn.raddr.ip
-            proc["port"] = conn.raddr.port
+            proc["raddr"] = conn.raddr.ip
+            proc["rport"] = conn.raddr.port
+            proc["laddr"] = conn.laddr.ip
+            proc["lport"] = conn.laddr.port
             initial_processes.append(proc)
         except Exception:
             pass
@@ -601,11 +631,12 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: 
     event_counter = collections.defaultdict(int)
     traffic_counter = collections.defaultdict(int)
     transaction = set()
-    for proc in new_processes:
-        proc = pickle.loads(proc)
+    for proc_pickle in new_processes:
+        proc: BpfEvent = pickle.loads(proc_pickle)
         if type(proc) != dict:
             q_error.put("sync error between secondary and primary, received '%s' in middle of transfer" % str(proc))
             continue
+        # get the sha256 of the process executable and its parent
         sha256 = secondary_subprocess_sha_wrapper(snitch, fan_mod_cnt, proc, p_rfuse, q_vt, q_out, q_error)
         pproc = {"pid": proc["ppid"], "name": proc["pname"], "exe": proc["pexe"], "fd": proc["pfd"], "dev": proc["pdev"], "ino": proc["pino"]}
         psha256 = secondary_subprocess_sha_wrapper(snitch, fan_mod_cnt, pproc, p_rfuse, q_vt, q_out, q_error)
@@ -619,13 +650,14 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: 
         # reverse dns lookup or omit with IP from logs
         if snitch["Config"]["Log addresses"]:
             if not proc["domain"]:
-                proc["domain"] = reverse_dns_lookup(proc["ip"])
+                proc["domain"] = reverse_dns_lookup(proc["raddr"])
         else:
-            proc["domain"], proc["ip"] = "", ""
+            proc["domain"], proc["raddr"] = "", ""
         # omit entry from logs
         ignored = False
         for ignore in snitch["Config"]["Log ignore"]:
-            if ((proc["port"] == ignore) or
+            if ((proc["rport"] == ignore) or
+                (proc["lport"] == ignore) or
                 (sha256 == ignore) or
                 (type(ignore) == str and proc["domain"].startswith(ignore))
                ):
@@ -633,25 +665,28 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: 
                 break
         if ignored:
             continue
-        if snitch["Config"]["Log ignore IP"] and proc["ip"]:
-            daddr = ipaddress.ip_address(proc["ip"])
-            if (any(daddr in network for network in snitch["Config"]["Log ignore IP"])):
+        if snitch["Config"]["Log ignore IP"] and proc["raddr"]:
+            raddr = ipaddress.ip_address(proc["raddr"])
+            if (any(raddr in network for network in snitch["Config"]["Log ignore IP"])):
+                continue
+            laddr = ipaddress.ip_address(proc["laddr"])
+            if (any(laddr in network for network in snitch["Config"]["Log ignore IP"])):
                 continue
         # create sql entry
-        event = (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, proc["domain"], proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], proc["pcmdline"], psha256)
+        event = (proc["exe"], proc["name"], proc["cmdline"], sha256, proc["pexe"], proc["pname"], proc["pcmdline"], psha256, proc["uid"], proc["lport"], proc["rport"], proc["laddr"], proc["raddr"], proc["domain"])
         if not (proc["send"] or proc["recv"]):
             event_counter[str(event)] += 1
         traffic_counter["send " + str(event)] += proc["send"]
         traffic_counter["recv " + str(event)] += proc["recv"]
         transaction.add(event)
-    return [(*event, event_counter[str(event)], traffic_counter["send " + str(event)], traffic_counter["recv " + str(event)]) for event in transaction]
+    return [(datetime_now, event_counter[str(event)], traffic_counter["send " + str(event)], traffic_counter["recv " + str(event)], *event) for event in transaction]
 
 
 def primary_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -> None:
     """iterate over the list of process/connection data to update the snitch dictionary and create notifications on new entries"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
-    for proc in new_processes:
-        proc = pickle.loads(proc)
+    for proc_pickle in new_processes:
+        proc: BpfEvent = pickle.loads(proc_pickle)
         proc_name, proc_exe, snitch_names, snitch_executables, parent = proc["name"], proc["exe"], snitch["Names"], snitch["Executables"], ""
         for i in range(2):
             notification = []
@@ -757,8 +792,8 @@ def primary_subprocess(snitch, snitch_pipes, secondary_pipe, q_error, q_in, _q_o
                 msg: dict = pickle.loads(q_in.get())
                 if msg["type"] == "ready":
                     secondary_pipe.send_bytes(pickle.dumps(len(processes_to_send)))
-                    for proc in processes_to_send:
-                        secondary_pipe.send_bytes(proc)
+                    for proc_pickle in processes_to_send:
+                        secondary_pipe.send_bytes(proc_pickle)
                     secondary_pipe.send_bytes(pickle.dumps("done"))
                     processes_to_send = []
                     break
@@ -802,16 +837,16 @@ def secondary_subprocess(snitch, fan_fd, p_rfuse: ProcessManager, p_virustotal: 
     # maintain a separate copy of the snitch dictionary here and coordinate with the primary_subprocess (sha256 and vt_results)
     get_vt_results(snitch, p_virustotal.q_in, q_primary_in, True)
     # init sql
-    # (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, pname text, pcmdline text, psha256 text, conns integer, send integer, recv integer)
-    # (proc["exe"], proc["name"], proc["cmdline"], sha256, datetime_now, proc["domain"], proc["ip"], proc["port"], proc["uid"], proc["pexe"], proc["pname"], proc["pcmdline"], psha256, event_counter[str(event)], sent bytes, received bytes)
-    sqlite_query = ''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '''
+    # (contime text, conns integer, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text)
+    # (datetime_now, event_counter[str(event)], sent bytes, received bytes, *(proc["exe"], proc["name"], proc["cmdline"], sha256, proc["pexe"], proc["pname"], proc["pcmdline"], psha256, proc["uid"], proc["lport"], proc["rport"], proc["laddr"], proc["raddr"], proc["domain"]))
+    sqlite_query = ''' INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '''
     file_path = os.path.join(BASE_PATH, "snitch.db")
     text_path = os.path.join(BASE_PATH, "conn.log")
     if snitch["Config"]["DB sql log"]:
         con = sqlite3.connect(file_path)
         cur = con.cursor()
         cur.execute(''' PRAGMA user_version ''')
-        assert cur.fetchone()[0] == 2, f"Incorrect database version of snitch.db for picosnitch v{VERSION}"
+        assert cur.fetchone()[0] == 3, f"Incorrect database version of snitch.db for picosnitch v{VERSION}"
         cur.execute(''' DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") ''' % int(snitch["Config"]["DB retention (days)"]))
         con.commit()
         con.close()
@@ -1018,12 +1053,12 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         try:
             stat = os.stat(f"/proc/{proc['pid']}/exe")
             pstat = os.stat(f"/proc/{proc['ppid']}/exe")
-            st_dev, st_ino, pid, fd, exe, cmd = get_fd(stat.st_dev, stat.st_ino, proc["pid"], proc["port"])
+            st_dev, st_ino, pid, fd, exe, cmd = get_fd(stat.st_dev, stat.st_ino, proc["pid"], proc["rport"])
             pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(pstat.st_dev, pstat.st_ino, proc["ppid"], -1)
-            if EVERY_EXE or proc["port"] != -1:
+            if EVERY_EXE or proc["rport"] != -1:
                 snitch_pipe_0.send_bytes(pickle.dumps({"pid": pid, "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                                      "ppid": ppid, "pname": proc["pname"], "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                                     "uid": proc["uid"], "send": 0, "recv": 0, "port": proc["port"], "ip": proc["ip"], "domain": domain_dict[proc["ip"]]}))
+                                                     "uid": proc["uid"], "send": 0, "recv": 0, "lport": proc["lport"], "rport": proc["rport"], "laddr": proc["laddr"], "raddr": proc["raddr"], "domain": domain_dict[proc["raddr"]]}))
         except Exception:
             pass
     # run bpf program
@@ -1040,6 +1075,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
     try:
         b = BPF(text=bpf_text)
         b.attach_kprobe(event="security_socket_connect", fn_name="security_socket_connect_entry")
+        b.attach_kretprobe(event="security_socket_connect", fn_name="security_socket_connect_return")
         b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
     except Exception as e:
         q_error.put("Init BPF %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
@@ -1060,67 +1096,82 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         event = b["ipv4_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
-        ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
+        laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
+        raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
+        print(f"ipv4 {event.comm.decode()} {event.lport} {event.dport} {laddr} {raddr}")
         snitch_pipe_0.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                             "uid": event.uid, "send": 0, "recv": 0, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
+                                             "uid": event.uid, "send": 0, "recv": 0, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
     def queue_ipv6_event(cpu, data, size):
         event = b["ipv6_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
-        ip = socket.inet_ntop(socket.AF_INET6, event.daddr)
+        laddr = socket.inet_ntop(socket.AF_INET6, event.saddr)
+        raddr = socket.inet_ntop(socket.AF_INET6, event.daddr)
+        print(f"ipv6 event: {event.comm.decode()} {event.lport} {event.dport} {laddr} {raddr}")
         snitch_pipe_1.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                             "uid": event.uid, "send": 0, "recv": 0, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
+                                             "uid": event.uid, "send": 0, "recv": 0, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
     def queue_other_event(cpu, data, size):
         event = b["other_socket_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, 0)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
+        print(f"other event: {event.comm.decode()} {cmd}")
         snitch_pipe_2.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                             "uid": event.uid, "send": 0, "recv": 0, "port": 0, "ip": "", "domain": ""}))
+                                             "uid": event.uid, "send": 0, "recv": 0, "lport": 0, "rport": 0, "laddr": "", "raddr": "", "domain": ""}))
     def queue_sendv4_event(cpu, data, size):
         event = b["sendmsg_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
-        ip =socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
+        laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
+        raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
+        print(f"sendv4 event: {event.comm.decode()} {event.bytes} {event.lport} {event.dport} {laddr} {raddr}")
         snitch_pipe_3.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                             "uid": event.uid, "send": event.bytes, "recv": 0, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
+                                             "uid": event.uid, "send": event.bytes, "recv": 0, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
     def queue_sendv6_event(cpu, data, size):
         event = b["sendmsg6_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
-        ip = socket.inet_ntop(socket.AF_INET6, event.daddr)
+        laddr = socket.inet_ntop(socket.AF_INET6, event.saddr)
+        raddr = socket.inet_ntop(socket.AF_INET6, event.daddr)
+        print(f"sendv6 event: {event.comm.decode()} {event.bytes} {event.lport} {event.dport} {laddr} {raddr}")
         snitch_pipe_4.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                             "uid": event.uid, "send": event.bytes, "recv": 0, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
+                                             "uid": event.uid, "send": event.bytes, "recv": 0, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
     def queue_recvv4_event(cpu, data, size):
         event = b["recvmsg_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
-        ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
+        laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
+        raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
+        print(f"recvv4 event: {event.comm.decode()} {event.bytes} {event.lport} {event.dport} {laddr} {raddr}")
         snitch_pipe_5.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                             "uid": event.uid, "send": 0, "recv": event.bytes, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
+                                             "uid": event.uid, "send": 0, "recv": event.bytes, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
     def queue_recvv6_event(cpu, data, size):
         event = b["recvmsg6_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, event.dport)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
-        ip = socket.inet_ntop(socket.AF_INET6, event.daddr)
+        laddr = socket.inet_ntop(socket.AF_INET6, event.saddr)
+        raddr = socket.inet_ntop(socket.AF_INET6, event.daddr)
+        print(f"recvv6 event: {event.comm.decode()} {event.bytes} {event.lport} {event.dport} {laddr} {raddr}")
         snitch_pipe_6.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                             "uid": event.uid, "send": 0, "recv": event.bytes, "port": event.dport, "ip": ip, "domain": domain_dict[ip]}))
+                                             "uid": event.uid, "send": 0, "recv": event.bytes, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
         st_dev, st_ino, pid, fd, exe, cmd = get_fd(event.dev, event.ino, event.pid, -1)
         pst_dev, pst_ino, ppid, pfd, pexe, pcmd = get_fd(event.pdev, event.pino, event.ppid, -1)
+        print(f"exec event: {event.comm.decode()} {cmd} {pexe} {pcmd}")
         if EVERY_EXE:
             snitch_pipe_7.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                                  "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                                 "uid": event.uid, "send": 0, "recv": 0, "port": -1, "ip": "", "domain": ""}))
+                                                 "uid": event.uid, "send": 0, "recv": 0, "lport": -1, "rport": -1, "laddr": "", "raddr": "", "domain": ""}))
     def queue_dns_event(cpu, data, size):
         event = b["dns_events"].event(data)
+        print(f"dns event: {event.host.decode()}")
         if event.daddr:
             ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
         else:
@@ -1694,7 +1745,7 @@ def ui_init() -> int:
     # check for table
     cur = con.cursor()
     cur.execute(''' PRAGMA user_version ''')
-    assert cur.fetchone()[0] == 2, f"Incorrect database version of snitch.db for picosnitch v{VERSION}"
+    assert cur.fetchone()[0] == 3, f"Incorrect database version of snitch.db for picosnitch v{VERSION}"
     con.close()
     # start curses
     for err_count in reversed(range(30)):
@@ -2203,13 +2254,13 @@ def start_picosnitch():
         cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
         if cur.fetchone()[0] != 1:
             cur.execute(''' CREATE TABLE connections
-                            (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text, pname text, pcmdline text, psha256 text, conns integer, send integer, recv integer) ''')
-            cur.execute(''' PRAGMA user_version = 2 ''')
+                            (contime text, conns integer, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text) ''')
+            cur.execute(''' PRAGMA user_version = 3 ''')
             con.commit()
         else:
             cur.execute(''' PRAGMA user_version ''')
             user_version = cur.fetchone()[0]
-            if user_version <= 1:
+            if user_version <= 2:
                 assert not os.path.exists("/run/picosnitch.pid"), "cannot upgrade database while picosnitch daemon is running"
                 print("Upgrading database, please wait...")
             if user_version == 0:
@@ -2227,6 +2278,16 @@ def start_picosnitch():
                 cur.execute(''' DROP TABLE tmp ''')
                 cur.execute(''' PRAGMA user_version = 2 ''')
                 con.commit()
+            if user_version <= 2:
+                cur.execute(''' ALTER TABLE connections RENAME TO tmp ''')
+                cur.execute(''' CREATE TABLE connections
+                                (contime text, conns integer, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer DEFAULT -1, rport integer, laddr text DEFAULT "", raddr text, domain text) ''')
+                cur.execute(''' INSERT INTO connections
+                                (contime, conns, send, recv, exe, name, cmdline, sha256, pexe, pname, pcmdline, psha256, uid, rport, raddr, domain) SELECT contime, conns, send, recv, exe, name, cmdline, sha256, pexe, pname, pcmdline, psha256, uid, port, ip, domain FROM tmp ''')
+                cur.execute(''' DROP TABLE tmp ''')
+                cur.execute(''' PRAGMA user_version = 3 ''')
+                con.commit()
+                print("Database upgrade complete")
         con.close()
         # optional remote database
         if sql_kwargs := tmp_snitch["Config"]["DB sql server"]:
@@ -2344,6 +2405,9 @@ bpf_text_base = """
 #include <linux/in.h>
 #include <linux/in6.h>
 #include <linux/ip.h>
+#include <net/sock.h>
+
+BPF_HASH(currsock, u32, struct socket *);
 
 struct addrinfo {
     int ai_flags;
@@ -2367,7 +2431,9 @@ struct ipv4_event_t {
     u32 dev;
     u32 pdev;
     u32 daddr;
+    u32 saddr;
     u16 dport;
+    u16 lport;
 } __attribute__((packed));
 BPF_PERF_OUTPUT(ipv4_events);
 
@@ -2375,6 +2441,7 @@ struct ipv6_event_t {
     char comm[TASK_COMM_LEN];
     char pcomm[TASK_COMM_LEN];
     unsigned __int128 daddr;
+    unsigned __int128 saddr;
     u64 ino;
     u64 pino;
     u32 pid;
@@ -2383,6 +2450,7 @@ struct ipv6_event_t {
     u32 dev;
     u32 pdev;
     u16 dport;
+    u16 lport;
 } __attribute__((packed));
 BPF_PERF_OUTPUT(ipv6_events);
 
@@ -2426,7 +2494,26 @@ struct exec_event_t {
 BPF_PERF_OUTPUT(exec_events);
 
 int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, struct sockaddr *address, int addrlen) {
-    u32 pid = bpf_get_current_pid_tgid() >> 32;
+    u32 tid = bpf_get_current_pid_tgid();
+    currsock.update(&tid, &sock);
+    return 0;
+}
+
+int security_socket_connect_return(struct pt_regs *ctx) {
+    int ret = PT_REGS_RC(ctx);
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+    u32 tid = pid_tgid;
+    struct socket **sockp;
+    sockp = currsock.lookup(&tid);
+    if (sockp == 0) {
+        return 0;
+    }
+    if (ret != 0) {
+        currsock.delete(&tid);
+        return 0;
+    }
+    struct socket *sock = *sockp;
     u32 uid = bpf_get_current_uid_gid();
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     u32 ppid = task->real_parent->tgid;
@@ -2436,34 +2523,38 @@ int security_socket_connect_entry(struct pt_regs *ctx, struct socket *sock, stru
     u64 pino = task->real_parent->mm->exe_file->f_path.dentry->d_inode->i_ino;
     u32 pdev = task->real_parent->mm->exe_file->f_path.dentry->d_inode->i_sb->s_dev;
     pdev = new_encode_dev(pdev);
-    u32 address_family = address->sa_family;
+    struct sock *sk;
+    u32 address_family;
+    if (bpf_probe_read(&sk, sizeof(sk), &sock->sk)) return 0;
+    if (bpf_probe_read(&address_family, sizeof(address_family), &sk->__sk_common.skc_family)) return 0;
     if (address_family == AF_INET) {
-        struct ipv4_event_t data4 = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .pdev = pdev, .ino = ino, .pino = pino};
-        struct sockaddr_in *daddr = (struct sockaddr_in *)address;
-        bpf_probe_read(&data4.daddr, sizeof(data4.daddr), &daddr->sin_addr.s_addr);
-        u16 dport = 0;
-        bpf_probe_read(&dport, sizeof(dport), &daddr->sin_port);
-        data4.dport = ntohs(dport);
-        bpf_get_current_comm(&data4.comm, sizeof(data4.comm));
-        bpf_probe_read_kernel_str(&data4.pcomm, sizeof(data4.pcomm), &task->real_parent->comm);
-        ipv4_events.perf_submit(ctx, &data4, sizeof(data4));
+        struct ipv4_event_t data = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .pdev = pdev, .ino = ino, .pino = pino};
+        bpf_probe_read(&data.daddr, sizeof(data.daddr), &sk->__sk_common.skc_daddr);
+        bpf_probe_read(&data.saddr, sizeof(data.saddr), &sk->__sk_common.skc_rcv_saddr);
+        bpf_probe_read(&data.dport, sizeof(data.dport), &sk->__sk_common.skc_dport);
+        bpf_probe_read(&data.lport, sizeof(data.lport), &sk->__sk_common.skc_num);
+        data.dport = ntohs(data.dport);
+        bpf_get_current_comm(&data.comm, sizeof(data.comm));
+        bpf_probe_read_kernel_str(&data.pcomm, sizeof(data.pcomm), &task->real_parent->comm);
+        ipv4_events.perf_submit(ctx, &data, sizeof(data));
     }
     else if (address_family == AF_INET6) {
-        struct ipv6_event_t data6 = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .pdev = pdev, .ino = ino, .pino = pino};
-        struct sockaddr_in6 *daddr6 = (struct sockaddr_in6 *)address;
-        bpf_probe_read(&data6.daddr, sizeof(data6.daddr), &daddr6->sin6_addr.in6_u.u6_addr32);
-        u16 dport6 = 0;
-        bpf_probe_read(&dport6, sizeof(dport6), &daddr6->sin6_port);
-        data6.dport = ntohs(dport6);
-        bpf_get_current_comm(&data6.comm, sizeof(data6.comm));
-        bpf_probe_read_kernel_str(&data6.pcomm, sizeof(data6.pcomm), &task->real_parent->comm);
-        ipv6_events.perf_submit(ctx, &data6, sizeof(data6));
+        struct ipv6_event_t data = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .pdev = pdev, .ino = ino, .pino = pino};
+        bpf_probe_read(&data.daddr, sizeof(data.daddr), &sk->__sk_common.skc_v6_daddr);
+        bpf_probe_read(&data.saddr, sizeof(data.saddr), &sk->__sk_common.skc_v6_rcv_saddr);
+        bpf_probe_read(&data.dport, sizeof(data.dport), &sk->__sk_common.skc_dport);
+        bpf_probe_read(&data.lport, sizeof(data.lport), &sk->__sk_common.skc_num);
+        data.dport = ntohs(data.dport);
+        bpf_get_current_comm(&data.comm, sizeof(data.comm));
+        bpf_probe_read_kernel_str(&data.pcomm, sizeof(data.pcomm), &task->real_parent->comm);
+        ipv6_events.perf_submit(ctx, &data, sizeof(data));
     }
     else if (address_family != AF_UNIX && address_family != AF_UNSPEC) {
         struct other_socket_event_t socket_event = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .pdev = pdev, .ino = ino, .pino = pino};
         bpf_get_current_comm(&socket_event.comm, sizeof(socket_event.comm));
         other_socket_events.perf_submit(ctx, &socket_event, sizeof(socket_event));
     }
+    currsock.delete(&tid);
     return 0;
 }
 
@@ -2533,8 +2624,6 @@ int exec_entry(struct pt_regs *ctx) {
 """
 
 bpf_text_bandwidth_structs = """
-#include <net/sock.h>
-
 struct sendrecv_event_t {
     char comm[TASK_COMM_LEN];
     char pcomm[TASK_COMM_LEN];
@@ -2547,7 +2636,9 @@ struct sendrecv_event_t {
     u32 pdev;
     u32 bytes;
     u32 daddr;
+    u32 saddr;
     u16 dport;
+    u16 lport;
 } __attribute__((packed));
 BPF_PERF_OUTPUT(sendmsg_events);
 BPF_PERF_OUTPUT(recvmsg_events);
@@ -2556,6 +2647,7 @@ struct sendrecv6_event_t {
     char comm[TASK_COMM_LEN];
     char pcomm[TASK_COMM_LEN];
     unsigned __int128 daddr;
+    unsigned __int128 saddr;
     u64 ino;
     u64 pino;
     u32 pid;
@@ -2565,6 +2657,7 @@ struct sendrecv6_event_t {
     u32 pdev;
     u32 bytes;
     u16 dport;
+    u16 lport;
 } __attribute__((packed));
 BPF_PERF_OUTPUT(sendmsg6_events);
 BPF_PERF_OUTPUT(recvmsg6_events);
@@ -2572,7 +2665,7 @@ BPF_PERF_OUTPUT(recvmsg6_events);
 
 bpf_text_bandwidth_probe = """
 KRETFUNC_PROBE(sock_sendmsg, struct socket *sock, struct msghdr *msg, int flags, u32 retval) {
-    if (retval > 0 && retval < 0x7fffffff) {
+    if (retval >= 0 && retval < 0x7fffffff) {
         u32 pid = bpf_get_current_pid_tgid() >> 32;
         u32 uid = bpf_get_current_uid_gid();
         struct task_struct *task, *parent;
@@ -2613,7 +2706,9 @@ KRETFUNC_PROBE(sock_sendmsg, struct socket *sock, struct msghdr *msg, int flags,
             bpf_get_current_comm(&data.comm, sizeof(data.comm));
             bpf_probe_read_kernel_str(&data.pcomm, sizeof(data.pcomm), &parent->comm);
             bpf_probe_read(&data.daddr, sizeof(data.daddr), &sock->sk->__sk_common.skc_daddr);
+            bpf_probe_read(&data.saddr, sizeof(data.saddr), &sock->sk->__sk_common.skc_rcv_saddr);
             bpf_probe_read(&data.dport, sizeof(data.dport), &sock->sk->__sk_common.skc_dport);
+            bpf_probe_read(&data.lport, sizeof(data.lport), &sock->sk->__sk_common.skc_num);
             data.dport = ntohs(data.dport);
             sendmsg_events.perf_submit(ctx, &data, sizeof(data));
         }
@@ -2622,7 +2717,9 @@ KRETFUNC_PROBE(sock_sendmsg, struct socket *sock, struct msghdr *msg, int flags,
             bpf_get_current_comm(&data.comm, sizeof(data.comm));
             bpf_probe_read_kernel_str(&data.pcomm, sizeof(data.pcomm), &parent->comm);
             bpf_probe_read(&data.daddr, sizeof(data.daddr), &sock->sk->__sk_common.skc_v6_daddr);
+            bpf_probe_read(&data.saddr, sizeof(data.saddr), &sock->sk->__sk_common.skc_v6_rcv_saddr);
             bpf_probe_read(&data.dport, sizeof(data.dport), &sock->sk->__sk_common.skc_dport);
+            bpf_probe_read(&data.lport, sizeof(data.lport), &sock->sk->__sk_common.skc_num);
             data.dport = ntohs(data.dport);
             sendmsg6_events.perf_submit(ctx, &data, sizeof(data));
         }
