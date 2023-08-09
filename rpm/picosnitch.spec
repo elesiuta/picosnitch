@@ -1,6 +1,6 @@
 Name:           picosnitch
 Version:        0.14.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 License:        GPL-3.0
 Summary:        Monitor network traffic per executable using BPF
 Url:            https://github.com/elesiuta/picosnitch
@@ -23,11 +23,11 @@ Requires:       python3-dbus
 %endif
 
 %if 0%{?suse_version}
-BuildRequires:  python-wheel
-BuildRequires:  python-curses
-Requires:       python-curses
-Requires:       python-dash
-Requires:       python-dbus-python
+BuildRequires:  python3-wheel
+BuildRequires:  python3-curses
+Requires:       python3-curses
+Requires:       python3-dash
+Requires:       python3-dbus-python
 Requires:       bcc-tools
 %else
 Requires:       bcc
@@ -76,6 +76,6 @@ install -D -m 644 debian/picosnitch.service %{buildroot}%{_unitdir}/%{name}.serv
 %endif
 
 %changelog
-* Wed Aug 9 2023 Eric Lesiuta <elesiuta@gmail.com> - 0.14.0-1
+* Wed Aug 9 2023 Eric Lesiuta <elesiuta@gmail.com> - 0.14.0-2
 - see releases on github for changes
 
