@@ -2229,12 +2229,13 @@ def start_picosnitch():
             if user_version <= 2:
                 cur.execute(''' ALTER TABLE connections RENAME TO tmp ''')
                 cur.execute(''' CREATE TABLE connections
-                                (contime text, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer DEFAULT -1, rport integer, laddr text DEFAULT "", raddr text, domain text) ''')
+                                (contime text, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text) ''')
                 cur.execute(''' INSERT INTO connections
-                                (contime, send, recv, exe, name, cmdline, sha256, pexe, pname, pcmdline, psha256, uid, rport, raddr, domain) SELECT contime, send, recv, exe, name, cmdline, sha256, pexe, pname, pcmdline, psha256, uid, port, ip, domain FROM tmp ''')
+                                (contime, send, recv, exe, name, cmdline, sha256, pexe, pname, pcmdline, psha256, uid, lport, rport, laddr, raddr, domain) SELECT contime, send, recv, exe, name, cmdline, sha256, pexe, pname, pcmdline, psha256, uid, -1, port, "", ip, domain FROM tmp ''')
                 cur.execute(''' DROP TABLE tmp ''')
                 cur.execute(''' PRAGMA user_version = 3 ''')
                 con.commit()
+                con.execute(''' VACUUM ''')
                 print("Database upgrade complete")
         con.close()
         # optional remote database
