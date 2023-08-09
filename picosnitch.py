@@ -57,7 +57,7 @@ site.addsitedir(os.path.expandvars("$PYTHON_USER_SITE"))
 import psutil
 
 # picosnitch version and supported platform
-VERSION: typing.Final[str] = "0.13.2"
+VERSION: typing.Final[str] = "0.14.0"
 assert sys.version_info >= (3, 8), "Python version >= 3.8 is required"
 assert sys.platform.startswith("linux"), "Did not detect a supported operating system"
 
