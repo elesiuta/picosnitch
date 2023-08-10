@@ -11,7 +11,7 @@
 - 🚀 Executable hashes are cached based on device + inode for improved performance, and works with applications running inside containers
 - 🕵️ Uses [BPF](https://ebpf.io/) for [accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and [fanotify](https://man7.org/linux/man-pages/man7/fanotify.7.html) to watch executables for modification
 - 👨‍👦 Since applications can call others to send/receive data for them, the parent executable and hash is also logged for each connection
-- 🧰 Pragmatic and minimalist design focussing on [accurate detection with clear and reliable error reporting when it isn't possible](#Limitations)
+- 🧰 Pragmatic and minimalist design focusing on [accurate detection with clear and reliable error reporting when it isn't possible](#Limitations)
 
 # [Installation](#Installation)
 
@@ -184,18 +184,18 @@
   - see [limitations](#Limitations) below for other sources of errors
 
 # [Limitations](#Limitations)
-- Despite focussing on reliability and notable advantages over [existing tools](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/#existing-tools-to-measure-bandwidth-usage-on-linux), picosnitch still has some limitations depending on its use case
-- When used as a security/auditing tool, a program with the same privileges could modify picosnitch, some mitigations include
+- Despite focusing on reliability and notable advantages over [existing tools](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/#existing-tools-to-measure-bandwidth-usage-on-linux), picosnitch still has some limitations depending on its use case
+- When used as a security/auditing tool, a program with sufficient privileges might alter picosnitch or its logs, or employ alternative communication mechanisms not monitored by picosnitch and potentially invisible to the kernel, some mitigations include
   - use `DB sql server` to maintain an [off-system copy of your logs](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS)
   - cross-checking with a [standalone router/firewall](https://en.wikipedia.org/wiki/List_of_router_and_firewall_distributions) to ensure all communication is accounted for
   - use [sandboxing](https://wiki.archlinux.org/title/Security#Sandboxing_applications) such as [flatpak](https://www.privacyguides.org/linux-desktop/sandboxing/#flatpak)
-- Detecting open sockets, monitoring traffic, and identifying the process is very reliable with [BPF](https://ebpf.io/); however, the executable name and path may be vague or spoofed if malicious, as a solution, picosnitch hashes the executable as a reliable identifier
+- Detecting open sockets and identifying the process is very reliable with [BPF](https://ebpf.io/); however, the executable name and path could be ambiguous or spoofed if malicious, as a countermeasure, picosnitch hashes the executable to provide a reliable identifier
   - only the process executable itself is hashed, leaving out shared libraries (e.g. LD_PRELOAD rootkits), extensions, or scripts which could become compromised
-    - some methods of protecting these files include using an [immutable OS](https://www.redhat.com/sysadmin/immutability-silverblue) or tools such as [AIDE](https://wiki.archlinux.org/title/AIDE), [fs-verity](https://www.kernel.org/doc/html/latest/filesystems/fsverity.html), [IMA/EVM](https://wiki.gentoo.org/wiki/Integrity_Measurement_Architecture), or [debsums (with caveats)](https://manpages.debian.org/unstable/debsums/debsums.1.en.html)
-  - if a process is very short-lived, picosnitch may not be able to open a file descriptor in time in order to hash it (this is rare)
+    - some possible mitigations include using an [immutable OS](https://www.redhat.com/sysadmin/immutability-silverblue) or tools such as [AIDE](https://wiki.archlinux.org/title/AIDE), [fs-verity](https://www.kernel.org/doc/html/latest/filesystems/fsverity.html), [IMA/EVM](https://wiki.gentoo.org/wiki/Integrity_Measurement_Architecture), or [debsums (with caveats)](https://manpages.debian.org/unstable/debsums/debsums.1.en.html)
+  - for extremely short-lived processes, picosnitch may not be able to open a file descriptor in time in order to hash it (this is rare)
   - the device and inode of the opened file descriptor are checked against what was reported by the BPF program to detect if the executable was replaced; however, BTRFS uses non-unique inodes, negating this protection (a negligible issue mentioned for completeness)
-  - if the executable fails to hash for any reason, the traffic will still be logged with all available information, and an error notification will be sent
+  - if hashing the executable fails for any reason, the traffic will still be logged with all available information, accompanied by an error notification
 - A large influx of new processes or connections may lead to some missed log entries as picosnitch preserves system traffic latency rather than impeding it to catch up with processing event callbacks
-  - this will be detected, logged as an error, and you will be notified
+  - such incidents will be detected, logged as an error, and you will be notified
   - you can mitigate this by increasing `Perf ring buffer (pages)`
 - In addition to bugs, please report any other limitations that may have been missed!
