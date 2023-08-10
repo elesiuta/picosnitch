@@ -11,9 +11,9 @@
 - 🚀 Executable hashes are cached based on device + inode for improved performance, and works with applications running inside containers
 - 🕵️ Uses [BPF](https://ebpf.io/) for [accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and [fanotify](https://man7.org/linux/man-pages/man7/fanotify.7.html) to watch executables for modification
 - 👨‍👦 Since applications can call others to send/receive data for them, the parent executable and hash is also logged for each connection
-- 🧰 Pragmatic and minimalist design focusing on [accurate detection with clear and reliable error reporting when it isn't possible](#Limitations)
+- 🧰 Pragmatic and minimalist design focusing on [accurate detection with clear and reliable error reporting when it isn't possible](#limitations)
 
-# [Installation](#Installation)
+# [Installation](#installation)
 
 ### [AUR](https://aur.archlinux.org/packages/picosnitch/) for Arch and derivatives <img src="https://cdn.simpleicons.org/archlinux" width="16" height="16">
 <details><summary>Details</summary>
@@ -102,7 +102,7 @@
 - you can also run the script `picosnitch.py` directly
 </details>
 
-# [Usage](#Usage)
+# [Usage](#usage)
 - Running picosnitch
   - enable/disable autostart on reboot with `systemctl enable|disable picosnitch`
   - start/stop/restart with `systemctl start|stop|restart picosnitch`
@@ -115,7 +115,7 @@
   - `space/enter`: filter on entry `backspace`: remove filter `h/H`: cycle through history `t/T`: cycle time range `u/U`: cycle byte units `r`: refresh view `q`: quit
 - Show usage with `picosnitch help`
 
-# [Configuration](#Configuration)
+# [Configuration](#configuration)
 - Config is stored in `~/.config/picosnitch/config.json`
   - restart picosnitch if it is currently running for any changes to take effect
 
@@ -158,7 +158,7 @@
 }
 ```
 
-# [Logging](#Logging)
+# [Logging](#logging)
 - A log of seen executables is stored in `~/.config/picosnitch/exe.log`
   - this is a history of your notifications
 - A record of seen executables is stored in `~/.config/picosnitch/record.json`
@@ -169,7 +169,7 @@
   - note, connection times are based on when the group is processed, so they are accurate to within `DB write limit (seconds)` at best, and could be delayed if the previous group is slow to hash
   - notifications are handled by a separate subprocess, so they are not subject to the same delays as the connection log
 - Use `DB sql server` to write the full connection log to a MariaDB, MySQL, or PostgreSQL server
-  - this is independent of `DB sql log` and is used for providing an [off-system copy to prevent tampering](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS) (use [GRANT](https://www.postgresql.org/docs/current/sql-grant.html) to assign privileges and see [limitations](#Limitations) for other caveats)
+  - this is independent of `DB sql log` and is used for providing an [off-system copy to prevent tampering](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS) (use [GRANT](https://www.postgresql.org/docs/current/sql-grant.html) to assign privileges and see [limitations](#limitations) for other caveats)
   - to configure, add the key `client` to `DB sql server` with value `mariadb`, `psycopg`, `psycopg2`, or `pymysql`, you can also optionally set `table_name`
   - assign remaining connection parameters for [mariadb](https://mariadb-corporation.github.io/mariadb-connector-python/usage.html#connecting), [psycopg](https://www.psycopg.org/docs/module.html#psycopg2.connect), or [pymysql](https://pymysql.readthedocs.io/en/latest/modules/connections.html) to `DB sql server` as key/value pairs
 - Enable `DB text log` to write the full connection log to `~/.config/picosnitch/conn.log`
@@ -181,9 +181,9 @@
   - while it is very unlikely for processes/connections to be missed (unless `Every exe (not just conns)` is enabled), picosnitch was designed such that it should still detect this and log an error giving you some indication of what happened
   - for most people in most cases, this should raise suspicion that a program may be misbehaving
   - a program should not be able to hide from picosnitch (either by omission or spoofing another program) without picosnitch reporting an error
-  - see [limitations](#Limitations) below for other sources of errors
+  - see [limitations](#limitations) below for other sources of errors
 
-# [Limitations](#Limitations)
+# [Limitations](#limitations)
 - Despite focusing on reliability and notable advantages over [existing tools](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/#existing-tools-to-measure-bandwidth-usage-on-linux), picosnitch still has some limitations depending on its use case
 - When used as a security/auditing tool, a program with sufficient privileges might alter picosnitch or its logs, or employ alternative communication mechanisms not monitored by picosnitch and potentially invisible to the kernel, some mitigations include
   - use `DB sql server` to maintain an [off-system copy of your logs](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS)
