@@ -84,6 +84,8 @@
   - `picosnitch systemd`
 - optional dependencies (will install from [PyPI](https://pypi.org/) with `[full]` if not already installed)
   - for dash: [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
+  - for dash themes: [dash-bootstrap-components](https://pypi.org/project/dash-bootstrap-components/) and [dash-bootstrap-templates](https://pypi.org/project/dash-bootstrap-templates/)
+  - for GeoIP lookups: [geoip2](https://pypi.org/project/geoip2/)
   - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro and should be installed from their repo)
   - for sql server: one of [psycopg](https://pypi.org/project/psycopg/), [pymysql](https://pypi.org/project/PyMySQL/), [mariadb](https://pypi.org/project/mariadb/), or [psycopg2](https://pypi.org/project/psycopg2/) (latter two not included with `[full]`)
   - for VirusTotal: [requests](https://pypi.org/project/requests/)
