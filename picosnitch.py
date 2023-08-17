@@ -1493,8 +1493,8 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
             # check if any query results are ready
             if not q_query_results.empty():
                 current_screen += q_query_results.get_nowait()
-            sum_send = sum(b for _, _, b, _ in current_screen)
-            sum_recv = sum(b for _, _, _, b in current_screen)
+            sum_send = sum(b for _, b, _ in current_screen)
+            sum_recv = sum(b for _, _, b in current_screen)
             execute_query = False
             running_query = True
         # update headers for screen
