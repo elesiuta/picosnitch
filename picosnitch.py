@@ -1406,12 +1406,11 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
             except Exception:
                 return f"{chr(0x2753)}{chr(0x200b)} {ip}"  # question emoji + ZWSP so line length is counted correctly
     # screens from queries (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer)
-    pri_i = 0
-    p_screens = ["Executables", "Process Names", "Commands", "SHA256", "Parent Executables", "Parent Names", "Parent Commands", "Parent SHA256", "Users", "Local Ports", "Remote Ports", "Local Addresses", "Remote Addresses", "Domains", "Entry Time"]
-    p_names = ["Executable", "Process Name", "Command", "SHA256", "Parent Executable", "Parent Name", "Parent Command", "Parent SHA256", "User", "Local Port", "Remote Port", "Local Address", "Remote Address", "Domain", "Entry Time"]
-    p_col = ["exe", "name", "cmdline", "sha256", "pexe", "pname", "pcmdline", "psha256", "uid", "lport", "rport", "laddr", "raddr", "domain", "contime"]
-    sec_i = 0
-    s_screens, s_names, s_col = p_screens, p_names, p_col
+    tab_i = 0
+    tab_names = ["Executables", "Process Names", "Commands", "SHA256", "Parent Executables", "Parent Names", "Parent Commands", "Parent SHA256", "Users", "Local Ports", "Remote Ports", "Local Addresses", "Remote Addresses", "Domains", "Entry Time"]
+    col_names = ["Executable", "Process Name", "Command", "SHA256", "Parent Executable", "Parent Name", "Parent Command", "Parent SHA256", "User", "Local Port", "Remote Port", "Local Address", "Remote Address", "Domain", "Entry Time"]
+    col_sql = ["exe", "name", "cmdline", "sha256", "pexe", "pname", "pcmdline", "psha256", "uid", "lport", "rport", "laddr", "raddr", "domain", "contime"]
+    tab_j = 0
     byte_units = 3
     round_bytes = lambda size, b: f"{size if b == 0 else round(size/10**b, 1)!s:>{8 if b == 0 else 7}} {'k' if b == 3 else 'M' if b == 6 else 'G' if b == 9 else ''}B"
     # ui loop
@@ -1428,8 +1427,8 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
     vt_status = collections.defaultdict(str)
     while True:
         # adjust cursor
-        pri_i %= len(p_col)
-        sec_i %= len(s_col)
+        tab_i %= len(col_sql)
+        tab_j %= len(col_sql)
         time_i %= len(time_period)
         if time_j < 0 or time_i == 0:
             time_j = 0
@@ -1454,9 +1453,9 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
                 else:
                     time_query = f" WHERE contime > datetime(\"{time_history_start}\") AND contime < datetime(\"{time_history_end}\")"
             if is_subquery:
-                current_query = f"SELECT {s_col[sec_i]}, SUM(send), SUM(recv) FROM connections WHERE {p_col[pri_i]} IS \"{primary_value}\"{time_query} GROUP BY {s_col[sec_i]}"
+                current_query = f"SELECT {col_sql[tab_j]}, SUM(send), SUM(recv) FROM connections WHERE {col_sql[tab_i]} IS \"{primary_value}\"{time_query} GROUP BY {col_sql[tab_j]}"
             else:
-                current_query = f"SELECT {p_col[pri_i]}, SUM(send), SUM(recv) FROM connections{time_query} GROUP BY {p_col[pri_i]}"
+                current_query = f"SELECT {col_sql[tab_i]}, SUM(send), SUM(recv) FROM connections{time_query} GROUP BY {col_sql[tab_i]}"
             update_query = False
         if execute_query:
             current_screen = []
@@ -1503,15 +1502,15 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
         help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  u/U: units  r: refresh  q: quit {' ':<{curses.COLS}}"
         status_bar = f"history: {time_history}  time range: {time_period[time_i]}  line: {min(cursor-first_line+1, len(current_screen))}/{len(current_screen)}  totals: {round_bytes(sum_send, byte_units).strip()} / {round_bytes(sum_recv, byte_units).strip()}{' ':<{curses.COLS}}"
         if is_subquery:
-            l_tabs = " | ".join(reversed([s_screens[sec_i-i] for i in range (1, len(s_screens))]))
-            r_tabs = " | ".join([s_screens[(sec_i+i) % len(s_screens)] for i in range(1, len(s_screens))])
-            c_tab = s_screens[sec_i]
-            column_names = f"{f'{s_names[sec_i]} (where {p_names[pri_i].lower()} = {primary_value})':<{curses.COLS - 29}.{curses.COLS - 29}}          Sent       Received"
+            l_tabs = " | ".join(reversed([tab_names[tab_j-i] for i in range (1, len(tab_names))]))
+            r_tabs = " | ".join([tab_names[(tab_j+i) % len(tab_names)] for i in range(1, len(tab_names))])
+            c_tab = tab_names[tab_j]
+            column_names = f"{f'{col_names[tab_j]} (where {col_names[tab_i].lower()} = {primary_value})':<{curses.COLS - 29}.{curses.COLS - 29}}          Sent       Received"
         else:
-            l_tabs = " | ".join(reversed([p_screens[pri_i-i] for i in range(1, len(p_screens))]))
-            r_tabs = " | ".join([p_screens[(pri_i+i) % len(p_screens)] for i in range(1, len(p_screens))])
-            c_tab = p_screens[pri_i]
-            column_names = f"{p_names[pri_i]:<{curses.COLS - 29}}          Sent       Received"
+            l_tabs = " | ".join(reversed([tab_names[tab_i-i] for i in range(1, len(tab_names))]))
+            r_tabs = " | ".join([tab_names[(tab_i+i) % len(tab_names)] for i in range(1, len(tab_names))])
+            c_tab = tab_names[tab_i]
+            column_names = f"{col_names[tab_i]:<{curses.COLS - 29}}          Sent       Received"
         edges_width = len("<- ... |  | ... ->")
         l_width = (curses.COLS - len(c_tab) - edges_width) // 2
         r_width = curses.COLS - len(c_tab) - edges_width - l_width
@@ -1538,10 +1537,10 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
                 # if space/enter was pressed on previous loop, check current line to update filter
                 if toggle_subquery:
                     if is_subquery:
-                        if s_col[sec_i] not in p_col:
+                        if col_sql[tab_j] not in col_sql:
                             is_subquery = False
                             break
-                        pri_i = sec_i
+                        tab_i = tab_j
                     primary_value = name
                     is_subquery = True
                     break
@@ -1551,14 +1550,14 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
                 # special cases (cmdline null chars, uid, ip, sha256 and vt results)
                 if type(name) == str:
                     name = name.replace("\0", "")
-                elif (not is_subquery and p_col[pri_i] == "uid") or (is_subquery and s_col[sec_i] == "uid"):
+                elif (not is_subquery and col_sql[tab_i] == "uid") or (is_subquery and col_sql[tab_j] == "uid"):
                     try:
                         name = f"{pwd.getpwuid(name).pw_name} ({name})"
                     except Exception:
                         name = f"??? ({name})"
-                if (not is_subquery and p_col[pri_i] == "raddr") or (is_subquery and s_col[sec_i] == "raddr"):
+                if (not is_subquery and col_sql[tab_i] == "raddr") or (is_subquery and col_sql[tab_j] == "raddr"):
                     name = get_geoip(name)
-                if (not is_subquery and p_col[pri_i].endswith("sha256")) or (is_subquery and s_col[sec_i].endswith("sha256")):
+                if (not is_subquery and col_sql[tab_i].endswith("sha256")) or (is_subquery and col_sql[tab_j].endswith("sha256")):
                     name = f"{name}{vt_status[name]}"
                 value = f"{round_bytes(send, byte_units):>14.14} {round_bytes(recv, byte_units):>14.14}"
                 stdscr.addstr(line - offset, 0, f"{name!s:<{curses.COLS-29}.{curses.COLS-29}}{value}")
@@ -1648,16 +1647,16 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
             cursor = len(current_screen) + first_line - 1
         elif ch == curses.KEY_LEFT:
             if is_subquery:
-                sec_i -= 1
+                tab_j -= 1
             else:
-                pri_i -= 1
+                tab_i -= 1
             update_query = True
             execute_query = True
         elif ch == curses.KEY_RIGHT:
             if is_subquery:
-                sec_i += 1
+                tab_j += 1
             else:
-                pri_i += 1
+                tab_i += 1
             update_query = True
             execute_query = True
         elif ch == curses.KEY_RESIZE and curses.is_term_resized(max_y, max_x):
