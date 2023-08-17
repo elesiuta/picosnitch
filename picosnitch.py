@@ -1417,7 +1417,6 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
     max_y, max_x = stdscr.getmaxyx()
     first_line = 4
     cursor, line = first_line, first_line
-    saved_cursors = []
     filter_values = []
     add_filter = False
     update_query = True
@@ -1540,9 +1539,6 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
                     if tab_i not in tab_stack:
                         tab_stack.append(tab_i)
                         filter_values.append(name)
-                    else:
-                        # already filtering on this column, clean up cursor stack so stack sizes match
-                        _ = saved_cursors.pop()
                     break
             else:
                 stdscr.attrset(curses.color_pair(0))
@@ -1593,13 +1589,10 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
         # process user input
         if ch == ord("\n") or ch == ord(" "):
             add_filter = True
-            saved_cursors.append(cursor)
         elif ch == curses.KEY_BACKSPACE:
             if tab_stack:
                 tab_i = tab_stack.pop()
                 _ = filter_values.pop()
-                cursor = saved_cursors.pop()
-                line = cursor + 1
             update_query = True
             execute_query = True
         elif ch == ord("r"):
