@@ -1421,6 +1421,7 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
     filter_exclude = []
     add_filter = False
     add_filter_exclude = False
+    update_time = True
     update_query = True
     execute_query = True
     running_query = False
@@ -1442,9 +1443,11 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
                 time_history_end = "now"
                 time_history = time_round_functions["second"](datetime.datetime.now())
             elif time_i != 0:
-                time_history_start = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j-1)).strftime("%Y-%m-%d %H:%M:%S")
-                time_history_end = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j-2)).strftime("%Y-%m-%d %H:%M:%S")
-                time_history = f"{time_history_start} -> {time_history_end}"
+                if update_time:
+                    time_history_start = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j-1)).strftime("%Y-%m-%d %H:%M:%S")
+                    time_history_end = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j-2)).strftime("%Y-%m-%d %H:%M:%S")
+                    time_history = f"{time_history_start} -> {time_history_end}"
+                    update_time = False
             if time_i == 0:
                 time_query = ""
             else:
@@ -1606,6 +1609,7 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
             update_query = True
             execute_query = True
         elif ch == ord("r"):
+            update_time = True
             update_query = True
             execute_query = True
         elif ch == ord("t"):
@@ -1620,10 +1624,12 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
             execute_query = True
         elif ch == ord("h"):
             time_j += 1
+            update_time = True
             update_query = True
             execute_query = True
         elif ch == ord("H"):
             time_j -= 1
+            update_time = True
             update_query = True
             execute_query = True
         elif ch == ord("u"):
