@@ -375,6 +375,7 @@ def read_snitch() -> dict:
             "Log addresses": True,
             "Log commands": True,
             "Log ignore": [],
+            "Log ports": True,
             "Perf ring buffer (pages)": 256,
             "Set RLIMIT_NOFILE": None,
             "VT API key": "",
@@ -651,6 +652,9 @@ def secondary_subprocess_helper(snitch: dict, fan_mod_cnt: dict, new_processes: 
                 proc["domain"] = reverse_dns_lookup(proc["raddr"])
         else:
             proc["domain"], proc["raddr"] = "", ""
+        if not snitch["Config"]["Log ports"]:
+            proc["lport"] = min(0, proc["lport"])
+            proc["rport"] = min(0, proc["rport"])
         # omit entry from logs
         ignored = False
         for ignore in snitch["Config"]["Log ignore"]:

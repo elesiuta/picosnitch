@@ -147,6 +147,7 @@
   # will omit connections that match any of these from the connection log
   # domains are in reverse domain name notation and will match all subdomains
   # the process name, executable, and hash will still be recorded in record.json
+  "Log ports": true, # Log local and remote ports for each connection
   "Perf ring buffer (pages)": 256, # Power of two number of pages for BPF program
   # only change this if it is giving you errors (e.g. missed events)
   # picosnitch opens a perf buffer for each event type, so this is multiplied by up to 18
