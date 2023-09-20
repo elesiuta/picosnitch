@@ -1418,7 +1418,9 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
     first_line = 4
     cursor, line = first_line, first_line
     filter_values = []
+    filter_exclude = []
     add_filter = False
+    add_filter_exclude = False
     update_query = True
     execute_query = True
     running_query = False
@@ -1451,7 +1453,7 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
                 else:
                     time_query = f" WHERE contime > datetime(\"{time_history_start}\") AND contime < datetime(\"{time_history_end}\")"
             if tab_stack:
-                filter_query = " AND ".join(f"{col_sql[i]} IS \"{value}\"" for i, value in zip(tab_stack, filter_values))
+                filter_query = " AND ".join(f"{col_sql[i]} IS {exclude}\"{value}\"" for i, exclude, value in zip(tab_stack, filter_exclude, filter_values))
                 current_query = f"SELECT {col_sql[tab_i]}, SUM(send), SUM(recv) FROM connections WHERE {filter_query}{time_query} GROUP BY {col_sql[tab_i]}"
             else:
                 current_query = f"SELECT {col_sql[tab_i]}, SUM(send), SUM(recv) FROM connections{time_query} GROUP BY {col_sql[tab_i]}"
@@ -1498,13 +1500,13 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
             execute_query = False
             running_query = True
         # update headers for screen
-        help_bar = f"space/enter: filter on entry  backspace: remove filter  h/H: history  t/T: time range  u/U: units  r: refresh  q: quit {' ':<{curses.COLS}}"
-        status_bar = f"history: {time_history}  time range: {time_period[time_i]}  line: {min(cursor-first_line+1, len(current_screen))}/{len(current_screen)}  totals: {round_bytes(sum_send, byte_units).strip()} / {round_bytes(sum_recv, byte_units).strip()}{' ':<{curses.COLS}}"
+        help_bar = f"f/F: filter  e/E: exclude  h/H: history  t/T: time  u/U: units  r: refresh  q: quit {' ':<{curses.COLS}}"
+        status_bar = f"history: {time_history}  time: {time_period[time_i]}  line: {min(cursor-first_line+1, len(current_screen))}/{len(current_screen)}  totals: {round_bytes(sum_send, byte_units).strip()} / {round_bytes(sum_recv, byte_units).strip()}{' ':<{curses.COLS}}"
         if tab_stack:
             l_tabs = " | ".join(reversed([tab_names[tab_i-i] for i in range (1, len(tab_names))]))
             r_tabs = " | ".join([tab_names[(tab_i+i) % len(tab_names)] for i in range(1, len(tab_names))])
             c_tab = tab_names[tab_i]
-            filter_query = " & ".join(f"{col_names[i].lower()} = \"{value}\"" for i, value in zip(tab_stack, filter_values))
+            filter_query = " & ".join(f"{col_names[i].lower()} {exclude.replace('NOT ', '!')}= \"{value}\"" for i, exclude, value in zip(tab_stack, filter_exclude, filter_values))
             column_names = f"{f'{col_names[tab_i]} (where {filter_query})':<{curses.COLS - 29}.{curses.COLS - 29}}          Sent       Received"
         else:
             l_tabs = " | ".join(reversed([tab_names[tab_i-i] for i in range(1, len(tab_names))]))
@@ -1536,9 +1538,13 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
                 stdscr.attrset(curses.color_pair(1) | curses.A_BOLD)
                 # if space/enter was pressed on previous loop, check current line to update filter
                 if add_filter:
-                    if tab_i not in tab_stack:
-                        tab_stack.append(tab_i)
-                        filter_values.append(name)
+                    tab_stack.append(tab_i)
+                    filter_values.append(name)
+                    if add_filter_exclude:
+                        filter_exclude.append("NOT ")
+                    else:
+                        filter_exclude.append("")
+                    add_filter_exclude = False
                     break
             else:
                 stdscr.attrset(curses.color_pair(0))
@@ -1587,12 +1593,16 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
         else:
             ch = stdscr.getch()
         # process user input
-        if ch == ord("\n") or ch == ord(" "):
+        if ch == ord("\n") or ch == ord(" ") or ch == ord("f"):
             add_filter = True
-        elif ch == curses.KEY_BACKSPACE:
+        if ch == ord("e"):
+            add_filter = True
+            add_filter_exclude = True
+        elif ch == curses.KEY_BACKSPACE or ch == ord("F") or ch == ord("E"):
             if tab_stack:
                 tab_i = tab_stack.pop()
                 _ = filter_values.pop()
+                _ = filter_exclude.pop()
             update_query = True
             execute_query = True
         elif ch == ord("r"):

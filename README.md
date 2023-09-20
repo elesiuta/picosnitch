@@ -114,7 +114,7 @@
   - visit [http://localhost:5100](http://localhost:5100) (you change this by setting the environment variables `HOST` and `PORT`)
 - Terminal user interface for browsing past connections
   - start with `picosnitch view`
-  - `space/enter`: filter on entry `backspace`: remove filter `h/H`: cycle through history `t/T`: cycle time range `u/U`: cycle byte units `r`: refresh view `q`: quit
+  - `space/enter/f`: filter on entry `e`: exclude entry `backspace/F/E`: remove filter `h/H`: step through history (time offset) `t/T`: cycle time range `u/U`: cycle byte units `r`: refresh view `q`: quit
 - Show usage with `picosnitch help`
 
 # [Configuration](#configuration)
