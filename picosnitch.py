@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # picosnitch
-# Copyright (C) 2020-2022 Eric Lesiuta
+# Copyright (C) 2020-2023 Eric Lesiuta
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -57,7 +57,7 @@ site.addsitedir(os.path.expandvars("$PYTHON_USER_SITE"))
 import psutil
 
 # picosnitch version and supported platform
-VERSION: typing.Final[str] = "0.14.1"
+VERSION: typing.Final[str] = "1.0.0"
 assert sys.version_info >= (3, 8), "Python version >= 3.8 is required"
 assert sys.platform.startswith("linux"), "Did not detect a supported operating system"
 

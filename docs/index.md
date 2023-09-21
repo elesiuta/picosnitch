@@ -114,7 +114,7 @@
   - visit [http://localhost:5100](http://localhost:5100) (you change this by setting the environment variables `HOST` and `PORT`)
 - Terminal user interface for browsing past connections
   - start with `picosnitch view`
-  - `space/enter`: filter on entry `backspace`: remove filter `h/H`: cycle through history `t/T`: cycle time range `u/U`: cycle byte units `r`: refresh view `q`: quit
+  - `space/enter/f`: filter on entry `e`: exclude entry `backspace/F/E`: remove filter `h/H`: step through history (time offset) `t/T`: cycle time range `u/U`: cycle byte units `r`: refresh view `q`: quit
 - Show usage with `picosnitch help`
 
 # [Configuration](#configuration)
@@ -147,6 +147,7 @@
   # will omit connections that match any of these from the connection log
   # domains are in reverse domain name notation and will match all subdomains
   # the process name, executable, and hash will still be recorded in record.json
+  "Log ports": true, # Log local and remote ports for each connection
   "Perf ring buffer (pages)": 256, # Power of two number of pages for BPF program
   # only change this if it is giving you errors (e.g. missed events)
   # picosnitch opens a perf buffer for each event type, so this is multiplied by up to 18
@@ -154,6 +155,9 @@
   # it is used for caching process executables and hashes (typical system default is 1024)
   # this is good enough for most people since caching is based on executable device + inode
   # fanotify is used to detect if a cached executable is modified to trigger a hash update
+  "Set st_dev mask": null, # Mask device number for open file descriptors (int)
+  # set to 0 to disable verification if it is giving you errors (e.g. FD cache errors)
+  # defaults to 0 if a btrfs partition is detected, otherwise 0xffffffff
   "VT API key": "", # API key for VirusTotal, leave blank to disable (str)
   "VT file upload": false, # Upload file if hash not found, only hashes are used by default
   "VT request limit (seconds)": 15 # Number of seconds between requests (free tier quota)
