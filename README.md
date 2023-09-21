@@ -155,6 +155,9 @@
   # it is used for caching process executables and hashes (typical system default is 1024)
   # this is good enough for most people since caching is based on executable device + inode
   # fanotify is used to detect if a cached executable is modified to trigger a hash update
+  "Set st_dev mask": null, # Mask device number for open file descriptors (int)
+  # set to 0 to disable verification if it is giving you errors (e.g. FD cache errors)
+  # defaults to 0 if a btrfs partition is detected, otherwise 0xffffffff
   "VT API key": "", # API key for VirusTotal, leave blank to disable (str)
   "VT file upload": false, # Upload file if hash not found, only hashes are used by default
   "VT request limit (seconds)": 15 # Number of seconds between requests (free tier quota)

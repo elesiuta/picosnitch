@@ -113,6 +113,11 @@ try:
                 # only warn users about btrfs on first run (by checking for config.json)
                 print("Warning: running picosnitch on systems with btrfs is not fully supported due to dev number strangeness and non-unique inodes (this is still fine for most use cases)", file=sys.stderr)
             break
+    file_path = os.path.join(BASE_PATH, "config.json")
+    with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
+        set_mask = json.load(json_file)["Set st_dev mask"]
+    if type(set_mask) == int:
+        st_dev_mask = set_mask
 except Exception:
     pass
 ST_DEV_MASK: typing.Final[int] = st_dev_mask
@@ -378,6 +383,7 @@ def read_snitch() -> dict:
             "Log ports": True,
             "Perf ring buffer (pages)": 256,
             "Set RLIMIT_NOFILE": None,
+            "Set st_dev mask": None,
             "VT API key": "",
             "VT file upload": False,
             "VT request limit (seconds)": 15
