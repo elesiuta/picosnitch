@@ -417,7 +417,7 @@ def read_snitch() -> dict:
             if key in snitch_record:
                 data[key] = snitch_record[key]
     assert all(type(data[key]) == type(template[key]) for key in template), "Invalid json files"
-    assert all(key == "Set RLIMIT_NOFILE" or type(data["Config"][key]) == type(template["Config"][key]) for key in template["Config"]), "Invalid config"
+    assert all(key in ["Set RLIMIT_NOFILE", "Set st_dev mask"] or type(data["Config"][key]) == type(template["Config"][key]) for key in template["Config"]), "Invalid config"
     if write_config:
         write_snitch(data, write_config=True)
     return data
