@@ -2159,8 +2159,10 @@ def start_picosnitch():
                    |______|--> enable/disable autostart on reboot
 
     * if systemctl isn't working, recreate the service with `picosnitch systemd`
-
     * if you don't use systemd, you can use `picosnitch start|stop|restart` instead
+    * if the daemon isn't working, try `picosnitch start-no-daemon`
+    * if dash isn't working, try `picosnitch start-dash` to see any errors
+    * available environment variables for dash: HOST, PORT, DASH_DEBUG
     """)
     systemd_service = textwrap.dedent(f"""    [Unit]
     Description=picosnitch
@@ -2326,6 +2328,7 @@ def start_picosnitch():
             except Exception:
                 pass
             print(f"serving web gui on http://{os.getenv('HOST', 'localhost')}:{os.getenv('PORT', '5100')}")
+            print("if this fails, try running `picosnitch start-dash` to see any errors")
             if sys.executable.startswith("/snap/") or sys.executable.startswith("/nix/"):
                 subprocess.Popen(["bash", "-c", f'/usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 return ui_dash()
