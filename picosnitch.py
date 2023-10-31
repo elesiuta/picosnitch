@@ -1302,10 +1302,12 @@ def main_process(snitch: dict):
         while True:
             time.sleep(5)
             if not all(p.is_alive() for p in subprocesses):
-                q_error.put("picosnitch subprocess died, attempting restart, terminate by running `picosnitch stop`")
+                dead = " ".join([p.name for p in subprocesses if not p.is_alive()])
+                q_error.put(f"picosnitch subprocess died, attempting restart, terminate by running `picosnitch stop` ({dead})")
                 break
             if any(p.is_zombie() for p in subprocesses):
-                q_error.put("picosnitch subprocess became a zombie, attempting restart")
+                zombies = " ".join([p.name for p in subprocesses if p.is_zombie()])
+                q_error.put(f"picosnitch subprocess became a zombie, attempting restart ({zombies})")
                 break
             if sum(p.memory() for p in subprocesses) > 4096000000:
                 q_error.put("picosnitch memory usage exceeded 4096 MB, attempting restart")
