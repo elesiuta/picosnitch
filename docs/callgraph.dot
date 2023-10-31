@@ -251,6 +251,11 @@ digraph G {
             subgraph cluster_picosnitch__monitor_subprocess {
 
                 graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
+                picosnitch__monitor_subprocess__get_cmdline [label="get_cmdline", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            }
+            subgraph cluster_picosnitch__monitor_subprocess {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
                 picosnitch__monitor_subprocess__get_fd [label="get_fd", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             }
             subgraph cluster_picosnitch__monitor_subprocess {
@@ -417,6 +422,7 @@ digraph G {
         picosnitch__main_process -> picosnitch__virustotal_subprocess [style="solid", color="#000000"];
         picosnitch__main_process__clean_exit -> picosnitch__ProcessManager [style="solid", color="#000000"];
         picosnitch__main_process__clean_exit -> picosnitch__ProcessManager__terminate [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
         picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
         picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_dns_event [style="solid", color="#000000"];
         picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_exec_event [style="solid", color="#000000"];
@@ -427,10 +433,15 @@ digraph G {
         picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_sendv6_event [style="solid", color="#000000"];
         picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess_initial_poll [style="solid", color="#000000"];
         picosnitch__monitor_subprocess__get_fd -> picosnitch__get_fstat [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__queue_exec_event -> picosnitch__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
         picosnitch__monitor_subprocess__queue_exec_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__queue_recvv4_event -> picosnitch__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
         picosnitch__monitor_subprocess__queue_recvv4_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__queue_recvv6_event -> picosnitch__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
         picosnitch__monitor_subprocess__queue_recvv6_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__queue_sendv4_event -> picosnitch__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
         picosnitch__monitor_subprocess__queue_sendv4_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__queue_sendv6_event -> picosnitch__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
         picosnitch__monitor_subprocess__queue_sendv6_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
         picosnitch__primary_subprocess -> picosnitch__NotificationManager__enable_notifications [style="solid", color="#000000"];
         picosnitch__primary_subprocess -> picosnitch__NotificationManager__toast [style="solid", color="#000000"];
