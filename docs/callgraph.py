@@ -4,7 +4,7 @@ import os
 # generate call graph using pyan3==1.0.4
 print("Generating call graph for picosnitch")
 os.chdir(os.path.dirname(__file__))
-os.system("pyan3 ../picosnitch.py --no-defines --uses --colored --nested-groups --dot > callgraph.dot")
+os.system("pyan3 ../picosnitch/*.py --no-defines --uses --colored --nested-groups --dot > callgraph.dot")
 
 # sort edges so output is deterministic
 with open("callgraph.dot", "r") as f:

@@ -3,489 +3,501 @@ digraph G {
     subgraph cluster_G {
 
         graph [style="filled,rounded",fillcolor="#80808018", label=""];
-        picosnitch [label="picosnitch", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="0"];
-        subgraph cluster_picosnitch {
+        picosnitch__cli [label="picosnitch.cli", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="0"];
+        picosnitch__daemon [label="picosnitch.daemon", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="1"];
+        picosnitch__event_structures [label="picosnitch.event_structures", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="2"];
+        picosnitch__main_process [label="picosnitch.main_process", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="3"];
+        picosnitch__monitor_subprocess [label="picosnitch.monitor_subprocess", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="4"];
+        picosnitch__notifcation_manager [label="picosnitch.notifcation_manager", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="5"];
+        picosnitch__primary_subprocess [label="picosnitch.primary_subprocess", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="6"];
+        picosnitch__process_manager [label="picosnitch.process_manager", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="7"];
+        picosnitch__rfuse_subprocess [label="picosnitch.rfuse_subprocess", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="8"];
+        picosnitch__secondary_subprocess [label="picosnitch.secondary_subprocess", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="9"];
+        picosnitch__user_interface [label="picosnitch.user_interface", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="10"];
+        picosnitch__utils [label="picosnitch.utils", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="11"];
+        picosnitch__virustotal_subprocess [label="picosnitch.virustotal_subprocess", style="filled", fillcolor="#ffffffb2", fontcolor="#000000", group="12"];
+        subgraph cluster_picosnitch__cli {
 
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__BpfEvent [label="BpfEvent", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.cli"];
+            picosnitch__cli__main [label="main", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
         }
-        subgraph cluster_picosnitch {
+        subgraph cluster_picosnitch__cli {
 
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__Daemon [label="Daemon", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.cli"];
+            picosnitch__cli__start_picosnitch [label="start_picosnitch", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            subgraph cluster_picosnitch__cli__start_picosnitch {
 
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__FanotifyEventMetadata [label="FanotifyEventMetadata", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__NotificationManager [label="NotificationManager", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__ProcessManager [label="ProcessManager", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__get_fanotify_events [label="get_fanotify_events", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__get_fstat [label="get_fstat", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__get_sha256_fd [label="get_sha256_fd", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__get_sha256_fuse [label="get_sha256_fuse", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__get_sha256_pid [label="get_sha256_pid", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__get_vt_results [label="get_vt_results", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__main [label="main", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__main_process [label="main_process", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__monitor_subprocess [label="monitor_subprocess", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__monitor_subprocess_initial_poll [label="monitor_subprocess_initial_poll", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__primary_subprocess [label="primary_subprocess", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__primary_subprocess_helper [label="primary_subprocess_helper", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__read_snitch [label="read_snitch", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__reverse_dns_lookup [label="reverse_dns_lookup", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__rfuse_subprocess [label="rfuse_subprocess", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__secondary_subprocess [label="secondary_subprocess", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__secondary_subprocess_helper [label="secondary_subprocess_helper", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__secondary_subprocess_sha_wrapper [label="secondary_subprocess_sha_wrapper", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__start_picosnitch [label="start_picosnitch", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__ui_dash [label="ui_dash", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__ui_geoip [label="ui_geoip", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__ui_init [label="ui_init", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__ui_loop [label="ui_loop", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__virustotal_subprocess [label="virustotal_subprocess", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-        }
-        subgraph cluster_picosnitch {
-
-            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch"];
-            picosnitch__write_snitch [label="write_snitch", style="filled", fillcolor="#feccccb2", fontcolor="#000000", group="0"];
-            subgraph cluster_picosnitch__Daemon {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.Daemon"];
-                picosnitch__Daemon____init__ [label="__init__", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.cli.start_picosnitch"];
+                picosnitch__cli__start_picosnitch__PicoDaemon [label="PicoDaemon", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
             }
-            subgraph cluster_picosnitch__Daemon {
+            subgraph cluster_picosnitch__cli__start_picosnitch {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.Daemon"];
-                picosnitch__Daemon__daemonize [label="daemonize", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__Daemon {
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.cli.start_picosnitch"];
+                picosnitch__cli__start_picosnitch__delpid [label="delpid", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
+                subgraph cluster_picosnitch__cli__start_picosnitch__PicoDaemon {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.Daemon"];
-                picosnitch__Daemon__delpid [label="delpid", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__Daemon {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.Daemon"];
-                picosnitch__Daemon__getpid [label="getpid", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__Daemon {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.Daemon"];
-                picosnitch__Daemon__restart [label="restart", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__Daemon {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.Daemon"];
-                picosnitch__Daemon__run [label="run", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__Daemon {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.Daemon"];
-                picosnitch__Daemon__start [label="start", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__Daemon {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.Daemon"];
-                picosnitch__Daemon__status [label="status", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__Daemon {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.Daemon"];
-                picosnitch__Daemon__stop [label="stop", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__NotificationManager {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.NotificationManager"];
-                picosnitch__NotificationManager____new__ [label="__new__", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__NotificationManager {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.NotificationManager"];
-                picosnitch__NotificationManager__enable_notifications [label="enable_notifications", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__NotificationManager {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.NotificationManager"];
-                picosnitch__NotificationManager__toast [label="toast", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__ProcessManager {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ProcessManager"];
-                picosnitch__ProcessManager____init__ [label="__init__", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__ProcessManager {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ProcessManager"];
-                picosnitch__ProcessManager__is_alive [label="is_alive", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__ProcessManager {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ProcessManager"];
-                picosnitch__ProcessManager__is_zombie [label="is_zombie", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__ProcessManager {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ProcessManager"];
-                picosnitch__ProcessManager__memory [label="memory", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__ProcessManager {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ProcessManager"];
-                picosnitch__ProcessManager__start [label="start", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__ProcessManager {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ProcessManager"];
-                picosnitch__ProcessManager__terminate [label="terminate", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__main_process {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.main_process"];
-                picosnitch__main_process__clean_exit [label="clean_exit", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__monitor_subprocess {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
-                picosnitch__monitor_subprocess__get_cmdline [label="get_cmdline", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__monitor_subprocess {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
-                picosnitch__monitor_subprocess__get_fd [label="get_fd", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__monitor_subprocess {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
-                picosnitch__monitor_subprocess__queue_dns_event [label="queue_dns_event", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__monitor_subprocess {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
-                picosnitch__monitor_subprocess__queue_exec_event [label="queue_exec_event", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__monitor_subprocess {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
-                picosnitch__monitor_subprocess__queue_lost [label="queue_lost", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__monitor_subprocess {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
-                picosnitch__monitor_subprocess__queue_recvv4_event [label="queue_recvv4_event", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__monitor_subprocess {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
-                picosnitch__monitor_subprocess__queue_recvv6_event [label="queue_recvv6_event", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__monitor_subprocess {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
-                picosnitch__monitor_subprocess__queue_sendv4_event [label="queue_sendv4_event", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__monitor_subprocess {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
-                picosnitch__monitor_subprocess__queue_sendv6_event [label="queue_sendv6_event", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__primary_subprocess {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.primary_subprocess"];
-                picosnitch__primary_subprocess__snitch_pipe_thread [label="snitch_pipe_thread", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__primary_subprocess {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.primary_subprocess"];
-                picosnitch__primary_subprocess__write_snitch_and_exit [label="write_snitch_and_exit", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__start_picosnitch {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.start_picosnitch"];
-                picosnitch__start_picosnitch__PicoDaemon [label="PicoDaemon", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            }
-            subgraph cluster_picosnitch__start_picosnitch {
-
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.start_picosnitch"];
-                picosnitch__start_picosnitch__delpid [label="delpid", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-                subgraph cluster_picosnitch__start_picosnitch__PicoDaemon {
-
-                    graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.start_picosnitch.PicoDaemon"];
-                    picosnitch__start_picosnitch__PicoDaemon__run [label="run", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
+                    graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.cli.start_picosnitch.PicoDaemon"];
+                    picosnitch__cli__start_picosnitch__PicoDaemon__run [label="run", style="filled", fillcolor="#ff3232b2", fontcolor="#000000", group="0"];
                 }
             }
-            subgraph cluster_picosnitch__ui_dash {
+        }
+        subgraph cluster_picosnitch__daemon {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
-                picosnitch__ui_dash__display_time_range [label="display_time_range", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.daemon"];
+            picosnitch__daemon__Daemon [label="Daemon", style="filled", fillcolor="#ffc499b2", fontcolor="#000000", group="1"];
+            subgraph cluster_picosnitch__daemon__Daemon {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.daemon.Daemon"];
+                picosnitch__daemon__Daemon____init__ [label="__init__", style="filled", fillcolor="#ffa765b2", fontcolor="#000000", group="1"];
             }
-            subgraph cluster_picosnitch__ui_dash {
+            subgraph cluster_picosnitch__daemon__Daemon {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
-                picosnitch__ui_dash__exit [label="exit", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.daemon.Daemon"];
+                picosnitch__daemon__Daemon__daemonize [label="daemonize", style="filled", fillcolor="#ffa765b2", fontcolor="#000000", group="1"];
             }
-            subgraph cluster_picosnitch__ui_dash {
+            subgraph cluster_picosnitch__daemon__Daemon {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
-                picosnitch__ui_dash__get_geoip [label="get_geoip", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.daemon.Daemon"];
+                picosnitch__daemon__Daemon__delpid [label="delpid", style="filled", fillcolor="#ffa765b2", fontcolor="#000000", group="1"];
             }
-            subgraph cluster_picosnitch__ui_dash {
+            subgraph cluster_picosnitch__daemon__Daemon {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
-                picosnitch__ui_dash__get_totals [label="get_totals", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.daemon.Daemon"];
+                picosnitch__daemon__Daemon__getpid [label="getpid", style="filled", fillcolor="#ffa765b2", fontcolor="#000000", group="1"];
             }
-            subgraph cluster_picosnitch__ui_dash {
+            subgraph cluster_picosnitch__daemon__Daemon {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
-                picosnitch__ui_dash__get_user [label="get_user", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.daemon.Daemon"];
+                picosnitch__daemon__Daemon__restart [label="restart", style="filled", fillcolor="#ffa765b2", fontcolor="#000000", group="1"];
             }
-            subgraph cluster_picosnitch__ui_dash {
+            subgraph cluster_picosnitch__daemon__Daemon {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
-                picosnitch__ui_dash__serve_layout [label="serve_layout", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.daemon.Daemon"];
+                picosnitch__daemon__Daemon__run [label="run", style="filled", fillcolor="#ffa765b2", fontcolor="#000000", group="1"];
             }
-            subgraph cluster_picosnitch__ui_dash {
+            subgraph cluster_picosnitch__daemon__Daemon {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
-                picosnitch__ui_dash__toggle_refresh [label="toggle_refresh", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.daemon.Daemon"];
+                picosnitch__daemon__Daemon__start [label="start", style="filled", fillcolor="#ffa765b2", fontcolor="#000000", group="1"];
             }
-            subgraph cluster_picosnitch__ui_dash {
+            subgraph cluster_picosnitch__daemon__Daemon {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
-                picosnitch__ui_dash__trim_label [label="trim_label", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.daemon.Daemon"];
+                picosnitch__daemon__Daemon__status [label="status", style="filled", fillcolor="#ffa765b2", fontcolor="#000000", group="1"];
             }
-            subgraph cluster_picosnitch__ui_dash {
+            subgraph cluster_picosnitch__daemon__Daemon {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
-                picosnitch__ui_dash__update [label="update", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.daemon.Daemon"];
+                picosnitch__daemon__Daemon__stop [label="stop", style="filled", fillcolor="#ffa765b2", fontcolor="#000000", group="1"];
             }
-            subgraph cluster_picosnitch__ui_dash {
+        }
+        subgraph cluster_picosnitch__event_structures {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
-                picosnitch__ui_dash__update_time_slider_marks [label="update_time_slider_marks", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.event_structures"];
+            picosnitch__event_structures__BpfEvent [label="BpfEvent", style="filled", fillcolor="#fff099b2", fontcolor="#000000", group="2"];
+        }
+        subgraph cluster_picosnitch__event_structures {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.event_structures"];
+            picosnitch__event_structures__FanotifyEventMetadata [label="FanotifyEventMetadata", style="filled", fillcolor="#fff099b2", fontcolor="#000000", group="2"];
+        }
+        subgraph cluster_picosnitch__main_process {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.main_process"];
+            picosnitch__main_process__main_process [label="main_process", style="filled", fillcolor="#e1ff99b2", fontcolor="#000000", group="3"];
+            subgraph cluster_picosnitch__main_process__main_process {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.main_process.main_process"];
+                picosnitch__main_process__main_process__clean_exit [label="clean_exit", style="filled", fillcolor="#d3ff65b2", fontcolor="#000000", group="3"];
             }
-            subgraph cluster_picosnitch__ui_dash {
+        }
+        subgraph cluster_picosnitch__monitor_subprocess {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_dash"];
-                picosnitch__ui_dash__update_time_slider_pos [label="update_time_slider_pos", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
+            picosnitch__monitor_subprocess__monitor_subprocess [label="monitor_subprocess", style="filled", fillcolor="#b6ff99b2", fontcolor="#000000", group="4"];
+        }
+        subgraph cluster_picosnitch__monitor_subprocess {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess"];
+            picosnitch__monitor_subprocess__monitor_subprocess_initial_poll [label="monitor_subprocess_initial_poll", style="filled", fillcolor="#b6ff99b2", fontcolor="#000000", group="4"];
+            subgraph cluster_picosnitch__monitor_subprocess__monitor_subprocess {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess.monitor_subprocess"];
+                picosnitch__monitor_subprocess__monitor_subprocess__get_cmdline [label="get_cmdline", style="filled", fillcolor="#91ff65b2", fontcolor="#000000", group="4"];
             }
-            subgraph cluster_picosnitch__ui_loop {
+            subgraph cluster_picosnitch__monitor_subprocess__monitor_subprocess {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_loop"];
-                picosnitch__ui_loop__fetch_query_results [label="fetch_query_results", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess.monitor_subprocess"];
+                picosnitch__monitor_subprocess__monitor_subprocess__get_fd [label="get_fd", style="filled", fillcolor="#91ff65b2", fontcolor="#000000", group="4"];
             }
-            subgraph cluster_picosnitch__ui_loop {
+            subgraph cluster_picosnitch__monitor_subprocess__monitor_subprocess {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.ui_loop"];
-                picosnitch__ui_loop__get_geoip [label="get_geoip", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess.monitor_subprocess"];
+                picosnitch__monitor_subprocess__monitor_subprocess__queue_dns_event [label="queue_dns_event", style="filled", fillcolor="#91ff65b2", fontcolor="#000000", group="4"];
             }
-            subgraph cluster_picosnitch__virustotal_subprocess {
+            subgraph cluster_picosnitch__monitor_subprocess__monitor_subprocess {
 
-                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.virustotal_subprocess"];
-                picosnitch__virustotal_subprocess__get_analysis [label="get_analysis", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess.monitor_subprocess"];
+                picosnitch__monitor_subprocess__monitor_subprocess__queue_exec_event [label="queue_exec_event", style="filled", fillcolor="#91ff65b2", fontcolor="#000000", group="4"];
+            }
+            subgraph cluster_picosnitch__monitor_subprocess__monitor_subprocess {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess.monitor_subprocess"];
+                picosnitch__monitor_subprocess__monitor_subprocess__queue_lost [label="queue_lost", style="filled", fillcolor="#91ff65b2", fontcolor="#000000", group="4"];
+            }
+            subgraph cluster_picosnitch__monitor_subprocess__monitor_subprocess {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess.monitor_subprocess"];
+                picosnitch__monitor_subprocess__monitor_subprocess__queue_recvv4_event [label="queue_recvv4_event", style="filled", fillcolor="#91ff65b2", fontcolor="#000000", group="4"];
+            }
+            subgraph cluster_picosnitch__monitor_subprocess__monitor_subprocess {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess.monitor_subprocess"];
+                picosnitch__monitor_subprocess__monitor_subprocess__queue_recvv6_event [label="queue_recvv6_event", style="filled", fillcolor="#91ff65b2", fontcolor="#000000", group="4"];
+            }
+            subgraph cluster_picosnitch__monitor_subprocess__monitor_subprocess {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess.monitor_subprocess"];
+                picosnitch__monitor_subprocess__monitor_subprocess__queue_sendv4_event [label="queue_sendv4_event", style="filled", fillcolor="#91ff65b2", fontcolor="#000000", group="4"];
+            }
+            subgraph cluster_picosnitch__monitor_subprocess__monitor_subprocess {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.monitor_subprocess.monitor_subprocess"];
+                picosnitch__monitor_subprocess__monitor_subprocess__queue_sendv6_event [label="queue_sendv6_event", style="filled", fillcolor="#91ff65b2", fontcolor="#000000", group="4"];
+            }
+        }
+        subgraph cluster_picosnitch__notifcation_manager {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.notifcation_manager"];
+            picosnitch__notifcation_manager__NotificationManager [label="NotificationManager", style="filled", fillcolor="#99ffa7b2", fontcolor="#000000", group="5"];
+            subgraph cluster_picosnitch__notifcation_manager__NotificationManager {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.notifcation_manager.NotificationManager"];
+                picosnitch__notifcation_manager__NotificationManager____new__ [label="__new__", style="filled", fillcolor="#65ff7bb2", fontcolor="#000000", group="5"];
+            }
+            subgraph cluster_picosnitch__notifcation_manager__NotificationManager {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.notifcation_manager.NotificationManager"];
+                picosnitch__notifcation_manager__NotificationManager__enable_notifications [label="enable_notifications", style="filled", fillcolor="#65ff7bb2", fontcolor="#000000", group="5"];
+            }
+            subgraph cluster_picosnitch__notifcation_manager__NotificationManager {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.notifcation_manager.NotificationManager"];
+                picosnitch__notifcation_manager__NotificationManager__toast [label="toast", style="filled", fillcolor="#65ff7bb2", fontcolor="#000000", group="5"];
+            }
+        }
+        subgraph cluster_picosnitch__primary_subprocess {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.primary_subprocess"];
+            picosnitch__primary_subprocess__primary_subprocess [label="primary_subprocess", style="filled", fillcolor="#99ffd3b2", fontcolor="#000000", group="6"];
+        }
+        subgraph cluster_picosnitch__primary_subprocess {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.primary_subprocess"];
+            picosnitch__primary_subprocess__primary_subprocess_helper [label="primary_subprocess_helper", style="filled", fillcolor="#99ffd3b2", fontcolor="#000000", group="6"];
+            subgraph cluster_picosnitch__primary_subprocess__primary_subprocess {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.primary_subprocess.primary_subprocess"];
+                picosnitch__primary_subprocess__primary_subprocess__snitch_pipe_thread [label="snitch_pipe_thread", style="filled", fillcolor="#65ffbdb2", fontcolor="#000000", group="6"];
+            }
+            subgraph cluster_picosnitch__primary_subprocess__primary_subprocess {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.primary_subprocess.primary_subprocess"];
+                picosnitch__primary_subprocess__primary_subprocess__write_snitch_and_exit [label="write_snitch_and_exit", style="filled", fillcolor="#65ffbdb2", fontcolor="#000000", group="6"];
+            }
+        }
+        subgraph cluster_picosnitch__process_manager {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.process_manager"];
+            picosnitch__process_manager__ProcessManager [label="ProcessManager", style="filled", fillcolor="#99feffb2", fontcolor="#000000", group="7"];
+            subgraph cluster_picosnitch__process_manager__ProcessManager {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.process_manager.ProcessManager"];
+                picosnitch__process_manager__ProcessManager____init__ [label="__init__", style="filled", fillcolor="#65feffb2", fontcolor="#000000", group="7"];
+            }
+            subgraph cluster_picosnitch__process_manager__ProcessManager {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.process_manager.ProcessManager"];
+                picosnitch__process_manager__ProcessManager__is_alive [label="is_alive", style="filled", fillcolor="#65feffb2", fontcolor="#000000", group="7"];
+            }
+            subgraph cluster_picosnitch__process_manager__ProcessManager {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.process_manager.ProcessManager"];
+                picosnitch__process_manager__ProcessManager__is_zombie [label="is_zombie", style="filled", fillcolor="#65feffb2", fontcolor="#000000", group="7"];
+            }
+            subgraph cluster_picosnitch__process_manager__ProcessManager {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.process_manager.ProcessManager"];
+                picosnitch__process_manager__ProcessManager__memory [label="memory", style="filled", fillcolor="#65feffb2", fontcolor="#000000", group="7"];
+            }
+            subgraph cluster_picosnitch__process_manager__ProcessManager {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.process_manager.ProcessManager"];
+                picosnitch__process_manager__ProcessManager__start [label="start", style="filled", fillcolor="#65feffb2", fontcolor="#000000", group="7"];
+            }
+            subgraph cluster_picosnitch__process_manager__ProcessManager {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.process_manager.ProcessManager"];
+                picosnitch__process_manager__ProcessManager__terminate [label="terminate", style="filled", fillcolor="#65feffb2", fontcolor="#000000", group="7"];
+            }
+        }
+        subgraph cluster_picosnitch__rfuse_subprocess {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.rfuse_subprocess"];
+            picosnitch__rfuse_subprocess__rfuse_subprocess [label="rfuse_subprocess", style="filled", fillcolor="#99d3ffb2", fontcolor="#000000", group="8"];
+        }
+        subgraph cluster_picosnitch__secondary_subprocess {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.secondary_subprocess"];
+            picosnitch__secondary_subprocess__secondary_subprocess [label="secondary_subprocess", style="filled", fillcolor="#99a7ffb2", fontcolor="#000000", group="9"];
+        }
+        subgraph cluster_picosnitch__secondary_subprocess {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.secondary_subprocess"];
+            picosnitch__secondary_subprocess__secondary_subprocess_helper [label="secondary_subprocess_helper", style="filled", fillcolor="#99a7ffb2", fontcolor="#000000", group="9"];
+        }
+        subgraph cluster_picosnitch__secondary_subprocess {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.secondary_subprocess"];
+            picosnitch__secondary_subprocess__secondary_subprocess_sha_wrapper [label="secondary_subprocess_sha_wrapper", style="filled", fillcolor="#99a7ffb2", fontcolor="#000000", group="9"];
+        }
+        subgraph cluster_picosnitch__user_interface {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface"];
+            picosnitch__user_interface__ui_dash [label="ui_dash", style="filled", fillcolor="#b699ffb2", fontcolor="#000000", group="10"];
+        }
+        subgraph cluster_picosnitch__user_interface {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface"];
+            picosnitch__user_interface__ui_geoip [label="ui_geoip", style="filled", fillcolor="#b699ffb2", fontcolor="#000000", group="10"];
+        }
+        subgraph cluster_picosnitch__user_interface {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface"];
+            picosnitch__user_interface__ui_init [label="ui_init", style="filled", fillcolor="#b699ffb2", fontcolor="#000000", group="10"];
+        }
+        subgraph cluster_picosnitch__user_interface {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface"];
+            picosnitch__user_interface__ui_loop [label="ui_loop", style="filled", fillcolor="#b699ffb2", fontcolor="#000000", group="10"];
+            subgraph cluster_picosnitch__user_interface__ui_dash {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface.ui_dash"];
+                picosnitch__user_interface__ui_dash__display_time_range [label="display_time_range", style="filled", fillcolor="#9165ffb2", fontcolor="#000000", group="10"];
+            }
+            subgraph cluster_picosnitch__user_interface__ui_dash {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface.ui_dash"];
+                picosnitch__user_interface__ui_dash__exit [label="exit", style="filled", fillcolor="#9165ffb2", fontcolor="#000000", group="10"];
+            }
+            subgraph cluster_picosnitch__user_interface__ui_dash {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface.ui_dash"];
+                picosnitch__user_interface__ui_dash__get_geoip [label="get_geoip", style="filled", fillcolor="#9165ffb2", fontcolor="#000000", group="10"];
+            }
+            subgraph cluster_picosnitch__user_interface__ui_dash {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface.ui_dash"];
+                picosnitch__user_interface__ui_dash__get_totals [label="get_totals", style="filled", fillcolor="#9165ffb2", fontcolor="#000000", group="10"];
+            }
+            subgraph cluster_picosnitch__user_interface__ui_dash {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface.ui_dash"];
+                picosnitch__user_interface__ui_dash__get_user [label="get_user", style="filled", fillcolor="#9165ffb2", fontcolor="#000000", group="10"];
+            }
+            subgraph cluster_picosnitch__user_interface__ui_dash {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface.ui_dash"];
+                picosnitch__user_interface__ui_dash__serve_layout [label="serve_layout", style="filled", fillcolor="#9165ffb2", fontcolor="#000000", group="10"];
+            }
+            subgraph cluster_picosnitch__user_interface__ui_dash {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface.ui_dash"];
+                picosnitch__user_interface__ui_dash__toggle_refresh [label="toggle_refresh", style="filled", fillcolor="#9165ffb2", fontcolor="#000000", group="10"];
+            }
+            subgraph cluster_picosnitch__user_interface__ui_dash {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface.ui_dash"];
+                picosnitch__user_interface__ui_dash__trim_label [label="trim_label", style="filled", fillcolor="#9165ffb2", fontcolor="#000000", group="10"];
+            }
+            subgraph cluster_picosnitch__user_interface__ui_dash {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface.ui_dash"];
+                picosnitch__user_interface__ui_dash__update [label="update", style="filled", fillcolor="#9165ffb2", fontcolor="#000000", group="10"];
+            }
+            subgraph cluster_picosnitch__user_interface__ui_dash {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface.ui_dash"];
+                picosnitch__user_interface__ui_dash__update_time_slider_marks [label="update_time_slider_marks", style="filled", fillcolor="#9165ffb2", fontcolor="#000000", group="10"];
+            }
+            subgraph cluster_picosnitch__user_interface__ui_dash {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface.ui_dash"];
+                picosnitch__user_interface__ui_dash__update_time_slider_pos [label="update_time_slider_pos", style="filled", fillcolor="#9165ffb2", fontcolor="#000000", group="10"];
+            }
+            subgraph cluster_picosnitch__user_interface__ui_loop {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface.ui_loop"];
+                picosnitch__user_interface__ui_loop__fetch_query_results [label="fetch_query_results", style="filled", fillcolor="#9165ffb2", fontcolor="#000000", group="10"];
+            }
+            subgraph cluster_picosnitch__user_interface__ui_loop {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.user_interface.ui_loop"];
+                picosnitch__user_interface__ui_loop__get_geoip [label="get_geoip", style="filled", fillcolor="#9165ffb2", fontcolor="#000000", group="10"];
+            }
+        }
+        subgraph cluster_picosnitch__utils {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.utils"];
+            picosnitch__utils__get_fanotify_events [label="get_fanotify_events", style="filled", fillcolor="#e199ffb2", fontcolor="#000000", group="11"];
+        }
+        subgraph cluster_picosnitch__utils {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.utils"];
+            picosnitch__utils__get_fstat [label="get_fstat", style="filled", fillcolor="#e199ffb2", fontcolor="#000000", group="11"];
+        }
+        subgraph cluster_picosnitch__utils {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.utils"];
+            picosnitch__utils__get_sha256_fd [label="get_sha256_fd", style="filled", fillcolor="#e199ffb2", fontcolor="#000000", group="11"];
+        }
+        subgraph cluster_picosnitch__utils {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.utils"];
+            picosnitch__utils__get_sha256_fuse [label="get_sha256_fuse", style="filled", fillcolor="#e199ffb2", fontcolor="#000000", group="11"];
+        }
+        subgraph cluster_picosnitch__utils {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.utils"];
+            picosnitch__utils__get_sha256_pid [label="get_sha256_pid", style="filled", fillcolor="#e199ffb2", fontcolor="#000000", group="11"];
+        }
+        subgraph cluster_picosnitch__utils {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.utils"];
+            picosnitch__utils__get_vt_results [label="get_vt_results", style="filled", fillcolor="#e199ffb2", fontcolor="#000000", group="11"];
+        }
+        subgraph cluster_picosnitch__utils {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.utils"];
+            picosnitch__utils__read_snitch [label="read_snitch", style="filled", fillcolor="#e199ffb2", fontcolor="#000000", group="11"];
+        }
+        subgraph cluster_picosnitch__utils {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.utils"];
+            picosnitch__utils__reverse_dns_lookup [label="reverse_dns_lookup", style="filled", fillcolor="#e199ffb2", fontcolor="#000000", group="11"];
+        }
+        subgraph cluster_picosnitch__utils {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.utils"];
+            picosnitch__utils__write_snitch [label="write_snitch", style="filled", fillcolor="#e199ffb2", fontcolor="#000000", group="11"];
+        }
+        subgraph cluster_picosnitch__virustotal_subprocess {
+
+            graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.virustotal_subprocess"];
+            picosnitch__virustotal_subprocess__virustotal_subprocess [label="virustotal_subprocess", style="filled", fillcolor="#ff99f0b2", fontcolor="#000000", group="12"];
+            subgraph cluster_picosnitch__virustotal_subprocess__virustotal_subprocess {
+
+                graph [style="filled,rounded",fillcolor="#80808018", label="picosnitch.virustotal_subprocess.virustotal_subprocess"];
+                picosnitch__virustotal_subprocess__virustotal_subprocess__get_analysis [label="get_analysis", style="filled", fillcolor="#ff65e9b2", fontcolor="#000000", group="12"];
             }
         }
     }
-        picosnitch -> picosnitch__start_picosnitch [style="solid", color="#000000"];
-        picosnitch__Daemon__daemonize -> picosnitch__Daemon__delpid [style="solid", color="#000000"];
-        picosnitch__Daemon__restart -> picosnitch__Daemon__start [style="solid", color="#000000"];
-        picosnitch__Daemon__restart -> picosnitch__Daemon__stop [style="solid", color="#000000"];
-        picosnitch__Daemon__start -> picosnitch__Daemon__daemonize [style="solid", color="#000000"];
-        picosnitch__Daemon__start -> picosnitch__Daemon__getpid [style="solid", color="#000000"];
-        picosnitch__Daemon__start -> picosnitch__Daemon__run [style="solid", color="#000000"];
-        picosnitch__Daemon__status -> picosnitch__Daemon__getpid [style="solid", color="#000000"];
-        picosnitch__Daemon__stop -> picosnitch__Daemon__getpid [style="solid", color="#000000"];
-        picosnitch__NotificationManager__toast -> picosnitch__NotificationManager__enable_notifications [style="solid", color="#000000"];
-        picosnitch__ProcessManager____init__ -> picosnitch__ProcessManager__start [style="solid", color="#000000"];
-        picosnitch__get_fanotify_events -> picosnitch__FanotifyEventMetadata [style="solid", color="#000000"];
-        picosnitch__get_fanotify_events -> picosnitch__get_fstat [style="solid", color="#000000"];
-        picosnitch__get_sha256_fd -> picosnitch__get_fstat [style="solid", color="#000000"];
-        picosnitch__get_sha256_pid -> picosnitch__get_fstat [style="solid", color="#000000"];
-        picosnitch__main -> picosnitch__main_process [style="solid", color="#000000"];
-        picosnitch__main -> picosnitch__read_snitch [style="solid", color="#000000"];
-        picosnitch__main_process -> picosnitch__ProcessManager [style="solid", color="#000000"];
-        picosnitch__main_process -> picosnitch__ProcessManager____init__ [style="solid", color="#000000"];
-        picosnitch__main_process -> picosnitch__ProcessManager__is_alive [style="solid", color="#000000"];
-        picosnitch__main_process -> picosnitch__ProcessManager__is_zombie [style="solid", color="#000000"];
-        picosnitch__main_process -> picosnitch__ProcessManager__memory [style="solid", color="#000000"];
-        picosnitch__main_process -> picosnitch__ProcessManager__start [style="solid", color="#000000"];
-        picosnitch__main_process -> picosnitch__ProcessManager__terminate [style="solid", color="#000000"];
-        picosnitch__main_process -> picosnitch__main_process__clean_exit [style="solid", color="#000000"];
-        picosnitch__main_process -> picosnitch__monitor_subprocess [style="solid", color="#000000"];
-        picosnitch__main_process -> picosnitch__primary_subprocess [style="solid", color="#000000"];
-        picosnitch__main_process -> picosnitch__rfuse_subprocess [style="solid", color="#000000"];
-        picosnitch__main_process -> picosnitch__secondary_subprocess [style="solid", color="#000000"];
-        picosnitch__main_process -> picosnitch__virustotal_subprocess [style="solid", color="#000000"];
-        picosnitch__main_process__clean_exit -> picosnitch__ProcessManager [style="solid", color="#000000"];
-        picosnitch__main_process__clean_exit -> picosnitch__ProcessManager__terminate [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_dns_event [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_exec_event [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_lost [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_recvv4_event [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_recvv6_event [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_sendv4_event [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess__queue_sendv6_event [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess -> picosnitch__monitor_subprocess_initial_poll [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess__get_fd -> picosnitch__get_fstat [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess__queue_exec_event -> picosnitch__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess__queue_exec_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess__queue_recvv4_event -> picosnitch__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess__queue_recvv4_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess__queue_recvv6_event -> picosnitch__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess__queue_recvv6_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess__queue_sendv4_event -> picosnitch__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess__queue_sendv4_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess__queue_sendv6_event -> picosnitch__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
-        picosnitch__monitor_subprocess__queue_sendv6_event -> picosnitch__monitor_subprocess__get_fd [style="solid", color="#000000"];
-        picosnitch__primary_subprocess -> picosnitch__NotificationManager__enable_notifications [style="solid", color="#000000"];
-        picosnitch__primary_subprocess -> picosnitch__NotificationManager__toast [style="solid", color="#000000"];
-        picosnitch__primary_subprocess -> picosnitch__primary_subprocess__snitch_pipe_thread [style="solid", color="#000000"];
-        picosnitch__primary_subprocess -> picosnitch__primary_subprocess__write_snitch_and_exit [style="solid", color="#000000"];
-        picosnitch__primary_subprocess -> picosnitch__primary_subprocess_helper [style="solid", color="#000000"];
-        picosnitch__primary_subprocess -> picosnitch__write_snitch [style="solid", color="#000000"];
-        picosnitch__primary_subprocess__write_snitch_and_exit -> picosnitch__NotificationManager__toast [style="solid", color="#000000"];
-        picosnitch__primary_subprocess__write_snitch_and_exit -> picosnitch__write_snitch [style="solid", color="#000000"];
-        picosnitch__primary_subprocess_helper -> picosnitch__NotificationManager__toast [style="solid", color="#000000"];
-        picosnitch__read_snitch -> picosnitch__write_snitch [style="solid", color="#000000"];
-        picosnitch__secondary_subprocess -> picosnitch__get_fanotify_events [style="solid", color="#000000"];
-        picosnitch__secondary_subprocess -> picosnitch__get_vt_results [style="solid", color="#000000"];
-        picosnitch__secondary_subprocess -> picosnitch__secondary_subprocess_helper [style="solid", color="#000000"];
-        picosnitch__secondary_subprocess_helper -> picosnitch__reverse_dns_lookup [style="solid", color="#000000"];
-        picosnitch__secondary_subprocess_helper -> picosnitch__secondary_subprocess_sha_wrapper [style="solid", color="#000000"];
-        picosnitch__secondary_subprocess_sha_wrapper -> picosnitch__get_sha256_fd [style="solid", color="#000000"];
-        picosnitch__secondary_subprocess_sha_wrapper -> picosnitch__get_sha256_fuse [style="solid", color="#000000"];
-        picosnitch__secondary_subprocess_sha_wrapper -> picosnitch__get_sha256_pid [style="solid", color="#000000"];
-        picosnitch__start_picosnitch -> picosnitch__Daemon__restart [style="solid", color="#000000"];
-        picosnitch__start_picosnitch -> picosnitch__Daemon__start [style="solid", color="#000000"];
-        picosnitch__start_picosnitch -> picosnitch__Daemon__status [style="solid", color="#000000"];
-        picosnitch__start_picosnitch -> picosnitch__Daemon__stop [style="solid", color="#000000"];
-        picosnitch__start_picosnitch -> picosnitch__ProcessManager__start [style="solid", color="#000000"];
-        picosnitch__start_picosnitch -> picosnitch__main [style="solid", color="#000000"];
-        picosnitch__start_picosnitch -> picosnitch__read_snitch [style="solid", color="#000000"];
-        picosnitch__start_picosnitch -> picosnitch__start_picosnitch__PicoDaemon [style="solid", color="#000000"];
-        picosnitch__start_picosnitch -> picosnitch__start_picosnitch__delpid [style="solid", color="#000000"];
-        picosnitch__start_picosnitch -> picosnitch__ui_dash [style="solid", color="#000000"];
-        picosnitch__start_picosnitch -> picosnitch__ui_init [style="solid", color="#000000"];
-        picosnitch__start_picosnitch__PicoDaemon -> picosnitch__Daemon [style="solid", color="#000000"];
-        picosnitch__start_picosnitch__PicoDaemon__run -> picosnitch__main [style="solid", color="#000000"];
-        picosnitch__ui_dash -> picosnitch__ui_dash__serve_layout [style="solid", color="#000000"];
-        picosnitch__ui_dash -> picosnitch__ui_geoip [style="solid", color="#000000"];
-        picosnitch__ui_dash__update -> picosnitch__ui_dash__get_geoip [style="solid", color="#000000"];
-        picosnitch__ui_dash__update -> picosnitch__ui_dash__get_totals [style="solid", color="#000000"];
-        picosnitch__ui_dash__update -> picosnitch__ui_dash__get_user [style="solid", color="#000000"];
-        picosnitch__ui_dash__update -> picosnitch__ui_dash__trim_label [style="solid", color="#000000"];
-        picosnitch__ui_dash__update -> picosnitch__ui_geoip [style="solid", color="#000000"];
-        picosnitch__ui_init -> picosnitch__ui_loop [style="solid", color="#000000"];
-        picosnitch__ui_loop -> picosnitch__ui_geoip [style="solid", color="#000000"];
-        picosnitch__ui_loop -> picosnitch__ui_loop__fetch_query_results [style="solid", color="#000000"];
-        picosnitch__ui_loop -> picosnitch__ui_loop__get_geoip [style="solid", color="#000000"];
-        picosnitch__virustotal_subprocess -> picosnitch__get_fstat [style="solid", color="#000000"];
-        picosnitch__virustotal_subprocess -> picosnitch__virustotal_subprocess__get_analysis [style="solid", color="#000000"];
-        picosnitch__write_snitch -> picosnitch__NotificationManager__toast [style="solid", color="#000000"];
+        picosnitch__cli -> picosnitch__cli__start_picosnitch [style="solid", color="#000000"];
+        picosnitch__cli__main -> picosnitch__main_process__main_process [style="solid", color="#000000"];
+        picosnitch__cli__main -> picosnitch__utils__read_snitch [style="solid", color="#000000"];
+        picosnitch__cli__start_picosnitch -> picosnitch__cli__main [style="solid", color="#000000"];
+        picosnitch__cli__start_picosnitch -> picosnitch__cli__start_picosnitch__PicoDaemon [style="solid", color="#000000"];
+        picosnitch__cli__start_picosnitch -> picosnitch__cli__start_picosnitch__delpid [style="solid", color="#000000"];
+        picosnitch__cli__start_picosnitch -> picosnitch__daemon__Daemon__restart [style="solid", color="#000000"];
+        picosnitch__cli__start_picosnitch -> picosnitch__daemon__Daemon__start [style="solid", color="#000000"];
+        picosnitch__cli__start_picosnitch -> picosnitch__daemon__Daemon__status [style="solid", color="#000000"];
+        picosnitch__cli__start_picosnitch -> picosnitch__daemon__Daemon__stop [style="solid", color="#000000"];
+        picosnitch__cli__start_picosnitch -> picosnitch__process_manager__ProcessManager__start [style="solid", color="#000000"];
+        picosnitch__cli__start_picosnitch -> picosnitch__user_interface__ui_dash [style="solid", color="#000000"];
+        picosnitch__cli__start_picosnitch -> picosnitch__user_interface__ui_init [style="solid", color="#000000"];
+        picosnitch__cli__start_picosnitch -> picosnitch__utils__read_snitch [style="solid", color="#000000"];
+        picosnitch__cli__start_picosnitch__PicoDaemon -> picosnitch__daemon__Daemon [style="solid", color="#000000"];
+        picosnitch__cli__start_picosnitch__PicoDaemon__run -> picosnitch__cli__main [style="solid", color="#000000"];
+        picosnitch__daemon__Daemon__daemonize -> picosnitch__daemon__Daemon__delpid [style="solid", color="#000000"];
+        picosnitch__daemon__Daemon__restart -> picosnitch__daemon__Daemon__start [style="solid", color="#000000"];
+        picosnitch__daemon__Daemon__restart -> picosnitch__daemon__Daemon__stop [style="solid", color="#000000"];
+        picosnitch__daemon__Daemon__start -> picosnitch__daemon__Daemon__daemonize [style="solid", color="#000000"];
+        picosnitch__daemon__Daemon__start -> picosnitch__daemon__Daemon__getpid [style="solid", color="#000000"];
+        picosnitch__daemon__Daemon__start -> picosnitch__daemon__Daemon__run [style="solid", color="#000000"];
+        picosnitch__daemon__Daemon__status -> picosnitch__daemon__Daemon__getpid [style="solid", color="#000000"];
+        picosnitch__daemon__Daemon__stop -> picosnitch__daemon__Daemon__getpid [style="solid", color="#000000"];
+        picosnitch__main_process__main_process -> picosnitch__main_process__main_process__clean_exit [style="solid", color="#000000"];
+        picosnitch__main_process__main_process -> picosnitch__monitor_subprocess__monitor_subprocess [style="solid", color="#000000"];
+        picosnitch__main_process__main_process -> picosnitch__primary_subprocess__primary_subprocess [style="solid", color="#000000"];
+        picosnitch__main_process__main_process -> picosnitch__process_manager__ProcessManager [style="solid", color="#000000"];
+        picosnitch__main_process__main_process -> picosnitch__process_manager__ProcessManager____init__ [style="solid", color="#000000"];
+        picosnitch__main_process__main_process -> picosnitch__process_manager__ProcessManager__is_alive [style="solid", color="#000000"];
+        picosnitch__main_process__main_process -> picosnitch__process_manager__ProcessManager__is_zombie [style="solid", color="#000000"];
+        picosnitch__main_process__main_process -> picosnitch__process_manager__ProcessManager__memory [style="solid", color="#000000"];
+        picosnitch__main_process__main_process -> picosnitch__process_manager__ProcessManager__start [style="solid", color="#000000"];
+        picosnitch__main_process__main_process -> picosnitch__process_manager__ProcessManager__terminate [style="solid", color="#000000"];
+        picosnitch__main_process__main_process -> picosnitch__rfuse_subprocess__rfuse_subprocess [style="solid", color="#000000"];
+        picosnitch__main_process__main_process -> picosnitch__secondary_subprocess__secondary_subprocess [style="solid", color="#000000"];
+        picosnitch__main_process__main_process -> picosnitch__virustotal_subprocess__virustotal_subprocess [style="solid", color="#000000"];
+        picosnitch__main_process__main_process__clean_exit -> picosnitch__process_manager__ProcessManager [style="solid", color="#000000"];
+        picosnitch__main_process__main_process__clean_exit -> picosnitch__process_manager__ProcessManager__terminate [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess -> picosnitch__monitor_subprocess__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess -> picosnitch__monitor_subprocess__monitor_subprocess__get_fd [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess -> picosnitch__monitor_subprocess__monitor_subprocess__queue_dns_event [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess -> picosnitch__monitor_subprocess__monitor_subprocess__queue_exec_event [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess -> picosnitch__monitor_subprocess__monitor_subprocess__queue_lost [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess -> picosnitch__monitor_subprocess__monitor_subprocess__queue_recvv4_event [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess -> picosnitch__monitor_subprocess__monitor_subprocess__queue_recvv6_event [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess -> picosnitch__monitor_subprocess__monitor_subprocess__queue_sendv4_event [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess -> picosnitch__monitor_subprocess__monitor_subprocess__queue_sendv6_event [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess -> picosnitch__monitor_subprocess__monitor_subprocess_initial_poll [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess__get_fd -> picosnitch__utils__get_fstat [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess__queue_exec_event -> picosnitch__monitor_subprocess__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess__queue_exec_event -> picosnitch__monitor_subprocess__monitor_subprocess__get_fd [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess__queue_recvv4_event -> picosnitch__monitor_subprocess__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess__queue_recvv4_event -> picosnitch__monitor_subprocess__monitor_subprocess__get_fd [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess__queue_recvv6_event -> picosnitch__monitor_subprocess__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess__queue_recvv6_event -> picosnitch__monitor_subprocess__monitor_subprocess__get_fd [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess__queue_sendv4_event -> picosnitch__monitor_subprocess__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess__queue_sendv4_event -> picosnitch__monitor_subprocess__monitor_subprocess__get_fd [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess__queue_sendv6_event -> picosnitch__monitor_subprocess__monitor_subprocess__get_cmdline [style="solid", color="#000000"];
+        picosnitch__monitor_subprocess__monitor_subprocess__queue_sendv6_event -> picosnitch__monitor_subprocess__monitor_subprocess__get_fd [style="solid", color="#000000"];
+        picosnitch__notifcation_manager__NotificationManager__toast -> picosnitch__notifcation_manager__NotificationManager__enable_notifications [style="solid", color="#000000"];
+        picosnitch__primary_subprocess__primary_subprocess -> picosnitch__notifcation_manager__NotificationManager__enable_notifications [style="solid", color="#000000"];
+        picosnitch__primary_subprocess__primary_subprocess -> picosnitch__notifcation_manager__NotificationManager__toast [style="solid", color="#000000"];
+        picosnitch__primary_subprocess__primary_subprocess -> picosnitch__primary_subprocess__primary_subprocess__snitch_pipe_thread [style="solid", color="#000000"];
+        picosnitch__primary_subprocess__primary_subprocess -> picosnitch__primary_subprocess__primary_subprocess__write_snitch_and_exit [style="solid", color="#000000"];
+        picosnitch__primary_subprocess__primary_subprocess -> picosnitch__primary_subprocess__primary_subprocess_helper [style="solid", color="#000000"];
+        picosnitch__primary_subprocess__primary_subprocess -> picosnitch__utils__write_snitch [style="solid", color="#000000"];
+        picosnitch__primary_subprocess__primary_subprocess__write_snitch_and_exit -> picosnitch__notifcation_manager__NotificationManager__toast [style="solid", color="#000000"];
+        picosnitch__primary_subprocess__primary_subprocess__write_snitch_and_exit -> picosnitch__utils__write_snitch [style="solid", color="#000000"];
+        picosnitch__primary_subprocess__primary_subprocess_helper -> picosnitch__notifcation_manager__NotificationManager__toast [style="solid", color="#000000"];
+        picosnitch__process_manager__ProcessManager____init__ -> picosnitch__process_manager__ProcessManager__start [style="solid", color="#000000"];
+        picosnitch__secondary_subprocess__secondary_subprocess -> picosnitch__secondary_subprocess__secondary_subprocess_helper [style="solid", color="#000000"];
+        picosnitch__secondary_subprocess__secondary_subprocess -> picosnitch__utils__get_fanotify_events [style="solid", color="#000000"];
+        picosnitch__secondary_subprocess__secondary_subprocess -> picosnitch__utils__get_vt_results [style="solid", color="#000000"];
+        picosnitch__secondary_subprocess__secondary_subprocess_helper -> picosnitch__secondary_subprocess__secondary_subprocess_sha_wrapper [style="solid", color="#000000"];
+        picosnitch__secondary_subprocess__secondary_subprocess_helper -> picosnitch__utils__reverse_dns_lookup [style="solid", color="#000000"];
+        picosnitch__secondary_subprocess__secondary_subprocess_sha_wrapper -> picosnitch__utils__get_sha256_fd [style="solid", color="#000000"];
+        picosnitch__secondary_subprocess__secondary_subprocess_sha_wrapper -> picosnitch__utils__get_sha256_fuse [style="solid", color="#000000"];
+        picosnitch__secondary_subprocess__secondary_subprocess_sha_wrapper -> picosnitch__utils__get_sha256_pid [style="solid", color="#000000"];
+        picosnitch__user_interface__ui_dash -> picosnitch__user_interface__ui_dash__serve_layout [style="solid", color="#000000"];
+        picosnitch__user_interface__ui_dash -> picosnitch__user_interface__ui_geoip [style="solid", color="#000000"];
+        picosnitch__user_interface__ui_dash__update -> picosnitch__user_interface__ui_dash__get_geoip [style="solid", color="#000000"];
+        picosnitch__user_interface__ui_dash__update -> picosnitch__user_interface__ui_dash__get_totals [style="solid", color="#000000"];
+        picosnitch__user_interface__ui_dash__update -> picosnitch__user_interface__ui_dash__get_user [style="solid", color="#000000"];
+        picosnitch__user_interface__ui_dash__update -> picosnitch__user_interface__ui_dash__trim_label [style="solid", color="#000000"];
+        picosnitch__user_interface__ui_dash__update -> picosnitch__user_interface__ui_geoip [style="solid", color="#000000"];
+        picosnitch__user_interface__ui_init -> picosnitch__user_interface__ui_loop [style="solid", color="#000000"];
+        picosnitch__user_interface__ui_loop -> picosnitch__user_interface__ui_geoip [style="solid", color="#000000"];
+        picosnitch__user_interface__ui_loop -> picosnitch__user_interface__ui_loop__fetch_query_results [style="solid", color="#000000"];
+        picosnitch__user_interface__ui_loop -> picosnitch__user_interface__ui_loop__get_geoip [style="solid", color="#000000"];
+        picosnitch__utils__get_fanotify_events -> picosnitch__event_structures__FanotifyEventMetadata [style="solid", color="#000000"];
+        picosnitch__utils__get_fanotify_events -> picosnitch__utils__get_fstat [style="solid", color="#000000"];
+        picosnitch__utils__get_sha256_fd -> picosnitch__utils__get_fstat [style="solid", color="#000000"];
+        picosnitch__utils__get_sha256_pid -> picosnitch__utils__get_fstat [style="solid", color="#000000"];
+        picosnitch__utils__read_snitch -> picosnitch__utils__write_snitch [style="solid", color="#000000"];
+        picosnitch__utils__write_snitch -> picosnitch__notifcation_manager__NotificationManager__toast [style="solid", color="#000000"];
+        picosnitch__virustotal_subprocess__virustotal_subprocess -> picosnitch__utils__get_fstat [style="solid", color="#000000"];
+        picosnitch__virustotal_subprocess__virustotal_subprocess -> picosnitch__virustotal_subprocess__virustotal_subprocess__get_analysis [style="solid", color="#000000"];
     }

@@ -13,8 +13,8 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://elesiuta.github.io/picosnitch",
     license="GPLv3",
-    py_modules=["picosnitch"],
-    entry_points={"console_scripts": ["picosnitch = picosnitch:start_picosnitch"]},
+    packages=["picosnitch"],
+    entry_points={"console_scripts": ["picosnitch = picosnitch.cli:start_picosnitch"]},
     install_requires=["psutil"],
     extras_require={
         "enable_dash": ["dash", "pandas", "plotly"],
