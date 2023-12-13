@@ -66,27 +66,31 @@ if sys.flags.optimize > 0:
     print("Warning: picosnitch does not function properly with the -O (optimize) flag", file=sys.stderr)
 
 # set constants and RLIMIT_NOFILE if configured
-if os.getuid() == 0:
-    if os.getenv("SUDO_UID"):
-        home_user = pwd.getpwuid(int(os.getenv("SUDO_UID"))).pw_name
-    elif os.getenv("SUDO_USER"):
-        home_user = os.getenv("SUDO_USER")
+try:
+    if os.getuid() == 0:
+        if os.getenv("SUDO_UID"):
+            home_user = pwd.getpwuid(int(os.getenv("SUDO_UID"))).pw_name
+        elif os.getenv("SUDO_USER"):
+            home_user = os.getenv("SUDO_USER")
+        else:
+            for home_user in os.listdir("/home"):
+                try:
+                    if pwd.getpwnam(home_user).pw_uid >= 1000:
+                        break
+                except Exception:
+                    pass
+        home_dir = pwd.getpwnam(home_user).pw_dir
+        if not os.getenv("SUDO_UID"):
+            os.environ["SUDO_UID"] = str(pwd.getpwnam(home_user).pw_uid)
+        if not os.getenv("DBUS_SESSION_BUS_ADDRESS"):
+            os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{pwd.getpwnam(home_user).pw_uid}/bus"
     else:
-        for home_user in os.listdir("/home"):
-            try:
-                if pwd.getpwnam(home_user).pw_uid >= 1000:
-                    break
-            except Exception:
-                pass
-    home_dir = pwd.getpwnam(home_user).pw_dir
-    if not os.getenv("SUDO_UID"):
-        os.environ["SUDO_UID"] = str(pwd.getpwnam(home_user).pw_uid)
-    if not os.getenv("DBUS_SESSION_BUS_ADDRESS"):
-        os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{pwd.getpwnam(home_user).pw_uid}/bus"
-else:
+        home_dir = os.path.expanduser("~")
+        if sys.executable.startswith("/snap/"):
+            home_dir = home_dir.split("/snap/picosnitch")[0]
+except Exception:
+    # fallback if there are no regular users on the system, this will likely be /root
     home_dir = os.path.expanduser("~")
-    if sys.executable.startswith("/snap/"):
-        home_dir = home_dir.split("/snap/picosnitch")[0]
 BASE_PATH: typing.Final[str] = os.path.join(home_dir, ".config", "picosnitch")
 try:
     file_path = os.path.join(BASE_PATH, "config.json")
