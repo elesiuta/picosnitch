@@ -1089,7 +1089,12 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         except Exception:
             pass
     # initialize bpf program
-    bpf_text = bpf_text_base + bpf_text_bandwidth_structs + bpf_text_bandwidth_probe.replace("int flags, ", "") + bpf_text_bandwidth_probe.replace("sendmsg", "recvmsg")
+    bpf_text = bpf_text_base + \
+               bpf_text_bandwidth_structs + \
+               bpf_text_bandwidth_probe.replace("recvmsg", "sendmsg").replace("int flags, ", "") + \
+               bpf_text_bandwidth_probe.replace("recvmsg", "sendmsg").replace("int flags, ", "").replace("inet_", "inet6_") + \
+               bpf_text_bandwidth_probe + \
+               bpf_text_bandwidth_probe.replace("inet_", "inet6_")
     try:
         assert BPF.support_kfunc(), "BPF.support_kfunc() was not True, check BCC version or Kernel Configuration"
         b = BPF(text=bpf_text)
@@ -2549,7 +2554,7 @@ BPF_PERF_OUTPUT(recvmsg6_events);
 """
 
 bpf_text_bandwidth_probe = """
-KRETFUNC_PROBE(sock_sendmsg, struct socket *sock, struct msghdr *msg, int flags, u32 retval) {
+KRETFUNC_PROBE(inet_recvmsg, struct socket *sock, struct msghdr *msg, int flags, u32 retval) {
     if (retval >= 0 && retval < 0x7fffffff) {
         u32 pid = bpf_get_current_pid_tgid() >> 32;
         u32 uid = bpf_get_current_uid_gid();
@@ -2595,7 +2600,7 @@ KRETFUNC_PROBE(sock_sendmsg, struct socket *sock, struct msghdr *msg, int flags,
             bpf_probe_read(&data.dport, sizeof(data.dport), &sock->sk->__sk_common.skc_dport);
             bpf_probe_read(&data.lport, sizeof(data.lport), &sock->sk->__sk_common.skc_num);
             data.dport = ntohs(data.dport);
-            sendmsg_events.perf_submit(ctx, &data, sizeof(data));
+            recvmsg_events.perf_submit(ctx, &data, sizeof(data));
         }
         else if (address_family == AF_INET6) {
             struct sendrecv6_event_t data = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .pdev = pdev, .ino = ino, .pino = pino, .bytes = retval};
@@ -2606,7 +2611,7 @@ KRETFUNC_PROBE(sock_sendmsg, struct socket *sock, struct msghdr *msg, int flags,
             bpf_probe_read(&data.dport, sizeof(data.dport), &sock->sk->__sk_common.skc_dport);
             bpf_probe_read(&data.lport, sizeof(data.lport), &sock->sk->__sk_common.skc_num);
             data.dport = ntohs(data.dport);
-            sendmsg6_events.perf_submit(ctx, &data, sizeof(data));
+            recvmsg6_events.perf_submit(ctx, &data, sizeof(data));
         }
     }
     return 0;
