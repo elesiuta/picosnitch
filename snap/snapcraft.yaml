@@ -6,7 +6,7 @@ description: |
 confinement: classic
 grade: stable
 base: core22
-version: '1.0.2'
+version: '1.0.3'
 
 architectures:
   - build-on: amd64
