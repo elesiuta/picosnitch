@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "picosnitch"
+version = "1.0.3"
+requires-python = ">=3.8"
+description = "Monitor network traffic per executable using BPF"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+classifiers = [
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Networking :: Monitoring",
+    "Topic :: System :: Monitoring",
+    "Topic :: Security",
+]
+dependencies = ["psutil"]
+
+[project.urls]
+Homepage = "https://elesiuta.github.io/picosnitch"
+
+[project.scripts]
+picosnitch = "picosnitch:start_picosnitch"
+
+[project.optional-dependencies]
+enable_dash = ["dash", "pandas", "plotly"]
+enable_geoip = ["geoip2"]
+enable_notifications = ["dbus-python"]
+enable_sql = ["psycopg", "pymysql"]
+enable_themes = ["dash-bootstrap-components", "dash-bootstrap-templates"]
+enable_virustotal = ["requests"]
+full = [
+    "dash",
+    "pandas",
+    "plotly",
+    "geoip2",
+    "psycopg",
+    "pymysql",
+    "dash-bootstrap-components",
+    "dash-bootstrap-templates",
+    "requests",
+]
+
+[tool.setuptools]
+py-modules = ["picosnitch"]
