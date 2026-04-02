@@ -21,6 +21,7 @@ import atexit
 import importlib
 import importlib.util
 import os
+import shutil
 import site
 import sqlite3
 import subprocess
@@ -115,8 +116,12 @@ def start_picosnitch():
             return 0
         elif sys.argv[1] in ["start", "stop", "restart", "start-no-daemon", "systemd"]:
             if os.getuid() != 0:
-                args = ["sudo", "-E", sys.executable, os.path.abspath(__file__), sys.argv[1]]
-                os.execvp("sudo", args)
+                if shutil.which("doas") and os.path.exists("/etc/doas.conf"):
+                    args = ["doas", sys.executable, os.path.abspath(__file__), sys.argv[1]]
+                    os.execvp("doas", args)
+                else:
+                    args = ["sudo", "-E", sys.executable, os.path.abspath(__file__), sys.argv[1]]
+                    os.execvp("sudo", args)
             with open("/proc/self/status", "r") as f:
                 proc_status = f.read()
                 capeff = int(proc_status[proc_status.find("CapEff:")+8:].splitlines()[0].strip(), base=16)
