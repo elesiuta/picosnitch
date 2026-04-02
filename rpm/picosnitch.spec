@@ -68,12 +68,9 @@ install -D -m 644 debian/picosnitch.service %{buildroot}%{_unitdir}/%{name}.serv
 %license LICENSE
 %doc README.md
 %{python3_sitelib}/picosnitch-*.egg-info/
-%{python3_sitelib}/picosnitch.py
+%{python3_sitelib}/picosnitch/
 /usr/bin/picosnitch
 %{_unitdir}/%{name}.service
-%if 0%{?fedora}%{?suse_version}%{?mageia}
-%{python3_sitelib}/__pycache__/picosnitch.cpython-*.pyc
-%endif
 
 %changelog
 * Tue Jan 2 2024 Eric Lesiuta <elesiuta@gmail.com> - 1.0.3-1

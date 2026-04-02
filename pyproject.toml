@@ -22,7 +22,7 @@ dependencies = ["psutil"]
 Homepage = "https://elesiuta.github.io/picosnitch"
 
 [project.scripts]
-picosnitch = "picosnitch:start_picosnitch"
+picosnitch = "picosnitch.cli:start_picosnitch"
 
 [project.optional-dependencies]
 enable_dash = ["dash", "pandas", "plotly"]
@@ -44,4 +44,4 @@ full = [
 ]
 
 [tool.setuptools]
-py-modules = ["picosnitch"]
+packages = ["picosnitch"]

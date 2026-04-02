@@ -96,7 +96,7 @@ def main_process(snitch: dict):
     # attempt to restart picosnitch (terminate by running `picosnitch stop`)
     time.sleep(5)
     _ = [p.terminate() for p in subprocesses]
-    args = [sys.executable, os.path.abspath(__file__), "restart"]
+    args = [sys.executable, "-m", "picosnitch", "restart"]
     subprocess.Popen(args)
     return 0
 

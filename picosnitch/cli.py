@@ -42,10 +42,7 @@ def main():
     # start picosnitch process monitor
     with open("/run/picosnitch.pid", "r") as f:
         assert int(f.read().strip()) == os.getpid()
-    if __name__ == "__main__" or sys.argv[1] == "start-no-daemon":
-        sys.exit(main_process(snitch))
-    print("Snitch subprocess init failed, __name__ != __main__", file=sys.stderr)
-    sys.exit(1)
+    sys.exit(main_process(snitch))
 
 
 def start_picosnitch():
@@ -58,7 +55,7 @@ def start_picosnitch():
     GNU General Public License for details.
 
     website: https://elesiuta.github.io/picosnitch
-    version: {VERSION} ({os.path.abspath(__file__)})
+    version: {VERSION}
     config and log files: {BASE_PATH}
 
     usage:
@@ -88,7 +85,7 @@ def start_picosnitch():
     Restart=always
     RestartSec=5
     Environment="SUDO_UID={os.getenv("SUDO_UID")}" "SUDO_USER={os.getenv("SUDO_USER")}" "DBUS_SESSION_BUS_ADDRESS={os.getenv("DBUS_SESSION_BUS_ADDRESS")}" "PYTHON_USER_SITE={site.USER_SITE}"
-    ExecStart={sys.executable} "{os.path.abspath(__file__)}" start-no-daemon
+    ExecStart={sys.executable} -m picosnitch start-no-daemon
     PIDFile=/run/picosnitch.pid
 
     [Install]
@@ -117,10 +114,10 @@ def start_picosnitch():
         elif sys.argv[1] in ["start", "stop", "restart", "start-no-daemon", "systemd"]:
             if os.getuid() != 0:
                 if shutil.which("doas") and os.path.exists("/etc/doas.conf"):
-                    args = ["doas", sys.executable, os.path.abspath(__file__), sys.argv[1]]
+                    args = ["doas", sys.executable, "-m", "picosnitch", sys.argv[1]]
                     os.execvp("doas", args)
                 else:
-                    args = ["sudo", "-E", sys.executable, os.path.abspath(__file__), sys.argv[1]]
+                    args = ["sudo", "-E", sys.executable, "-m", "picosnitch", sys.argv[1]]
                     os.execvp("sudo", args)
             with open("/proc/self/status", "r") as f:
                 proc_status = f.read()
@@ -253,7 +250,7 @@ def start_picosnitch():
                 subprocess.Popen(["bash", "-c", f'/usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 return ui_dash()
             subprocess.Popen(["bash", "-c", f'let i=0; rm {BASE_PATH}/dash; while [[ ! -f {BASE_PATH}/dash || "$i" -gt 30 ]]; do let i++; sleep 1; done; rm {BASE_PATH}/dash && /usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            args = ["bash", "-c", f"touch {BASE_PATH}/dash; nohup {sys.executable} \"{os.path.abspath(__file__)}\" start-dash > /dev/null 2>&1 &"]
+            args = ["bash", "-c", f"touch {BASE_PATH}/dash; nohup {sys.executable} -m picosnitch start-dash > /dev/null 2>&1 &"]
             os.execvp("bash", args)
         # web gui without launching browser or detaching from terminal (intended for debugging)
         elif sys.argv[1] == "start-dash":
@@ -263,7 +260,7 @@ def start_picosnitch():
             return ui_init()
         # show version or help if invalid argument and exit
         elif sys.argv[1] == "version":
-            print(f"version: {VERSION} ({os.path.abspath(__file__)})\nconfig and log files: {BASE_PATH}")
+            print(f"version: {VERSION}\nconfig and log files: {BASE_PATH}")
             return 0
         else:
             print(readme)
