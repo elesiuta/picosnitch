@@ -1,10 +1,22 @@
 #!/usr/bin/env python3
+import glob
+import io
 import os
+import sys
+
+import pyan
 
 # generate call graph using pyan3==1.0.4
 print("Generating call graph for picosnitch")
 os.chdir(os.path.dirname(__file__))
-os.system("pyan3 ../picosnitch/*.py --no-defines --uses --colored --nested-groups --dot > callgraph.dot")
+sys.argv = ["pyan3"] + sorted(glob.glob("../picosnitch/*.py")) + ["--no-defines", "--uses", "--colored", "--nested-groups", "--dot"]
+old_stdout = sys.stdout
+sys.stdout = io.StringIO()
+pyan.main()
+output = sys.stdout.getvalue()
+sys.stdout = old_stdout
+with open("callgraph.dot", "w") as f:
+    f.write(output)
 
 # sort edges so output is deterministic
 with open("callgraph.dot", "r") as f:
@@ -22,7 +34,7 @@ for line in dot:
         new_dot += sorted(new_edges)
         new_dot.append(line)
     else:
-        new_dot.append(line)   
+        new_dot.append(line)
 with open("callgraph.dot", "w") as f:
     f.writelines(new_dot)
 
