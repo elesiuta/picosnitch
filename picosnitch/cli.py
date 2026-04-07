@@ -30,8 +30,8 @@ import textwrap
 
 from .constants import BASE_PATH, VERSION
 from .daemon import Daemon
-from .main_process import main_process
-from .user_interface import ui_dash, ui_init
+from .main_loop import main_process
+from .ui import ui_dash, ui_init
 from .utils import read_snitch
 
 

@@ -30,9 +30,9 @@ import sys
 import time
 import typing
 
-from .constants import BASE_PATH, VERSION
-from .process_manager import ProcessManager
-from .utils import get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup
+from ..constants import BASE_PATH, VERSION
+from ..process_manager import ProcessManager
+from ..utils import get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup
 
 
 def secondary_subprocess_sha_wrapper(snitch: dict, fan_mod_cnt: dict, proc: dict, p_rfuse: ProcessManager, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> str:

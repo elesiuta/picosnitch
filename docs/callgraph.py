@@ -24,8 +24,8 @@ dot: str = pyan.create_callgraph(
         "cli.py",
         "constants.py",
         "daemon.py",
-        "event_structures.py",
-        "user_interface.py",
+        "types.py",
+        "ui.py",
     ],
 )
 

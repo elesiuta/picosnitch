@@ -24,7 +24,7 @@ import queue
 import sys
 import time
 
-from .utils import get_fstat
+from ..utils import get_fstat
 
 
 def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):

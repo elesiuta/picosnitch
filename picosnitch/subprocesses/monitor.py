@@ -38,7 +38,7 @@ site.addsitedir("/usr/lib/python3/dist-packages")
 site.addsitedir(os.path.expandvars("$PYTHON_USER_SITE"))
 import psutil
 
-from .constants import FD_CACHE, PID_CACHE, ST_DEV_MASK
+from ..constants import FD_CACHE, PID_CACHE, ST_DEV_MASK
 
 
 def monitor_subprocess_initial_poll() -> list:

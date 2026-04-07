@@ -23,7 +23,7 @@ import pickle
 import queue
 import sys
 
-from .utils import get_sha256_fd, get_sha256_pid
+from ..utils import get_sha256_fd, get_sha256_pid
 
 
 def rfuse_subprocess(config: dict, q_error, q_in, q_out):

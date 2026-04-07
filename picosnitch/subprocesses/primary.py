@@ -26,9 +26,9 @@ import threading
 import time
 import typing
 
-from .event_structures import BpfEvent
-from .notifcation_manager import NotificationManager
-from .utils import write_snitch
+from ..types import BpfEvent
+from ..notifications import NotificationManager
+from ..utils import write_snitch
 
 
 def primary_subprocess_helper(snitch: dict, new_processes: typing.List[bytes]) -> None:

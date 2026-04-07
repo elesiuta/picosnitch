@@ -27,12 +27,12 @@ import sys
 import time
 
 from .constants import FD_CACHE
-from .monitor_subprocess import monitor_subprocess
-from .primary_subprocess import primary_subprocess
+from .subprocesses.monitor import monitor_subprocess
+from .subprocesses.primary import primary_subprocess
 from .process_manager import ProcessManager
-from .rfuse_subprocess import rfuse_subprocess
-from .secondary_subprocess import secondary_subprocess
-from .virustotal_subprocess import virustotal_subprocess
+from .subprocesses.fuse import rfuse_subprocess
+from .subprocesses.secondary import secondary_subprocess
+from .subprocesses.virustotal import virustotal_subprocess
 
 
 def main_process(snitch: dict):
