@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # picosnitch
-# Copyright (C) 2020-2023 Eric Lesiuta
+# Copyright (C) 2020 Eric Lesiuta
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -27,15 +27,15 @@ import sys
 import time
 
 from .constants import FD_CACHE
-from .subprocesses.monitor import monitor_subprocess
-from .subprocesses.primary import primary_subprocess
+from .subprocesses.monitor import run_monitor
+from .subprocesses.primary import run_primary
 from .process_manager import ProcessManager
-from .subprocesses.fuse import rfuse_subprocess
-from .subprocesses.secondary import secondary_subprocess
-from .subprocesses.virustotal import virustotal_subprocess
+from .subprocesses.fuse import run_fuse
+from .subprocesses.secondary import run_secondary
+from .subprocesses.virustotal import run_virustotal
 
 
-def main_process(snitch: dict):
+def run_main_loop(state: dict):
     """coordinates all picosnitch subprocesses"""
     # init fanotify
     libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -45,22 +45,22 @@ def main_process(snitch: dict):
     fan_fd = libc.fanotify_init(flags, os.O_RDONLY)
     assert fan_fd >= 0, "fanotify_init() failed"
     # start subprocesses
-    snitch_pipes = [multiprocessing.Pipe(duplex=False) for i in range(5)]
-    snitch_recv_pipes, snitch_send_pipes = zip(*snitch_pipes)
+    event_pipes = [multiprocessing.Pipe(duplex=False) for i in range(5)]
+    event_recv_pipes, event_send_pipes = zip(*event_pipes)
     secondary_recv_pipe, secondary_send_pipe = multiprocessing.Pipe(duplex=False)
     q_error = multiprocessing.Queue()
-    p_monitor = ProcessManager(name="snitchmonitor", target=monitor_subprocess,
-                               init_args=(snitch["Config"], fan_fd, snitch_send_pipes, q_error,))
-    p_rfuse = ProcessManager(name="snitchrfuse", target=rfuse_subprocess,
-                             init_args=(snitch["Config"], q_error,))
-    p_virustotal = ProcessManager(name="snitchvirustotal", target=virustotal_subprocess,
-                                  init_args=(snitch["Config"], q_error,))
-    p_primary = ProcessManager(name="snitchprimary", target=primary_subprocess,
-                               init_args=(snitch, snitch_recv_pipes, secondary_send_pipe, q_error,))
-    p_secondary = ProcessManager(name="snitchsecondary", target=secondary_subprocess,
-                           init_args=(snitch, fan_fd, p_rfuse, p_virustotal, secondary_recv_pipe, p_primary.q_in, q_error,))
+    p_monitor = ProcessManager(name="snitchmonitor", target=run_monitor,
+                               init_args=(state["Config"], fan_fd, event_send_pipes, q_error,))
+    p_fuse = ProcessManager(name="snitchrfuse", target=run_fuse,
+                             init_args=(state["Config"], q_error,))
+    p_virustotal = ProcessManager(name="snitchvirustotal", target=run_virustotal,
+                                  init_args=(state["Config"], q_error,))
+    p_primary = ProcessManager(name="snitchprimary", target=run_primary,
+                               init_args=(state, event_recv_pipes, secondary_send_pipe, q_error,))
+    p_secondary = ProcessManager(name="snitchsecondary", target=run_secondary,
+                           init_args=(state, fan_fd, p_fuse, p_virustotal, secondary_recv_pipe, p_primary.q_in, q_error,))
     # set signals
-    subprocesses = [p_monitor, p_rfuse, p_virustotal, p_primary, p_secondary]
+    subprocesses = [p_monitor, p_fuse, p_virustotal, p_primary, p_secondary]
     def clean_exit():
         _ = [p.terminate() for p in subprocesses]
         sys.exit(0)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # picosnitch
-# Copyright (C) 2020-2023 Eric Lesiuta
+# Copyright (C) 2020 Eric Lesiuta
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -41,7 +41,7 @@ import psutil
 from ..constants import FD_CACHE, PID_CACHE, ST_DEV_MASK
 
 
-def monitor_subprocess_initial_poll() -> list:
+def initial_poll() -> list:
     """poll initial processes and connections using psutil"""
     initial_processes = []
     for pid in psutil.pids():
@@ -71,8 +71,8 @@ def monitor_subprocess_initial_poll() -> list:
     return initial_processes
 
 
-def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out):
-    """runs a bpf program to monitor the system for new connections and puts info into a pipe for primary_subprocess"""
+def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
+    """runs a bpf program to monitor the system for new connections and puts info into a pipe for run_primary"""
     # initialization of subprocess
     try:
         os.nice(-20)
@@ -82,7 +82,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
     from bcc import BPF
     parent_process = multiprocessing.parent_process()
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
-    snitch_pipe_0, snitch_pipe_1, snitch_pipe_2, snitch_pipe_3, snitch_pipe_4 = snitch_pipes
+    event_pipe_0, event_pipe_1, event_pipe_2, event_pipe_3, event_pipe_4 = event_pipes
     EVERY_EXE: typing.Final[bool] = config["Every exe (not just conns)"]
     PAGE_CNT: typing.Final[int] = config["Perf ring buffer (pages)"]
     # fanotify (for watching executables for modification)
@@ -150,7 +150,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         except Exception:
             return ""
     # get current connections
-    for proc in monitor_subprocess_initial_poll():
+    for proc in initial_poll():
         try:
             stat = os.stat(f"/proc/{proc['pid']}/exe")
             pstat = os.stat(f"/proc/{proc['ppid']}/exe")
@@ -159,7 +159,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
             st_dev, st_ino, pid, fd, exe = get_fd(stat.st_dev, stat.st_ino, proc["pid"], proc["rport"])
             pst_dev, pst_ino, ppid, pfd, pexe = get_fd(pstat.st_dev, pstat.st_ino, proc["ppid"], -1)
             if EVERY_EXE or proc["rport"] != -1:
-                snitch_pipe_0.send_bytes(pickle.dumps({"pid": pid, "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+                event_pipe_0.send_bytes(pickle.dumps({"pid": pid, "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                                      "ppid": ppid, "pname": proc["pname"], "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                                      "uid": proc["uid"], "send": 0, "recv": 0, "lport": proc["lport"], "rport": proc["rport"], "laddr": proc["laddr"], "raddr": proc["raddr"], "domain": domain_dict[proc["raddr"]]}))
         except Exception:
@@ -188,7 +188,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
             use_getaddrinfo_uprobe = True
         except Exception:
             q_error.put("BPF.attach_uprobe() failed for getaddrinfo, falling back to only using reverse DNS lookup")
-    # callbacks for bpf events, read event and put into a pipe for primary_subprocess
+    # callbacks for bpf events, read event and put into a pipe for run_primary
     def queue_lost(event, *args):
         q_error.put(f"BPF callbacks not processing fast enough, missed {event} event, try increasing 'Perf ring buffer (pages)' (power of two) if this continues")
     def queue_sendv4_event(cpu, data, size):
@@ -199,7 +199,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         pcmd = get_cmdline(event.ppid)
         laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
         raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
-        snitch_pipe_0.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+        event_pipe_0.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": event.bytes, "recv": 0, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
     def queue_sendv6_event(cpu, data, size):
@@ -210,7 +210,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         pcmd = get_cmdline(event.ppid)
         laddr = socket.inet_ntop(socket.AF_INET6, event.saddr)
         raddr = socket.inet_ntop(socket.AF_INET6, event.daddr)
-        snitch_pipe_1.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+        event_pipe_1.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": event.bytes, "recv": 0, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
     def queue_recvv4_event(cpu, data, size):
@@ -221,7 +221,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         pcmd = get_cmdline(event.ppid)
         laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
         raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
-        snitch_pipe_2.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+        event_pipe_2.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": event.bytes, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
     def queue_recvv6_event(cpu, data, size):
@@ -232,7 +232,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         pcmd = get_cmdline(event.ppid)
         laddr = socket.inet_ntop(socket.AF_INET6, event.saddr)
         raddr = socket.inet_ntop(socket.AF_INET6, event.daddr)
-        snitch_pipe_3.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+        event_pipe_3.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": event.bytes, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
     def queue_exec_event(cpu, data, size):
@@ -242,7 +242,7 @@ def monitor_subprocess(config: dict, fan_fd, snitch_pipes, q_error, q_in, _q_out
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
         if EVERY_EXE:
-            snitch_pipe_4.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
+            event_pipe_4.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                                  "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                                  "uid": event.uid, "send": 0, "recv": 0, "lport": -1, "rport": -1, "laddr": "", "raddr": "", "domain": ""}))
     def queue_dns_event(cpu, data, size):

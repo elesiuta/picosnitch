@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # picosnitch
-# Copyright (C) 2020-2023 Eric Lesiuta
+# Copyright (C) 2020 Eric Lesiuta
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -27,7 +27,7 @@ import time
 from ..utils import get_fstat
 
 
-def virustotal_subprocess(config: dict, q_error, q_vt_pending, q_vt_results):
+def run_virustotal(config: dict, q_error, q_vt_pending, q_vt_results):
     """get virustotal results of process executable"""
     parent_process = multiprocessing.parent_process()
     try:

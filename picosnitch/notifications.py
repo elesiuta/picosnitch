@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # picosnitch
-# Copyright (C) 2020-2023 Eric Lesiuta
+# Copyright (C) 2020 Eric Lesiuta
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@ import os
 import sys
 
 
-class NotificationManager:
+class Notifier:
     """A singleton for creating system tray notifications, holds notifications in queue if fails, prints if disabled"""
     __instance = None
     dbus_notifications = False
@@ -30,7 +30,7 @@ class NotificationManager:
     last_notification = ""
     def __new__(cls, *args, **kwargs):
         if not cls.__instance:
-            cls.__instance = super(NotificationManager, cls).__new__(cls, *args, **kwargs)
+            cls.__instance = super(Notifier, cls).__new__(cls, *args, **kwargs)
         return cls.__instance
 
     def enable_notifications(self):

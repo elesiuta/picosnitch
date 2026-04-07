@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # picosnitch
-# Copyright (C) 2020-2023 Eric Lesiuta
+# Copyright (C) 2020 Eric Lesiuta
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -37,7 +37,7 @@ import time
 from .constants import BASE_PATH, VERSION
 
 
-def ui_geoip():
+def init_geoip():
     """init a geoip2 reader and return it (along with updating geoip db), or None if not available"""
     with open(os.path.join(BASE_PATH, "config.json"), "r", encoding="utf-8", errors="surrogateescape") as json_file:
         if not json.load(json_file)["GeoIP lookup"]:
@@ -73,7 +73,7 @@ def ui_geoip():
         return None
 
 
-def ui_loop(stdscr: curses.window, splash: str) -> int:
+def tui_loop(stdscr: curses.window, splash: str) -> int:
     """for curses wrapper"""
     # thread for querying database
     file_path = os.path.join(BASE_PATH, "snitch.db")
@@ -136,7 +136,7 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
     })
     time_round_func = lambda resolution_index, time: time_round_functions[time_round_units[resolution_index]](time)
     # geoip lookup
-    geoip_reader = ui_geoip()
+    geoip_reader = init_geoip()
     def get_geoip(ip: str) -> str:
         try:
             country_code = geoip_reader.country(ip).country.iso_code
@@ -418,7 +418,7 @@ def ui_loop(stdscr: curses.window, splash: str) -> int:
             return 0
 
 
-def ui_init() -> int:
+def tui_init() -> int:
     """init curses ui"""
     splash = textwrap.dedent("""
         @@&@@                                                              @@@@,
@@ -446,14 +446,14 @@ def ui_init() -> int:
     # start curses
     for err_count in reversed(range(30)):
         try:
-            return curses.wrapper(ui_loop, splash)
+            return curses.wrapper(tui_loop, splash)
         except curses.error:
             print("CURSES DISPLAY ERROR: try resizing your terminal, ui will close in %s seconds" % (err_count + 1), file=sys.stderr)
             time.sleep(1)
     return 1
 
 
-def ui_dash():
+def web_dashboard():
     """gui with plotly dash"""
     site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
     site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
@@ -487,7 +487,7 @@ def ui_dash():
         "year": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1, month=1),
     })
     time_round_func = lambda resolution_index, time: time_round_functions[time_round_units[resolution_index]](time)
-    geoip_reader = ui_geoip()
+    geoip_reader = init_geoip()
     def get_user(uid) -> str:
         try:
             return f"{pwd.getpwuid(uid).pw_name} ({uid})"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # picosnitch
-# Copyright (C) 2020-2023 Eric Lesiuta
+# Copyright (C) 2020 Eric Lesiuta
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -35,8 +35,8 @@ import typing
 from .constants import BASE_PATH, PID_CACHE, ST_DEV_MASK
 
 
-def read_snitch() -> dict:
-    """read data for the snitch dictionary from config.json and record.json or init new files if not found"""
+def load_state() -> dict:
+    """read data for the state dictionary from config.json and record.json or init new files if not found"""
     template = {
         "Config": {
             "DB retention (days)": 30,
@@ -84,19 +84,19 @@ def read_snitch() -> dict:
         write_config = True
     if os.path.exists(record_path):
         with open(record_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
-            snitch_record = json.load(json_file)
+            state_record = json.load(json_file)
         for key in ["Executables", "Names", "Parent Executables", "Parent Names", "SHA256"]:
-            if key in snitch_record:
-                data[key] = snitch_record[key]
+            if key in state_record:
+                data[key] = state_record[key]
     assert all(type(data[key]) == type(template[key]) for key in template), "Invalid json files"
     assert all(key in ["Set RLIMIT_NOFILE", "Set st_dev mask"] or type(data["Config"][key]) == type(template["Config"][key]) for key in template["Config"]), "Invalid config"
     if write_config:
-        write_snitch(data, write_config=True)
+        save_state(data, write_config=True)
     return data
 
 
-def write_snitch(snitch: dict, write_config: bool = False, write_record: bool = True) -> None:
-    """write the snitch dictionary to config.json, record.json, exe.log, and error.log"""
+def save_state(state: dict, write_config: bool = False, write_record: bool = True) -> None:
+    """write the state dictionary to config.json, record.json, exe.log, and error.log"""
     config_path = os.path.join(BASE_PATH, "config.json")
     record_path = os.path.join(BASE_PATH, "record.json")
     exe_log_path = os.path.join(BASE_PATH, "exe.log")
@@ -106,28 +106,28 @@ def write_snitch(snitch: dict, write_config: bool = False, write_record: bool = 
         os.makedirs(BASE_PATH)
     if os.stat(BASE_PATH).st_uid == 0 and os.getenv("SUDO_UID"):
         os.chown(BASE_PATH, int(os.getenv("SUDO_UID")), int(os.getenv("SUDO_UID")))
-    snitch_config = snitch["Config"]
+    snitch_config = state["Config"]
     try:
         if write_config:
             with open(config_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
                 json.dump(snitch_config, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
-        del snitch["Config"]
-        if snitch["Error Log"]:
+        del state["Config"]
+        if state["Error Log"]:
             with open(error_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
-                text_file.write("\n".join(snitch["Error Log"]) + "\n")
-        del snitch["Error Log"]
-        if snitch["Exe Log"]:
+                text_file.write("\n".join(state["Error Log"]) + "\n")
+        del state["Error Log"]
+        if state["Exe Log"]:
             with open(exe_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
-                text_file.write("\n".join(snitch["Exe Log"]) + "\n")
-        del snitch["Exe Log"]
+                text_file.write("\n".join(state["Exe Log"]) + "\n")
+        del state["Exe Log"]
         if write_record:
             with open(record_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
-                json.dump(snitch, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
+                json.dump(state, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
     except Exception:
-        NotificationManager().toast("picosnitch write error", file=sys.stderr)
-    snitch["Config"] = snitch_config
-    snitch["Error Log"] = []
-    snitch["Exe Log"] = []
+        Notifier().toast("picosnitch write error", file=sys.stderr)
+    state["Config"] = snitch_config
+    state["Error Log"] = []
+    state["Exe Log"] = []
 
 
 @functools.lru_cache(maxsize=None)
@@ -212,16 +212,16 @@ def get_fanotify_events(fan_fd: int, fan_mod_cnt: dict, q_error: multiprocessing
             q_error.put("Fanotify Event %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
-def get_vt_results(snitch: dict, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, check_pending: bool = False) -> None:
-    """get virustotal results from subprocess and update snitch, q_vt = q_in if check_pending else q_out"""
+def sync_vt_results(state: dict, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, check_pending: bool = False) -> None:
+    """get virustotal results from subprocess and update state, q_vt = q_in if check_pending else q_out"""
     if check_pending:
-        for exe in snitch["SHA256"]:
-            for sha256 in snitch["SHA256"][exe]:
-                if snitch["SHA256"][exe][sha256] in ["VT Pending", "File not analyzed (no api key)", "", None]:
-                    if exe in snitch["Executables"] and snitch["Executables"][exe]:
-                        name = snitch["Executables"][exe][0]
-                    elif exe in snitch["Parent Executables"] and snitch["Parent Executables"][exe]:
-                        name = snitch["Parent Executables"][exe][0]
+        for exe in state["SHA256"]:
+            for sha256 in state["SHA256"][exe]:
+                if state["SHA256"][exe][sha256] in ["VT Pending", "File not analyzed (no api key)", "", None]:
+                    if exe in state["Executables"] and state["Executables"][exe]:
+                        name = state["Executables"][exe][0]
+                    elif exe in state["Parent Executables"] and state["Parent Executables"][exe]:
+                        name = state["Parent Executables"][exe][0]
                     else:
                         name = exe
                     proc = {"exe": exe, "name": name}

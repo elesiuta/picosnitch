@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # picosnitch
-# Copyright (C) 2020-2023 Eric Lesiuta
+# Copyright (C) 2020 Eric Lesiuta
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@ import sys
 from ..utils import get_sha256_fd, get_sha256_pid
 
 
-def rfuse_subprocess(config: dict, q_error, q_in, q_out):
+def run_fuse(config: dict, q_error, q_in, q_out):
     """runs as user to read executables for FUSE/AppImage (since real, effective, and saved UID must match)"""
     parent_process = multiprocessing.parent_process()
     try:

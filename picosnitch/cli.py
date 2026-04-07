@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # picosnitch
-# Copyright (C) 2020-2023 Eric Lesiuta
+# Copyright (C) 2020 Eric Lesiuta
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,19 +30,19 @@ import textwrap
 
 from .constants import BASE_PATH, VERSION
 from .daemon import Daemon
-from .main_loop import main_process
-from .ui import ui_dash, ui_init
-from .utils import read_snitch
+from .main_loop import run_main_loop
+from .ui import web_dashboard, tui_init
+from .utils import load_state
 
 
 def main():
     """init picosnitch"""
-    # master copy of the snitch dictionary, all subprocesses only receive a static copy of it from this point in time
-    snitch = read_snitch()
+    # master copy of the state dictionary, all subprocesses only receive a static copy of it from this point in time
+    state = load_state()
     # start picosnitch process monitor
     with open("/run/picosnitch.pid", "r") as f:
         assert int(f.read().strip()) == os.getpid()
-    sys.exit(main_process(snitch))
+    sys.exit(run_main_loop(state))
 
 
 def start_picosnitch():
@@ -126,7 +126,7 @@ def start_picosnitch():
                 assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
             assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
         # config and database checks and init
-        tmp_snitch = read_snitch()
+        tmp_state = load_state()
         assert os.path.exists(os.path.join(BASE_PATH, "snitch.db")) or os.getuid() == 0, "Requires root privileges to create database"
         con = sqlite3.connect(os.path.join(BASE_PATH, "snitch.db"))
         cur = con.cursor()
@@ -170,7 +170,7 @@ def start_picosnitch():
                 print("Database upgrade complete")
         con.close()
         # optional remote database
-        if sql_kwargs := tmp_snitch["Config"]["DB sql server"]:
+        if sql_kwargs := tmp_state["Config"]["DB sql server"]:
             sql_client = sql_kwargs.pop("client", "no client error")
             table_name = sql_kwargs.pop("table_name", "connections")
             sql = importlib.import_module(sql_client)
@@ -248,16 +248,16 @@ def start_picosnitch():
             print("if this fails, try running `picosnitch start-dash` to see any errors")
             if sys.executable.startswith("/snap/") or sys.executable.startswith("/nix/"):
                 subprocess.Popen(["bash", "-c", f'/usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                return ui_dash()
+                return web_dashboard()
             subprocess.Popen(["bash", "-c", f'let i=0; rm {BASE_PATH}/dash; while [[ ! -f {BASE_PATH}/dash || "$i" -gt 30 ]]; do let i++; sleep 1; done; rm {BASE_PATH}/dash && /usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             args = ["bash", "-c", f"touch {BASE_PATH}/dash; nohup {sys.executable} -m picosnitch start-dash > /dev/null 2>&1 &"]
             os.execvp("bash", args)
         # web gui without launching browser or detaching from terminal (intended for debugging)
         elif sys.argv[1] == "start-dash":
-            return ui_dash()
+            return web_dashboard()
         # terminal interface
         elif sys.argv[1] == "view":
-            return ui_init()
+            return tui_init()
         # show version or help if invalid argument and exit
         elif sys.argv[1] == "version":
             print(f"version: {VERSION}\nconfig and log files: {BASE_PATH}")
