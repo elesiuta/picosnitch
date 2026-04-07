@@ -1,31 +1,40 @@
 #!/usr/bin/env python3
-import glob
-import io
 import os
-import sys
 
 import pyan
 
-# generate call graph using pyan3==1.0.4
+# generate call graph using pyan3==2.3.1
 print("Generating call graph for picosnitch")
 os.chdir(os.path.dirname(__file__))
-sys.argv = ["pyan3"] + sorted(glob.glob("../picosnitch/*.py")) + ["--no-defines", "--uses", "--colored", "--nested-groups", "--dot"]
-old_stdout = sys.stdout
-sys.stdout = io.StringIO()
-pyan.main()
-output = sys.stdout.getvalue()
-sys.stdout = old_stdout
-with open("callgraph.dot", "w") as f:
-    f.write(output)
+dot: str = pyan.create_callgraph(
+    filenames=["../picosnitch/**/*.py"],
+    root="..",
+    format="dot",
+    rankdir="TB",
+    nested_groups=True,
+    draw_defines=False,
+    draw_uses=True,
+    colored=True,
+    grouped_alt=True,
+    concentrate=True,
+    depth=2,
+    exclude=[
+        "__init__.py",
+        "__main__.py",
+        "cli.py",
+        "constants.py",
+        "daemon.py",
+        "event_structures.py",
+        "user_interface.py",
+    ],
+)
 
-# sort edges so output is deterministic
-with open("callgraph.dot", "r") as f:
-    dot = f.readlines()
-new_dot = []
-new_edges = []
-edge_start = False
-edge_end = False
-for line in dot:
+# sort dot file edges so output is deterministic
+new_dot: list[str] = []
+new_edges: list[str] = []
+edge_start: bool = False
+edge_end: bool = False
+for line in dot.splitlines(keepends=True):
     if "->" in line and not edge_end:
         edge_start = True
         new_edges.append(line)
