@@ -127,3 +127,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# BPF generated files
+picosnitch/bpf/vmlinux.h
+picosnitch/bpf/*.bpf.o

@@ -124,7 +124,8 @@ def start_picosnitch():
                 capeff = int(proc_status[proc_status.find("CapEff:")+8:].splitlines()[0].strip(), base=16)
                 cap_sys_admin = 2**21
                 assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
-            assert importlib.util.find_spec("bcc"), "Requires BCC https://github.com/iovisor/bcc/blob/master/INSTALL.md"
+            from .bpf_wrapper import check_bpf_requirements
+            check_bpf_requirements()
         # config and database checks and init
         tmp_state = load_state()
         assert os.path.exists(os.path.join(BASE_PATH, "snitch.db")) or os.getuid() == 0, "Requires root privileges to create database"

@@ -1,12 +1,13 @@
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "picosnitch"
 version = "1.0.3"
-requires-python = ">=3.8"
+requires-python = ">=3.12"
 description = "Monitor network traffic per executable using BPF"
+urls = { "Homepage" = "https://github.com/elesiuta/picosnitch" }
 readme = "README.md"
 license = "GPL-3.0-or-later"
 classifiers = [
@@ -14,34 +15,38 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: System :: Networking :: Monitoring",
     "Topic :: System :: Monitoring",
-    "Topic :: Security",
 ]
-dependencies = ["psutil"]
+dependencies = [
+    "psutil"
+]
 
-[project.urls]
-Homepage = "https://elesiuta.github.io/picosnitch"
+[project.optional-dependencies]
+dash = ["dash", "pandas", "plotly"]
+geoip = ["geoip2"]
+notifications = ["dbus-python"]
+sql = ["psycopg[binary]", "pymysql"]
+themes = ["dash-bootstrap-components", "dash-bootstrap-templates"]
+virustotal = ["requests"]
+full = [
+    "picosnitch[dash,geoip,notifications,sql,themes,virustotal]"
+]
 
 [project.scripts]
 picosnitch = "picosnitch.cli:start_picosnitch"
 
-[project.optional-dependencies]
-enable_dash = ["dash", "pandas", "plotly"]
-enable_geoip = ["geoip2"]
-enable_notifications = ["dbus-python"]
-enable_sql = ["psycopg", "pymysql"]
-enable_themes = ["dash-bootstrap-components", "dash-bootstrap-templates"]
-enable_virustotal = ["requests"]
-full = [
-    "dash",
-    "pandas",
-    "plotly",
-    "geoip2",
-    "psycopg",
-    "pymysql",
-    "dash-bootstrap-components",
-    "dash-bootstrap-templates",
-    "requests",
+[tool.hatch.build.targets.sdist]
+include = [
+    "/picosnitch/",
+    "/hatch_build.py",
+    "/README.md",
+    "/LICENSE",
 ]
 
-[tool.setuptools]
+[tool.hatch.build.targets.wheel]
 packages = ["picosnitch"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
+
+[tool.hatch.build.targets.wheel.force-include]
+"picosnitch/bpf/picosnitch.bpf.o" = "picosnitch/bpf/picosnitch.bpf.o"

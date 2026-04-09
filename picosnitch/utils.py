@@ -33,6 +33,7 @@ import termios
 import typing
 
 from .constants import BASE_PATH, PID_CACHE, ST_DEV_MASK
+from .types import FanotifyEventMetadata
 
 
 def load_state() -> dict:

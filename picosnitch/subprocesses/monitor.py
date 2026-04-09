@@ -25,20 +25,20 @@ import ipaddress
 import multiprocessing
 import os
 import pickle
+import platform
+import shutil
 import signal
-import site
 import socket
 import struct
 import sys
 import time
 import typing
 
-# add site dirs for system and user installed packages (to import bcc with picosnitch installed via pipx/venv, or dependencies installed via user)
-site.addsitedir("/usr/lib/python3/dist-packages")
-site.addsitedir(os.path.expandvars("$PYTHON_USER_SITE"))
 import psutil
 
 from ..constants import FD_CACHE, PID_CACHE, ST_DEV_MASK
+from ..bpf_wrapper import BPF, check_bpf_requirements, find_bpf_object
+from ..utils import get_fstat
 
 
 def initial_poll() -> list:
@@ -78,8 +78,6 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
         os.nice(-20)
     except Exception:
         pass
-    import bcc
-    from bcc import BPF
     parent_process = multiprocessing.parent_process()
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
     event_pipe_0, event_pipe_1, event_pipe_2, event_pipe_3, event_pipe_4 = event_pipes
@@ -98,8 +96,34 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
     for x in range(FD_CACHE):
         fd_dict[f"tmp{x}"] = (0,)
     self_pid = os.getpid()
+    # cache of resolved inode -> exe path, for when /proc/PID/exe is gone
+    ino_path_cache = {}
+    # helper to find executable by comm name and inode when /proc/PID/exe is unavailable
+    def _find_exe_by_inode(comm: str, st_dev: int, st_ino: int) -> str:
+        """Try to find the executable file on disk by comm name and inode match."""
+        if not comm:
+            return ""
+        # Try shutil.which first (uses PATH)
+        candidate = shutil.which(comm)
+        if candidate:
+            try:
+                stat = os.stat(candidate)
+                if (stat.st_dev & ST_DEV_MASK) == st_dev and stat.st_ino == st_ino:
+                    return os.path.realpath(candidate)
+            except Exception:
+                pass
+        # Try common system directories
+        for prefix in ("/usr/bin", "/usr/sbin", "/bin", "/sbin", "/usr/local/bin", "/usr/local/sbin"):
+            candidate = os.path.join(prefix, comm)
+            try:
+                stat = os.stat(candidate)
+                if (stat.st_dev & ST_DEV_MASK) == st_dev and stat.st_ino == st_ino:
+                    return os.path.realpath(candidate)
+            except Exception:
+                continue
+        return ""
     # function for getting an existing or opening a new file descriptor based on st_dev and st_ino
-    def get_fd(st_dev: int, st_ino: int, pid: int, port: int) -> typing.Tuple[int, int, int, str, str]:
+    def get_fd(st_dev: int, st_ino: int, pid: int, port: int, comm: str = "") -> typing.Tuple[int, int, int, str, str]:
         st_dev = st_dev & ST_DEV_MASK
         sig = f"{st_dev} {st_ino}"
         try:
@@ -126,6 +150,27 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
                 exe = os.readlink(f"/proc/{pid}/exe")
             except Exception:
                 exe = ""
+            # fallback: if /proc/PID/exe is gone, resolve exe from inode cache or by comm name
+            if not exe:
+                if sig in ino_path_cache:
+                    exe = ino_path_cache[sig]
+                elif comm:
+                    exe = _find_exe_by_inode(comm, st_dev, st_ino)
+            if not fd and exe:
+                try:
+                    fd = os.open(exe, os.O_RDONLY)
+                    # verify the inode still matches before caching
+                    if (st_dev, st_ino) == get_fstat(fd):
+                        libc.fanotify_mark(fan_fd, _FAN_MARK_ADD, _FAN_MODIFY, fd, None)
+                        fd_path = f"/proc/{self_pid}/fd/{fd}"
+                    else:
+                        os.close(fd)
+                        fd, fd_path = 0, ""
+                except Exception:
+                    fd, fd_path = 0, ""
+            # cache resolved exe path by inode for future lookups
+            if exe:
+                ino_path_cache[sig] = exe
             if fd and (st_dev, st_ino) != get_fstat(fd):
                 if EVERY_EXE or port != -1:
                     q_error.put(f"Exe inode changed for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino}) before FD could be opened, using port: {port}")
@@ -156,24 +201,28 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
             pstat = os.stat(f"/proc/{proc['ppid']}/exe")
             cmd = get_cmdline(proc["pid"])
             pcmd = get_cmdline(proc["ppid"])
-            st_dev, st_ino, pid, fd, exe = get_fd(stat.st_dev, stat.st_ino, proc["pid"], proc["rport"])
-            pst_dev, pst_ino, ppid, pfd, pexe = get_fd(pstat.st_dev, pstat.st_ino, proc["ppid"], -1)
+            st_dev, st_ino, pid, fd, exe = get_fd(stat.st_dev, stat.st_ino, proc["pid"], proc["rport"], proc["name"])
+            pst_dev, pst_ino, ppid, pfd, pexe = get_fd(pstat.st_dev, pstat.st_ino, proc["ppid"], -1, proc["pname"])
             if EVERY_EXE or proc["rport"] != -1:
                 event_pipe_0.send_bytes(pickle.dumps({"pid": pid, "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                                      "ppid": ppid, "pname": proc["pname"], "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                                      "uid": proc["uid"], "send": 0, "recv": 0, "lport": proc["lport"], "rport": proc["rport"], "laddr": proc["laddr"], "raddr": proc["raddr"], "domain": domain_dict[proc["raddr"]]}))
         except Exception:
             pass
-    # initialize bpf program
-    bpf_text = bpf_text_base + \
-               bpf_text_bandwidth_structs + \
-               bpf_text_bandwidth_probe.replace("recvmsg", "sendmsg").replace("int flags, ", "") + \
-               bpf_text_bandwidth_probe.replace("recvmsg", "sendmsg").replace("int flags, ", "").replace("inet_", "inet6_") + \
-               bpf_text_bandwidth_probe + \
-               bpf_text_bandwidth_probe.replace("inet_", "inet6_")
+    # initialize bpf program - use pre-compiled object file
     try:
-        assert BPF.support_kfunc(), "BPF.support_kfunc() was not True, check BCC version or Kernel Configuration"
-        b = BPF(text=bpf_text)
+        bpf_obj_path = find_bpf_object()
+    except FileNotFoundError as e:
+        q_error.put(str(e))
+        raise
+    try:
+        check_bpf_requirements()
+    except RuntimeError as e:
+        q_error.put(f"BPF requirements check failed: {e}")
+        raise
+    try:
+        assert BPF.support_kfunc(), "BPF kfunc support check failed"
+        b = BPF(obj_file=bpf_obj_path)
         b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
     except Exception as e:
         q_error.put("Init BPF %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
@@ -181,20 +230,26 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
         os.kill(parent_process.pid, signal.SIGTERM)
         raise e
     use_getaddrinfo_uprobe = False
-    if bcc.__version__ == "EAD-HASH-NOTFOUND+GITDIR-N" or tuple(map(int, bcc.__version__.split(".")[0:2])) >= (0, 23):
-        try:
-            b.attach_uprobe(name="c", sym="getaddrinfo", fn_name="dns_entry")
-            b.attach_uretprobe(name="c", sym="getaddrinfo", fn_name="dns_return")
-            use_getaddrinfo_uprobe = True
-        except Exception:
-            q_error.put("BPF.attach_uprobe() failed for getaddrinfo, falling back to only using reverse DNS lookup")
+    try:
+        b.attach_uprobe(name="c", sym="getaddrinfo", fn_name="dns_entry")
+        b.attach_uretprobe(name="c", sym="getaddrinfo", fn_name="dns_return")
+        use_getaddrinfo_uprobe = True
+    except Exception as e:
+        q_error.put(f"BPF.attach_uprobe() failed for getaddrinfo: {e}, falling back to only using reverse DNS lookup")
+    # Attach fexit programs for network monitoring
+    try:
+        b.bpf_obj.attach_trace("sock_sendmsg_ret")
+        b.bpf_obj.attach_trace("sock_recvmsg_ret")
+    except Exception as e:
+        q_error.put(f"Failed to attach network monitoring programs: {e}")
+        raise
     # callbacks for bpf events, read event and put into a pipe for run_primary
     def queue_lost(event, *args):
         q_error.put(f"BPF callbacks not processing fast enough, missed {event} event, try increasing 'Perf ring buffer (pages)' (power of two) if this continues")
     def queue_sendv4_event(cpu, data, size):
         event = b["sendmsg_events"].event(data)
-        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport)
-        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1)
+        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
+        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
         laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
@@ -204,19 +259,19 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
                                              "uid": event.uid, "send": event.bytes, "recv": 0, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
     def queue_sendv6_event(cpu, data, size):
         event = b["sendmsg6_events"].event(data)
-        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport)
-        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1)
+        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
+        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
-        laddr = socket.inet_ntop(socket.AF_INET6, event.saddr)
-        raddr = socket.inet_ntop(socket.AF_INET6, event.daddr)
+        laddr = socket.inet_ntop(socket.AF_INET6, bytes(event.saddr)[:16])
+        raddr = socket.inet_ntop(socket.AF_INET6, bytes(event.daddr)[:16])
         event_pipe_1.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": event.bytes, "recv": 0, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
     def queue_recvv4_event(cpu, data, size):
         event = b["recvmsg_events"].event(data)
-        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport)
-        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1)
+        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
+        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
         laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
@@ -226,19 +281,19 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
                                              "uid": event.uid, "send": 0, "recv": event.bytes, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
     def queue_recvv6_event(cpu, data, size):
         event = b["recvmsg6_events"].event(data)
-        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport)
-        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1)
+        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
+        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
-        laddr = socket.inet_ntop(socket.AF_INET6, event.saddr)
-        raddr = socket.inet_ntop(socket.AF_INET6, event.daddr)
+        laddr = socket.inet_ntop(socket.AF_INET6, bytes(event.saddr)[:16])
+        raddr = socket.inet_ntop(socket.AF_INET6, bytes(event.daddr)[:16])
         event_pipe_3.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
                                              "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
                                              "uid": event.uid, "send": 0, "recv": event.bytes, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
-        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, -1)
-        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1)
+        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, -1, event.comm.decode())
+        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
         if EVERY_EXE:
@@ -268,233 +323,7 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
         if not parent_process.is_alive() or not q_in.empty():
             return 0
         try:
-            b.perf_buffer_poll(timeout=-1)
+            b.perf_buffer_poll(timeout=1000)
         except Exception as e:
             q_error.put("BPF %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
-
-
-bpf_text_base = """
-// This eBPF program was based on the following sources
-// https://github.com/p-/socket-connect-bpf/blob/7f386e368759e53868a078570254348e73e73e22/securitySocketConnectSrc.bpf
-// https://github.com/iovisor/bcc/blob/master/tools/execsnoop.py
-// https://github.com/iovisor/bcc/blob/master/tools/gethostlatency.py
-// https://github.com/iovisor/bcc/blob/master/tools/tcpconnect.py
-// https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/
-
-#include <uapi/linux/ptrace.h>
-#include <linux/socket.h>
-#include <linux/sched.h>
-#include <linux/in.h>
-#include <linux/in6.h>
-#include <linux/ip.h>
-#include <net/sock.h>
-
-struct addrinfo {
-    int ai_flags;
-    int ai_family;
-    int ai_socktype;
-    int ai_protocol;
-    u32 ai_addrlen;
-    struct sockaddr *ai_addr;
-    char *ai_canonname;
-    struct addrinfo *ai_next;
-};
-
-struct dns_val_t {
-    char host[80];
-    struct addrinfo **res;
-};
-BPF_HASH(dns_hash, u32, struct dns_val_t);
-
-struct dns_event_t {
-    char host[80];
-    u32 daddr;
-    unsigned __int128 daddr6;
-} __attribute__((packed));
-BPF_PERF_OUTPUT(dns_events);
-
-struct exec_event_t {
-    char comm[TASK_COMM_LEN];
-    char pcomm[TASK_COMM_LEN];
-    u64 ino;
-    u64 pino;
-    u32 pid;
-    u32 ppid;
-    u32 uid;
-    u32 dev;
-    u32 pdev;
-} __attribute__((packed));
-BPF_PERF_OUTPUT(exec_events);
-
-int dns_entry(struct pt_regs *ctx, const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res) {
-    if (PT_REGS_PARM1(ctx)) {
-        struct dns_val_t val = {.res = res};
-        if (bpf_probe_read_user(&val.host, sizeof(val.host), (void *)PT_REGS_PARM1(ctx)) == 0) {
-            u32 tid = (u32)bpf_get_current_pid_tgid();
-            dns_hash.update(&tid, &val);
-        }
-    }
-    return 0;
-}
-
-int dns_return(struct pt_regs *ctx) {
-    struct dns_val_t *valp;
-    u32 tid = (u32)bpf_get_current_pid_tgid();
-    valp = dns_hash.lookup(&tid);
-    if (valp) {
-        struct dns_event_t data = {};
-        bpf_probe_read_kernel(&data.host, sizeof(data.host), (void *)valp->host);
-        struct addrinfo *address;
-        bpf_probe_read(&address, sizeof(address), valp->res);
-        for (int i = 0; i < 8; i++) {
-            u32 address_family;
-            bpf_probe_read(&address_family, sizeof(address_family), &address->ai_family);
-            if (address_family == AF_INET) {
-                struct sockaddr_in *daddr;
-                bpf_probe_read(&daddr, sizeof(daddr), &address->ai_addr);
-                bpf_probe_read(&data.daddr, sizeof(data.daddr), &daddr->sin_addr.s_addr);
-                dns_events.perf_submit(ctx, &data, sizeof(data));
-            }
-            else if (address_family == AF_INET6) {
-                struct sockaddr_in6 *daddr6;
-                bpf_probe_read(&daddr6, sizeof(daddr6), &address->ai_addr);
-                bpf_probe_read(&data.daddr6, sizeof(data.daddr6), &daddr6->sin6_addr.in6_u.u6_addr32);
-                dns_events.perf_submit(ctx, &data, sizeof(data));
-            }
-            if (bpf_probe_read(&address, sizeof(address), &address->ai_next) != 0) break;
-            struct dns_event_t data = {};
-            bpf_probe_read_kernel(&data.host, sizeof(data.host), (void *)valp->host);
-        }
-        dns_hash.delete(&tid);
-    }
-    return 0;
-}
-
-int exec_entry(struct pt_regs *ctx) {
-    if (PT_REGS_RC(ctx) == 0) {
-        struct exec_event_t data = {};
-        data.pid = bpf_get_current_pid_tgid() >> 32;
-        data.uid = bpf_get_current_uid_gid();
-        struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-        data.ppid = task->real_parent->tgid;
-        data.ino = task->mm->exe_file->f_path.dentry->d_inode->i_ino;
-        data.dev = task->mm->exe_file->f_path.dentry->d_inode->i_sb->s_dev;
-        data.dev = new_encode_dev(data.dev);
-        data.pino = task->real_parent->mm->exe_file->f_path.dentry->d_inode->i_ino;
-        data.pdev = task->real_parent->mm->exe_file->f_path.dentry->d_inode->i_sb->s_dev;
-        data.pdev = new_encode_dev(data.pdev);
-        bpf_get_current_comm(&data.comm, sizeof(data.comm));
-        bpf_probe_read_kernel_str(&data.pcomm, sizeof(data.pcomm), &task->real_parent->comm);
-        exec_events.perf_submit(ctx, &data, sizeof(data));
-    }
-    return 0;
-}
-"""
-
-
-bpf_text_bandwidth_structs = """
-struct sendrecv_event_t {
-    char comm[TASK_COMM_LEN];
-    char pcomm[TASK_COMM_LEN];
-    u64 ino;
-    u64 pino;
-    u32 pid;
-    u32 ppid;
-    u32 uid;
-    u32 dev;
-    u32 pdev;
-    u32 bytes;
-    u32 daddr;
-    u32 saddr;
-    u16 dport;
-    u16 lport;
-} __attribute__((packed));
-BPF_PERF_OUTPUT(sendmsg_events);
-BPF_PERF_OUTPUT(recvmsg_events);
-
-struct sendrecv6_event_t {
-    char comm[TASK_COMM_LEN];
-    char pcomm[TASK_COMM_LEN];
-    unsigned __int128 daddr;
-    unsigned __int128 saddr;
-    u64 ino;
-    u64 pino;
-    u32 pid;
-    u32 ppid;
-    u32 uid;
-    u32 dev;
-    u32 pdev;
-    u32 bytes;
-    u16 dport;
-    u16 lport;
-} __attribute__((packed));
-BPF_PERF_OUTPUT(sendmsg6_events);
-BPF_PERF_OUTPUT(recvmsg6_events);
-"""
-
-
-bpf_text_bandwidth_probe = """
-KRETFUNC_PROBE(inet_recvmsg, struct socket *sock, struct msghdr *msg, int flags, u32 retval) {
-    if (retval >= 0 && retval < 0x7fffffff) {
-        u32 pid = bpf_get_current_pid_tgid() >> 32;
-        u32 uid = bpf_get_current_uid_gid();
-        struct task_struct *task, *parent;
-        struct mm_struct *mm;
-        struct file *exe_file;
-        struct dentry *exe_dentry;
-        struct inode *exe_inode;
-        struct super_block *exe_sb;
-        u64 ino, pino;
-        u32 ppid, dev, pdev;
-        task = (struct task_struct *)bpf_get_current_task();
-        // u32 ppid = task->real_parent->tgid;
-        // u64 ino = task->mm->exe_file->f_path.dentry->d_inode->i_ino;
-        // u32 dev = task->mm->exe_file->f_path.dentry->d_inode->i_sb->s_dev;
-        if (bpf_probe_read_kernel(&parent, sizeof(parent), &task->real_parent)) return 0;
-        if (bpf_probe_read_kernel(&ppid, sizeof(ppid), &parent->tgid)) return 0;
-        if (bpf_probe_read_kernel(&mm, sizeof(mm), &task->mm)) return 0;
-        if (bpf_probe_read_kernel(&exe_file, sizeof(exe_file), &mm->exe_file)) return 0;
-        if (bpf_probe_read_kernel(&exe_dentry, sizeof(exe_dentry), &exe_file->f_path.dentry)) return 0;
-        if (bpf_probe_read_kernel(&exe_inode, sizeof(exe_inode), &exe_dentry->d_inode)) return 0;
-        if (bpf_probe_read_kernel(&ino, sizeof(ino), &exe_inode->i_ino)) return 0;
-        if (bpf_probe_read_kernel(&exe_sb, sizeof(exe_sb), &exe_inode->i_sb)) return 0;
-        if (bpf_probe_read_kernel(&dev, sizeof(dev), &exe_sb->s_dev)) return 0;
-        dev = new_encode_dev(dev);
-        // u64 pino = task->real_parent->mm->exe_file->f_path.dentry->d_inode->i_ino;
-        // u32 pdev = task->real_parent->mm->exe_file->f_path.dentry->d_inode->i_sb->s_dev;
-        if (bpf_probe_read_kernel(&mm, sizeof(mm), &parent->mm)) return 0;
-        if (bpf_probe_read_kernel(&exe_file, sizeof(exe_file), &mm->exe_file)) return 0;
-        if (bpf_probe_read_kernel(&exe_dentry, sizeof(exe_dentry), &exe_file->f_path.dentry)) return 0;
-        if (bpf_probe_read_kernel(&exe_inode, sizeof(exe_inode), &exe_dentry->d_inode)) return 0;
-        if (bpf_probe_read_kernel(&pino, sizeof(pino), &exe_inode->i_ino)) return 0;
-        if (bpf_probe_read_kernel(&exe_sb, sizeof(exe_sb), &exe_inode->i_sb)) return 0;
-        if (bpf_probe_read_kernel(&pdev, sizeof(pdev), &exe_sb->s_dev)) return 0;
-        pdev = new_encode_dev(pdev);
-        u32 address_family = sock->sk->__sk_common.skc_family;
-        if (address_family == AF_INET) {
-            struct sendrecv_event_t data = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .pdev = pdev, .ino = ino, .pino = pino, .bytes = retval};
-            bpf_get_current_comm(&data.comm, sizeof(data.comm));
-            bpf_probe_read_kernel_str(&data.pcomm, sizeof(data.pcomm), &parent->comm);
-            bpf_probe_read(&data.daddr, sizeof(data.daddr), &sock->sk->__sk_common.skc_daddr);
-            bpf_probe_read(&data.saddr, sizeof(data.saddr), &sock->sk->__sk_common.skc_rcv_saddr);
-            bpf_probe_read(&data.dport, sizeof(data.dport), &sock->sk->__sk_common.skc_dport);
-            bpf_probe_read(&data.lport, sizeof(data.lport), &sock->sk->__sk_common.skc_num);
-            data.dport = ntohs(data.dport);
-            recvmsg_events.perf_submit(ctx, &data, sizeof(data));
-        }
-        else if (address_family == AF_INET6) {
-            struct sendrecv6_event_t data = {.pid = pid, .ppid = ppid, .uid = uid, .dev = dev, .pdev = pdev, .ino = ino, .pino = pino, .bytes = retval};
-            bpf_get_current_comm(&data.comm, sizeof(data.comm));
-            bpf_probe_read_kernel_str(&data.pcomm, sizeof(data.pcomm), &parent->comm);
-            bpf_probe_read(&data.daddr, sizeof(data.daddr), &sock->sk->__sk_common.skc_v6_daddr);
-            bpf_probe_read(&data.saddr, sizeof(data.saddr), &sock->sk->__sk_common.skc_v6_rcv_saddr);
-            bpf_probe_read(&data.dport, sizeof(data.dport), &sock->sk->__sk_common.skc_dport);
-            bpf_probe_read(&data.lport, sizeof(data.lport), &sock->sk->__sk_common.skc_num);
-            data.dport = ntohs(data.dport);
-            recvmsg6_events.perf_submit(ctx, &data, sizeof(data));
-        }
-    }
-    return 0;
-}
-"""
 

@@ -22,7 +22,7 @@ import os
 import site
 import typing
 
-# add site dirs for system and user installed packages (to import bcc with picosnitch installed via pipx/venv, or dependencies installed via user)
+# add site dirs for system and user installed packages (for dependencies when picosnitch is installed via pipx/venv, or dependencies installed via user)
 site.addsitedir("/usr/lib/python3/dist-packages")
 site.addsitedir(os.path.expandvars("$PYTHON_USER_SITE"))
 import psutil

@@ -26,14 +26,14 @@ import sys
 import time
 import typing
 
-# add site dirs for system and user installed packages (to import bcc with picosnitch installed via pipx/venv, or dependencies installed via user)
+# add site dirs for system and user installed packages (for dependencies when picosnitch is installed via pipx/venv, or dependencies installed via user)
 site.addsitedir("/usr/lib/python3/dist-packages")
 site.addsitedir(os.path.expandvars("$PYTHON_USER_SITE"))
 import psutil
 
 # picosnitch version and supported platform
 VERSION: typing.Final[str] = "1.0.3"
-assert sys.version_info >= (3, 8), "Python version >= 3.8 is required"
+assert sys.version_info >= (3, 12), "Python version >= 3.12 is required"
 assert sys.platform.startswith("linux"), "Did not detect a supported operating system"
 
 # warning about -O (optimize) flag since asserts are disabled and some are critical

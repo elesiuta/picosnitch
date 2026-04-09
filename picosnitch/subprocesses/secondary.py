@@ -32,7 +32,8 @@ import typing
 
 from ..constants import BASE_PATH, VERSION
 from ..process_manager import ProcessManager
-from ..utils import get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup
+from ..types import BpfEvent
+from ..utils import get_fanotify_events, get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup, sync_vt_results
 
 
 def resolve_hash(state: dict, fan_mod_cnt: dict, proc: dict, p_fuse: ProcessManager, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> str:
