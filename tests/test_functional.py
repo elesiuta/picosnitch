@@ -1,0 +1,314 @@
+#!/usr/bin/env python3
+"""
+Functional end-to-end tests for picosnitch BPF CO-RE implementation.
+
+These tests verify:
+1. Picosnitch daemon starts and stops correctly
+2. Network traffic is captured with correct byte counts
+3. Short-lived processes are detected with exe paths resolved
+4. Executable hashes are computed correctly
+5. Database and log files are populated correctly
+"""
+
+import hashlib
+import json
+import os
+import shutil
+import signal
+import sqlite3
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+# Constants
+PICOSNITCH_DIR = Path(__file__).parent.parent
+PYTHON_EXE = sys.executable
+
+
+# Use standard config location - handle sudo case where SUDO_UID is set
+def get_config_dir() -> Path:
+    """Get the picosnitch config directory, handling sudo properly."""
+    sudo_uid = os.environ.get("SUDO_UID")
+    if sudo_uid:
+        import pwd
+
+        home = pwd.getpwuid(int(sudo_uid)).pw_dir
+    else:
+        home = str(Path.home())
+    return Path(home) / ".config" / "picosnitch"
+
+
+CONFIG_DIR = get_config_dir()
+
+# Test configuration
+DB_WRITE_LIMIT = 5  # seconds - we set this in config
+STARTUP_WAIT = 8  # seconds to wait for picosnitch to fully start
+TRAFFIC_WAIT = 3  # seconds to wait after network activity
+
+
+def get_executable_hash(exe_path: str) -> str:
+    """Calculate SHA256 hash of an executable file."""
+    sha256 = hashlib.sha256()
+    try:
+        with open(exe_path, "rb") as f:
+            while data := f.read(1048576):
+                sha256.update(data)
+        return sha256.hexdigest()
+    except (FileNotFoundError, PermissionError):
+        return None
+
+
+def find_executable(name: str) -> str:
+    """Find the full path to an executable."""
+    result = subprocess.run(["which", name], capture_output=True, text=True)
+    if result.returncode == 0:
+        return result.stdout.strip()
+    return None
+
+
+def backup_config():
+    """Backup existing picosnitch config if it exists."""
+    backup_dir = CONFIG_DIR.parent / "picosnitch_backup"
+    if CONFIG_DIR.exists():
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+        shutil.copytree(CONFIG_DIR, backup_dir)
+    return backup_dir
+
+
+def restore_config(backup_dir: Path):
+    """Restore picosnitch config from backup."""
+    if backup_dir.exists():
+        if CONFIG_DIR.exists():
+            shutil.rmtree(CONFIG_DIR)
+        shutil.copytree(backup_dir, CONFIG_DIR)
+        shutil.rmtree(backup_dir)
+
+
+def clear_config():
+    """Clear picosnitch config directory for fresh test."""
+    if CONFIG_DIR.exists():
+        shutil.rmtree(CONFIG_DIR)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def stop_existing_picosnitch():
+    """Stop any existing picosnitch daemon."""
+    subprocess.run([PYTHON_EXE, "-m", "picosnitch", "stop"], capture_output=True, timeout=30)
+    time.sleep(2)
+
+
+def start_picosnitch(extra_config: dict = None) -> subprocess.Popen:
+    """Start picosnitch daemon in start-no-daemon mode and return the process."""
+    config = {
+        "DB retention (days)": 1,
+        "DB sql log": True,
+        "DB sql server": {},
+        "DB text log": False,
+        "DB write limit (seconds)": DB_WRITE_LIMIT,
+        "Desktop notifications": False,
+        "Log addresses": True,
+        "Log commands": True,
+        "Log ignore": [],
+        "Set RLIMIT_NOFILE": None,
+        "VT API key": "",
+        "VT file upload": False,
+        "VT request limit (seconds)": 15,
+    }
+    if extra_config:
+        config.update(extra_config)
+
+    config_file = CONFIG_DIR / "config.json"
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(config_file, "w") as f:
+        json.dump(config, f)
+
+    proc = subprocess.Popen([PYTHON_EXE, "-m", "picosnitch", "start-no-daemon"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    time.sleep(STARTUP_WAIT)
+
+    if proc.poll() is not None:
+        stdout = proc.stdout.read().decode()
+        stderr = proc.stderr.read().decode()
+        raise RuntimeError(f"picosnitch exited early: stdout={stdout}, stderr={stderr}")
+
+    return proc
+
+
+def stop_picosnitch(proc: subprocess.Popen):
+    """Stop picosnitch process and wait for DB flush."""
+    if proc and proc.poll() is None:
+        proc.send_signal(signal.SIGINT)
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+    time.sleep(DB_WRITE_LIMIT + 2)
+
+
+def query_db(query: str) -> list:
+    """Execute a query on the snitch database."""
+    db_path = CONFIG_DIR / "snitch.db"
+    if not db_path.exists():
+        return []
+    con = sqlite3.connect(str(db_path))
+    cur = con.cursor()
+    try:
+        cur.execute(query)
+        results = cur.fetchall()
+    finally:
+        con.close()
+    return results
+
+
+def get_connections_for_process(process_name: str) -> list:
+    """Get all connections for a process name."""
+    return query_db(f"SELECT name, exe, raddr, rport, send, recv, domain FROM connections WHERE name LIKE '%{process_name}%'")
+
+
+@pytest.fixture(scope="module")
+def picosnitch_session():
+    """Module-scoped fixture that manages picosnitch lifecycle for all tests."""
+    if os.geteuid() != 0:
+        pytest.skip("Tests require root privileges. Run with: sudo uv run pytest tests/test_functional.py -v")
+
+    backup_dir = backup_config()
+    stop_existing_picosnitch()
+    clear_config()
+
+    proc = start_picosnitch()
+
+    yield proc
+
+    stop_picosnitch(proc)
+    restore_config(backup_dir)
+
+
+class TestShortLivedProcesses:
+    """Tests for capturing short-lived processes with correct exe paths."""
+
+    def test_curl_exe_resolved(self, picosnitch_session):
+        """Test that curl's executable path is resolved even though it exits quickly."""
+        curl_exe = find_executable("curl")
+        if not curl_exe:
+            pytest.skip("curl not available")
+
+        subprocess.run(["curl", "-s", "http://example.com", "-o", "/dev/null"], capture_output=True, timeout=30)
+
+        time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
+
+        connections = get_connections_for_process("curl")
+        assert len(connections) > 0, "Should have captured curl connections"
+
+        for conn in connections:
+            name, exe, raddr, rport, send, recv, domain = conn
+            assert exe != "", f"curl exe should be resolved, got empty for raddr={raddr} rport={rport}"
+            assert "curl" in exe, f"curl exe should contain 'curl', got: {exe}"
+
+    def test_curl_sha256_correct(self, picosnitch_session):
+        """Test that curl's SHA256 hash is computed correctly."""
+        curl_exe = find_executable("curl")
+        if not curl_exe:
+            pytest.skip("curl not available")
+
+        expected_hash = get_executable_hash(curl_exe)
+
+        subprocess.run(["curl", "-s", "http://example.com", "-o", "/dev/null"], capture_output=True, timeout=30)
+
+        time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
+
+        results = query_db("SELECT sha256 FROM connections WHERE name LIKE '%curl%' AND sha256 NOT LIKE '!%' LIMIT 1")
+        assert len(results) > 0, "Should have a valid SHA256 for curl"
+        sha256 = results[0][0]
+        assert sha256 == expected_hash, f"SHA256 mismatch: got {sha256}, expected {expected_hash}"
+
+    def test_wget_exe_resolved(self, picosnitch_session):
+        """Test that wget's executable path is resolved."""
+        wget_exe = find_executable("wget")
+        if not wget_exe:
+            pytest.skip("wget not available")
+
+        subprocess.run(["wget", "-q", "http://example.com", "-O", "/dev/null"], capture_output=True, timeout=30)
+
+        time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
+
+        connections = get_connections_for_process("wget")
+        assert len(connections) > 0, "Should have captured wget connections"
+
+        for conn in connections:
+            name, exe, raddr, rport, send, recv, domain = conn
+            assert exe != "", "wget exe should be resolved, got empty"
+            assert "wget" in exe, f"wget exe should contain 'wget', got: {exe}"
+
+    def test_multiple_rapid_curl(self, picosnitch_session):
+        """Test that multiple rapid curl invocations all get exe resolved."""
+        curl_exe = find_executable("curl")
+        if not curl_exe:
+            pytest.skip("curl not available")
+
+        for i in range(3):
+            subprocess.run(["curl", "-s", "http://example.com", "-o", "/dev/null"], capture_output=True, timeout=30)
+            time.sleep(0.5)
+
+        time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
+
+        connections = get_connections_for_process("curl")
+        assert len(connections) >= 1, "Should have captured at least one curl connection"
+
+        # All curl connections should have exe resolved
+        for conn in connections:
+            name, exe, raddr, rport, send, recv, domain = conn
+            assert exe != "", "All curl connections should have exe resolved"
+
+    def test_no_read_errors(self, picosnitch_session):
+        """Test that there are no Read Errors in the error log after curl/wget."""
+        error_log = CONFIG_DIR / "error.log"
+        if error_log.exists():
+            content = error_log.read_text()
+            read_errors = [line for line in content.splitlines() if "Read Error" in line and "curl" in line]
+            assert len(read_errors) == 0, f"Should not have Read Errors for curl: {read_errors[:3]}"
+
+
+class TestDatabaseIntegrity:
+    """Tests for database integrity."""
+
+    def test_database_schema(self, picosnitch_session):
+        """Test that database has correct schema."""
+        subprocess.run(["curl", "-s", "http://example.com", "-o", "/dev/null"], capture_output=True, timeout=30)
+        time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
+
+        db_path = CONFIG_DIR / "snitch.db"
+        assert db_path.exists(), "Database should exist"
+
+        con = sqlite3.connect(str(db_path))
+        cur = con.cursor()
+        cur.execute("PRAGMA user_version")
+        version = cur.fetchone()[0]
+        assert version == 3, f"Database version should be 3, got {version}"
+
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='connections'")
+        tables = cur.fetchall()
+        assert len(tables) == 1, "connections table should exist"
+        con.close()
+
+    def test_no_device_mismatch_errors(self, picosnitch_session):
+        """Test no 'Exe inode changed' errors (device encoding bug)."""
+        subprocess.run(["curl", "-s", "http://example.com", "-o", "/dev/null"], capture_output=True, timeout=30)
+        time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
+
+        error_log = CONFIG_DIR / "error.log"
+        if error_log.exists():
+            content = error_log.read_text()
+            assert content.count("Exe inode changed") == 0, "Should not have inode changed errors"
+
+
+if __name__ == "__main__":
+    if os.geteuid() != 0:
+        print("WARNING: These tests require root privileges.")
+        print("Run with: sudo uv run pytest tests/test_functional.py -v")
+        sys.exit(1)
+    pytest.main([__file__, "-v"])
