@@ -26,8 +26,8 @@ import threading
 import time
 import typing
 
-from ..types import BpfEvent
 from ..notifications import Notifier
+from ..types import BpfEvent
 from ..utils import save_state
 
 

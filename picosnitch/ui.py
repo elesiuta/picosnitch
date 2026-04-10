@@ -158,14 +158,17 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
             "year": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1, month=1),
         }
     )
-    time_round_func = lambda resolution_index, time: time_round_functions[time_round_units[resolution_index]](time)
+
+    def time_round_func(resolution_index, time):
+        return time_round_functions[time_round_units[resolution_index]](time)
+
     # geoip lookup
     geoip_reader = init_geoip()
 
     def get_geoip(ip: str) -> str:
         try:
             country_code = geoip_reader.country(ip).country.iso_code
-            base = 0x1F1E6 - ord("A")
+            # base = 0x1F1E6 - ord("A")
             # country_flag = chr(base + ord(country_code[0].upper())) + chr(base + ord(country_code[1].upper()))  # flags aren't supported in most fonts and terminals, disable for now
             return f"{country_code} {ip}"
         except Exception:
@@ -216,7 +219,10 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
     col_sql = ["exe", "name", "cmdline", "sha256", "pexe", "pname", "pcmdline", "psha256", "uid", "lport", "rport", "laddr", "raddr", "domain", "contime"]
     tab_stack = []
     byte_units = 3
-    round_bytes = lambda size, b: f"{size if b == 0 else round(size / 10**b, 1)!s:>{8 if b == 0 else 7}} {'k' if b == 3 else 'M' if b == 6 else 'G' if b == 9 else ''}B"
+
+    def round_bytes(size, b):
+        return f"{size if b == 0 else round(size / 10**b, 1)!s:>{8 if b == 0 else 7}} {'k' if b == 3 else 'M' if b == 6 else 'G' if b == 9 else ''}B"
+
     # ui loop
     max_y, max_x = stdscr.getmaxyx()
     first_line = 4
@@ -357,7 +363,7 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
                 stdscr.attrset(curses.color_pair(0))
             if first_line <= line - offset < curses.LINES - 1:
                 # special cases (cmdline null chars, uid, ip, sha256 and vt results)
-                if type(name) == str:
+                if isinstance(name, str):
                     name = name.replace("\0", "")
                 elif col_sql[tab_i] == "uid":
                     try:
@@ -521,12 +527,12 @@ def web_dashboard():
     site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash-bootstrap-templates/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
     site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/geoip2/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
     site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/geoip2/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
-    from dash import Dash, dcc, html, callback_context, no_update
-    from dash.dependencies import Input, Output, State
-    from dash.exceptions import PreventUpdate
     import pandas as pd
     import pandas.io.sql as psql
     import plotly.express as px
+    from dash import Dash, callback_context, dcc, html, no_update
+    from dash.dependencies import Input, Output, State
+    from dash.exceptions import PreventUpdate
 
     with open(os.path.join(BASE_PATH, "config.json"), "r", encoding="utf-8", errors="surrogateescape") as json_file:
         config = json.load(json_file)
@@ -579,7 +585,10 @@ def web_dashboard():
             "year": lambda x: x.replace(microsecond=0, second=0, minute=0, hour=0, day=1, month=1),
         }
     )
-    time_round_func = lambda resolution_index, time: time_round_functions[time_round_units[resolution_index]](time)
+
+    def time_round_func(resolution_index, time):
+        return time_round_functions[time_round_units[resolution_index]](time)
+
     geoip_reader = init_geoip()
 
     def get_user(uid) -> str:

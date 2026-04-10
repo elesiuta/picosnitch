@@ -25,7 +25,6 @@ import ipaddress
 import multiprocessing
 import os
 import pickle
-import platform
 import shutil
 import signal
 import socket
@@ -36,8 +35,8 @@ import typing
 
 import psutil
 
-from ..constants import FD_CACHE, PID_CACHE, ST_DEV_MASK
 from ..bpf_wrapper import BPF, check_bpf_requirements, find_bpf_object
+from ..constants import FD_CACHE, PID_CACHE, ST_DEV_MASK
 from ..utils import get_fstat
 
 

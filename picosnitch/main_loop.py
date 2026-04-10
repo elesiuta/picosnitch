@@ -27,10 +27,10 @@ import sys
 import time
 
 from .constants import FD_CACHE
-from .subprocesses.monitor import run_monitor
-from .subprocesses.primary import run_primary
 from .process_manager import ProcessManager
 from .subprocesses.fuse import run_fuse
+from .subprocesses.monitor import run_monitor
+from .subprocesses.primary import run_primary
 from .subprocesses.secondary import run_secondary
 from .subprocesses.virustotal import run_virustotal
 

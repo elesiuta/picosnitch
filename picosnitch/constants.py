@@ -73,7 +73,7 @@ try:
     file_path = os.path.join(BASE_PATH, "config.json")
     with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
         nofile = json.load(json_file)["Set RLIMIT_NOFILE"]
-    if type(nofile) == int:
+    if isinstance(nofile, int):
         try:
             new_limit = (nofile, resource.getrlimit(resource.RLIMIT_NOFILE)[1])
             resource.setrlimit(resource.RLIMIT_NOFILE, new_limit)
@@ -100,7 +100,7 @@ try:
     file_path = os.path.join(BASE_PATH, "config.json")
     with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
         set_mask = json.load(json_file)["Set st_dev mask"]
-    if type(set_mask) == int:
+    if isinstance(set_mask, int):
         st_dev_mask = set_mask
 except Exception:
     pass

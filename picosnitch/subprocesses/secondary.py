@@ -86,7 +86,7 @@ def build_log_entries(
     transaction = set()
     for proc_pickle in new_processes:
         proc: BpfEvent = pickle.loads(proc_pickle)
-        if type(proc) != dict:
+        if not isinstance(proc, dict):
             q_error.put("sync error between secondary and primary, received '%s' in middle of transfer" % str(proc))
             continue
         # get the sha256 of the process executable and its parent
@@ -112,7 +112,7 @@ def build_log_entries(
         # omit entry from logs
         ignored = False
         for ignore in state["Config"]["Log ignore"]:
-            if (proc["rport"] == ignore) or (proc["lport"] == ignore) or (sha256 == ignore) or (type(ignore) == str and proc["domain"].startswith(ignore)):
+            if (proc["rport"] == ignore) or (proc["lport"] == ignore) or (sha256 == ignore) or (isinstance(ignore, str) and proc["domain"].startswith(ignore)):
                 ignored = True
                 break
         if ignored:
@@ -180,7 +180,7 @@ def run_secondary(state, fan_fd, p_fuse: ProcessManager, p_virustotal: ProcessMa
         try:
             ignored_ips.append(ipaddress.ip_network(ip_subnet))
             state["Config"]["Log ignore"].remove(ip_subnet)
-        except Exception as e:
+        except Exception:
             pass
     state["Config"]["Log ignore IP"] = ignored_ips
     # main loop
@@ -203,7 +203,7 @@ def run_secondary(state, fan_fd, p_fuse: ProcessManager, p_virustotal: ProcessMa
             transfer_size = 0
             if secondary_pipe.poll():
                 first_pickle = secondary_pipe.recv_bytes()
-                if type(pickle.loads(first_pickle)) == int:
+                if isinstance(pickle.loads(first_pickle), int):
                     transfer_size = pickle.loads(first_pickle)
                 elif pickle.loads(first_pickle) == "done":
                     q_error.put("sync error between secondary and primary on ready (received done)")

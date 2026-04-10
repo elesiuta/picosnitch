@@ -31,7 +31,7 @@ import textwrap
 from .constants import BASE_PATH, VERSION
 from .daemon import Daemon
 from .main_loop import run_main_loop
-from .ui import web_dashboard, tui_init
+from .ui import tui_init, web_dashboard
 from .utils import load_state
 
 
@@ -243,7 +243,9 @@ def start_picosnitch():
         elif sys.argv[1] == "dash":
             site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
             site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
-            import dash, pandas, plotly
+            import dash
+            import pandas
+            import plotly
 
             assert dash.__version__ and pandas.__version__ and plotly.__version__
             try:

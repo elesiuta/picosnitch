@@ -21,9 +21,9 @@ import ctypes
 import ctypes.util
 import fcntl
 import functools
+import hashlib
 import ipaddress
 import json
-import hashlib
 import multiprocessing
 import os
 import pickle
@@ -33,6 +33,7 @@ import termios
 import typing
 
 from .constants import BASE_PATH, PID_CACHE, ST_DEV_MASK
+from .notifications import Notifier
 from .types import FanotifyEventMetadata
 
 
@@ -89,8 +90,8 @@ def load_state() -> dict:
         for key in ["Executables", "Names", "Parent Executables", "Parent Names", "SHA256"]:
             if key in state_record:
                 data[key] = state_record[key]
-    assert all(type(data[key]) == type(template[key]) for key in template), "Invalid json files"
-    assert all(key in ["Set RLIMIT_NOFILE", "Set st_dev mask"] or type(data["Config"][key]) == type(template["Config"][key]) for key in template["Config"]), "Invalid config"
+    assert all(type(data[key]) is type(template[key]) for key in template), "Invalid json files"
+    assert all(key in ["Set RLIMIT_NOFILE", "Set st_dev mask"] or type(data["Config"][key]) is type(template["Config"][key]) for key in template["Config"]), "Invalid config"
     if write_config:
         save_state(data, write_config=True)
     return data

@@ -460,6 +460,7 @@ digraph G {
         "picosnitch__subprocesses__virustotal__run_virustotal" -> "picosnitch__subprocesses__virustotal__run_virustotal__get_analysis" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__virustotal__run_virustotal" -> "picosnitch__subprocesses__virustotal__run_virustotal__get_analysis" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__virustotal__run_virustotal" -> "picosnitch__utils__get_fstat" [style="solid",  color="#000000"];
+        "picosnitch__utils" -> "picosnitch__notifications__Notifier" [style="solid",  color="#000000"];
         "picosnitch__utils" -> "picosnitch__utils__get_fanotify_events" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__get_fstat" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__get_sha256_fd" [style="dashed",  color="#ffffff00"];
@@ -473,4 +474,5 @@ digraph G {
         "picosnitch__utils__get_sha256_fd" -> "picosnitch__utils__get_fstat" [style="solid",  color="#000000"];
         "picosnitch__utils__get_sha256_pid" -> "picosnitch__utils__get_fstat" [style="solid",  color="#000000"];
         "picosnitch__utils__load_state" -> "picosnitch__utils__save_state" [style="solid",  color="#000000"];
+        "picosnitch__utils__save_state" -> "picosnitch__notifications__Notifier" [style="solid",  color="#000000"];
     }
