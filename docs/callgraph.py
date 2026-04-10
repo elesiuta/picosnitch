@@ -3,7 +3,7 @@ import os
 
 import pyan
 
-# generate call graph using pyan3==2.3.1
+# generate call graph using pyan3
 print("Generating call graph for picosnitch")
 os.chdir(os.path.dirname(__file__))
 dot: str = pyan.create_callgraph(

@@ -17,7 +17,7 @@ classifiers = [
     "Topic :: System :: Monitoring",
 ]
 dependencies = [
-    "psutil"
+    "psutil",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +29,11 @@ themes = ["dash-bootstrap-components", "dash-bootstrap-templates"]
 virustotal = ["requests"]
 full = [
     "picosnitch[dash,geoip,notifications,sql,themes,virustotal]"
+]
+
+[dependency-groups]
+dev = [
+    "pyan3==2.3.1",
 ]
 
 [project.scripts]
