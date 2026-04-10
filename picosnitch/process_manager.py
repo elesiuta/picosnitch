@@ -30,15 +30,14 @@ import psutil
 
 class ProcessManager:
     """A class for managing a subprocess"""
+
     def __init__(self, name: str, target: typing.Callable, init_args: tuple = ()) -> None:
         self.name, self.target, self.init_args = name, target, init_args
         self.q_in, self.q_out = multiprocessing.Queue(), multiprocessing.Queue()
         self.start()
 
     def start(self) -> None:
-        self.p = multiprocessing.Process(name=self.name, target=self.target, daemon=True,
-                                         args=(*self.init_args, self.q_in, self.q_out)
-                                        )
+        self.p = multiprocessing.Process(name=self.name, target=self.target, daemon=True, args=(*self.init_args, self.q_in, self.q_out))
         self.p.start()
         self.pp = psutil.Process(self.p.pid)
 

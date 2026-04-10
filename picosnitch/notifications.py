@@ -23,11 +23,13 @@ import sys
 
 class Notifier:
     """A singleton for creating system tray notifications, holds notifications in queue if fails, prints if disabled"""
+
     __instance = None
     dbus_notifications = False
     notifications_ready = False
     notification_queue = []
     last_notification = ""
+
     def __new__(cls, *args, **kwargs):
         if not cls.__instance:
             cls.__instance = super(Notifier, cls).__new__(cls, *args, **kwargs)
@@ -37,6 +39,7 @@ class Notifier:
         self.dbus_notifications = True
         try:
             import dbus
+
             os.seteuid(int(os.getenv("SUDO_UID")))
             dbus_session_obj = dbus.SessionBus().get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications")
             interface = dbus.Interface(dbus_session_obj, "org.freedesktop.Notifications")
@@ -70,4 +73,3 @@ class Notifier:
         except Exception:
             self.notification_queue.append(msg)
             self.notifications_ready = False
-

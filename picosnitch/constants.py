@@ -84,15 +84,18 @@ try:
 except Exception:
     pass
 FD_CACHE: typing.Final[int] = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128
-PID_CACHE: typing.Final[int] = max(8192, 2*FD_CACHE)
-st_dev_mask = 0xffffffff
+PID_CACHE: typing.Final[int] = max(8192, 2 * FD_CACHE)
+st_dev_mask = 0xFFFFFFFF
 try:
     for part in psutil.disk_partitions():
         if part.fstype == "btrfs":
             st_dev_mask = 0
             if not os.path.exists(os.path.join(BASE_PATH, "config.json")):
                 # only warn users about btrfs on first run (by checking for config.json)
-                print("Warning: running picosnitch on systems with btrfs is not fully supported due to dev number strangeness and non-unique inodes (this is still fine for most use cases)", file=sys.stderr)
+                print(
+                    "Warning: running picosnitch on systems with btrfs is not fully supported due to dev number strangeness and non-unique inodes (this is still fine for most use cases)",
+                    file=sys.stderr,
+                )
             break
     file_path = os.path.join(BASE_PATH, "config.json")
     with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
@@ -102,4 +105,3 @@ try:
 except Exception:
     pass
 ST_DEV_MASK: typing.Final[int] = st_dev_mask
-

@@ -30,14 +30,12 @@ class BPFBuildHook(BuildHookInterface):
         vmlinux_h = os.path.join(bpf_src_dir, "vmlinux.h")
         if not os.path.exists(vmlinux_h):
             if not os.path.exists("/sys/kernel/btf/vmlinux"):
-                raise RuntimeError(
-                    "Cannot compile BPF: /sys/kernel/btf/vmlinux not found.\n"
-                    "Either provide a pre-compiled bpf/picosnitch.bpf.o or "
-                    "build on a kernel with CONFIG_DEBUG_INFO_BTF=y"
-                )
+                raise RuntimeError("Cannot compile BPF: /sys/kernel/btf/vmlinux not found.\nEither provide a pre-compiled bpf/picosnitch.bpf.o or build on a kernel with CONFIG_DEBUG_INFO_BTF=y")
             result = subprocess.run(
                 ["bpftool", "btf", "dump", "file", "/sys/kernel/btf/vmlinux", "format", "c"],
-                capture_output=True, text=True, check=True,
+                capture_output=True,
+                text=True,
+                check=True,
             )
             with open(vmlinux_h, "w") as f:
                 f.write(result.stdout)
@@ -50,11 +48,19 @@ class BPFBuildHook(BuildHookInterface):
         # Compile
         subprocess.run(
             [
-                "clang", "-g", "-O2", "-target", "bpf",
+                "clang",
+                "-g",
+                "-O2",
+                "-target",
+                "bpf",
                 f"-D__TARGET_ARCH_{bpf_target}",
-                "-Wall", "-Werror",
+                "-Wall",
+                "-Werror",
                 f"-I{bpf_src_dir}",
-                "-c", bpf_src, "-o", bpf_obj,
+                "-c",
+                bpf_src,
+                "-o",
+                bpf_obj,
             ],
             check=True,
         )

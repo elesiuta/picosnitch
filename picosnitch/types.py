@@ -23,6 +23,7 @@ import typing
 
 class BpfEvent(typing.TypedDict):
     """Process and connection data for each event captured by the BPF program, and sent to the main & secondary processes"""
+
     pid: int
     name: str
     fd: int
@@ -49,6 +50,7 @@ class BpfEvent(typing.TypedDict):
 
 class FanotifyEventMetadata(ctypes.Structure):
     """https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/uapi/linux/fanotify.h"""
+
     _fields_ = [
         ("event_len", ctypes.c_uint32),
         ("vers", ctypes.c_uint8),
@@ -56,6 +58,5 @@ class FanotifyEventMetadata(ctypes.Structure):
         ("metadata_len", ctypes.c_uint16),
         ("mask", ctypes.c_uint64),
         ("fd", ctypes.c_int32),
-        ("pid", ctypes.c_int32)
+        ("pid", ctypes.c_int32),
     ]
-

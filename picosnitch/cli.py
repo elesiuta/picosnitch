@@ -121,53 +121,54 @@ def start_picosnitch():
                     os.execvp("sudo", args)
             with open("/proc/self/status", "r") as f:
                 proc_status = f.read()
-                capeff = int(proc_status[proc_status.find("CapEff:")+8:].splitlines()[0].strip(), base=16)
+                capeff = int(proc_status[proc_status.find("CapEff:") + 8 :].splitlines()[0].strip(), base=16)
                 cap_sys_admin = 2**21
                 assert capeff & cap_sys_admin, "Missing capability CAP_SYS_ADMIN"
             from .bpf_wrapper import check_bpf_requirements
+
             check_bpf_requirements()
         # config and database checks and init
         tmp_state = load_state()
         assert os.path.exists(os.path.join(BASE_PATH, "snitch.db")) or os.getuid() == 0, "Requires root privileges to create database"
         con = sqlite3.connect(os.path.join(BASE_PATH, "snitch.db"))
         cur = con.cursor()
-        cur.execute(''' SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' ''')
+        cur.execute(""" SELECT count(name) FROM sqlite_master WHERE type='table' AND name='connections' """)
         if cur.fetchone()[0] != 1:
-            cur.execute(''' CREATE TABLE connections
-                            (contime text, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text) ''')
-            cur.execute(''' PRAGMA user_version = 3 ''')
+            cur.execute(""" CREATE TABLE connections
+                            (contime text, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text) """)
+            cur.execute(""" PRAGMA user_version = 3 """)
             con.commit()
         else:
-            cur.execute(''' PRAGMA user_version ''')
+            cur.execute(""" PRAGMA user_version """)
             user_version = cur.fetchone()[0]
             if user_version <= 2:
                 assert not os.path.exists("/run/picosnitch.pid"), "cannot upgrade database while picosnitch daemon is running"
                 print("Upgrading database, please wait...")
             if user_version == 0:
-                cur.execute(''' ALTER TABLE connections RENAME COLUMN events TO conns ''')
-                cur.execute(''' ALTER TABLE connections ADD COLUMN send integer DEFAULT 0 NOT NULL ''')
-                cur.execute(''' ALTER TABLE connections ADD COLUMN recv integer DEFAULT 0 NOT NULL ''')
-                cur.execute(''' PRAGMA user_version = 1 ''')
+                cur.execute(""" ALTER TABLE connections RENAME COLUMN events TO conns """)
+                cur.execute(""" ALTER TABLE connections ADD COLUMN send integer DEFAULT 0 NOT NULL """)
+                cur.execute(""" ALTER TABLE connections ADD COLUMN recv integer DEFAULT 0 NOT NULL """)
+                cur.execute(""" PRAGMA user_version = 1 """)
                 con.commit()
             if user_version <= 1:
-                cur.execute(''' ALTER TABLE connections RENAME TO tmp ''')
-                cur.execute(''' CREATE TABLE connections
-                                (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text DEFAULT "", pname text DEFAULT "", pcmdline text DEFAULT "", psha256 text DEFAULT "", conns integer, send integer, recv integer) ''')
-                cur.execute(''' INSERT INTO connections
-                                (exe, name, cmdline, sha256, contime, domain, ip, port, uid, conns, send, recv) SELECT exe, name, cmdline, sha256, contime, domain, ip, port, uid, conns, send, recv FROM tmp ''')
-                cur.execute(''' DROP TABLE tmp ''')
-                cur.execute(''' PRAGMA user_version = 2 ''')
+                cur.execute(""" ALTER TABLE connections RENAME TO tmp """)
+                cur.execute(""" CREATE TABLE connections
+                                (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer, pexe text DEFAULT "", pname text DEFAULT "", pcmdline text DEFAULT "", psha256 text DEFAULT "", conns integer, send integer, recv integer) """)
+                cur.execute(""" INSERT INTO connections
+                                (exe, name, cmdline, sha256, contime, domain, ip, port, uid, conns, send, recv) SELECT exe, name, cmdline, sha256, contime, domain, ip, port, uid, conns, send, recv FROM tmp """)
+                cur.execute(""" DROP TABLE tmp """)
+                cur.execute(""" PRAGMA user_version = 2 """)
                 con.commit()
             if user_version <= 2:
-                cur.execute(''' ALTER TABLE connections RENAME TO tmp ''')
-                cur.execute(''' CREATE TABLE connections
-                                (contime text, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text) ''')
-                cur.execute(''' INSERT INTO connections
-                                (contime, send, recv, exe, name, cmdline, sha256, pexe, pname, pcmdline, psha256, uid, lport, rport, laddr, raddr, domain) SELECT contime, send, recv, exe, name, cmdline, sha256, pexe, pname, pcmdline, psha256, uid, -1, port, "", ip, domain FROM tmp ''')
-                cur.execute(''' DROP TABLE tmp ''')
-                cur.execute(''' PRAGMA user_version = 3 ''')
+                cur.execute(""" ALTER TABLE connections RENAME TO tmp """)
+                cur.execute(""" CREATE TABLE connections
+                                (contime text, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text) """)
+                cur.execute(""" INSERT INTO connections
+                                (contime, send, recv, exe, name, cmdline, sha256, pexe, pname, pcmdline, psha256, uid, lport, rport, laddr, raddr, domain) SELECT contime, send, recv, exe, name, cmdline, sha256, pexe, pname, pcmdline, psha256, uid, -1, port, "", ip, domain FROM tmp """)
+                cur.execute(""" DROP TABLE tmp """)
+                cur.execute(""" PRAGMA user_version = 3 """)
                 con.commit()
-                con.execute(''' VACUUM ''')
+                con.execute(""" VACUUM """)
                 print("Database upgrade complete")
         con.close()
         # optional remote database
@@ -176,12 +177,12 @@ def start_picosnitch():
             table_name = sql_kwargs.pop("table_name", "connections")
             sql = importlib.import_module(sql_client)
             if sql_client not in ["mariadb", "psycopg", "psycopg2", "pymysql"]:
-                print(f"Warning, using {sql_client} for \"DB sql server\" \"client\" may not be supported, ensure it implements PEP 249", file=sys.stderr)
+                print(f'Warning, using {sql_client} for "DB sql server" "client" may not be supported, ensure it implements PEP 249', file=sys.stderr)
             try:
                 con = sql.connect(**sql_kwargs)
                 cur = con.cursor()
-                cur.execute(f''' CREATE TABLE IF NOT EXISTS {table_name}
-                                 (contime text, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text) ''')
+                cur.execute(f""" CREATE TABLE IF NOT EXISTS {table_name}
+                                 (contime text, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text) """)
                 con.commit()
                 con.close()
             except Exception as e:
@@ -195,10 +196,12 @@ def start_picosnitch():
                     if confirm.lower().startswith("y"):
                         subprocess.run(["systemctl", sys.argv[1], "picosnitch"])
                         return 0
+
         # init built in daemon control
         class PicoDaemon(Daemon):
             def run(self):
                 main()
+
         daemon = PicoDaemon("/run/picosnitch.pid")
         # process command line arguments
         if sys.argv[1] == "start":
@@ -223,8 +226,10 @@ def start_picosnitch():
         # simple mode (intended for running from systemd or debugging)
         elif sys.argv[1] == "start-no-daemon":
             assert not os.path.exists("/run/picosnitch.pid"), "pid file already exists"
+
             def delpid():
                 os.remove("/run/picosnitch.pid")
+
             atexit.register(delpid)
             if sys.executable.startswith("/nix/"):
                 os.makedirs("/run/picosnitch", exist_ok=True)
@@ -239,6 +244,7 @@ def start_picosnitch():
             site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
             site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
             import dash, pandas, plotly
+
             assert dash.__version__ and pandas.__version__ and plotly.__version__
             try:
                 os.setgid(int(os.getenv("SUDO_UID")))
@@ -248,9 +254,19 @@ def start_picosnitch():
             print(f"serving web gui on http://{os.getenv('HOST', 'localhost')}:{os.getenv('PORT', '5100')}")
             print("if this fails, try running `picosnitch start-dash` to see any errors")
             if sys.executable.startswith("/snap/") or sys.executable.startswith("/nix/"):
-                subprocess.Popen(["bash", "-c", f'/usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.Popen(
+                    ["bash", "-c", f"/usr/bin/env python3 -m webbrowser -t http://{os.getenv('HOST', 'localhost')}:{os.getenv('PORT', '5100')}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
                 return web_dashboard()
-            subprocess.Popen(["bash", "-c", f'let i=0; rm {BASE_PATH}/dash; while [[ ! -f {BASE_PATH}/dash || "$i" -gt 30 ]]; do let i++; sleep 1; done; rm {BASE_PATH}/dash && /usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(
+                [
+                    "bash",
+                    "-c",
+                    f'let i=0; rm {BASE_PATH}/dash; while [[ ! -f {BASE_PATH}/dash || "$i" -gt 30 ]]; do let i++; sleep 1; done; rm {BASE_PATH}/dash && /usr/bin/env python3 -m webbrowser -t http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")}',
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
             args = ["bash", "-c", f"touch {BASE_PATH}/dash; nohup {sys.executable} -m picosnitch start-dash > /dev/null 2>&1 &"]
             os.execvp("bash", args)
         # web gui without launching browser or detaching from terminal (intended for debugging)
@@ -274,4 +290,3 @@ def start_picosnitch():
 
 if __name__ == "__main__":
     sys.exit(start_picosnitch())
-

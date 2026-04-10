@@ -49,21 +49,62 @@ def run_main_loop(state: dict):
     event_recv_pipes, event_send_pipes = zip(*event_pipes)
     secondary_recv_pipe, secondary_send_pipe = multiprocessing.Pipe(duplex=False)
     q_error = multiprocessing.Queue()
-    p_monitor = ProcessManager(name="snitchmonitor", target=run_monitor,
-                               init_args=(state["Config"], fan_fd, event_send_pipes, q_error,))
-    p_fuse = ProcessManager(name="snitchrfuse", target=run_fuse,
-                             init_args=(state["Config"], q_error,))
-    p_virustotal = ProcessManager(name="snitchvirustotal", target=run_virustotal,
-                                  init_args=(state["Config"], q_error,))
-    p_primary = ProcessManager(name="snitchprimary", target=run_primary,
-                               init_args=(state, event_recv_pipes, secondary_send_pipe, q_error,))
-    p_secondary = ProcessManager(name="snitchsecondary", target=run_secondary,
-                           init_args=(state, fan_fd, p_fuse, p_virustotal, secondary_recv_pipe, p_primary.q_in, q_error,))
+    p_monitor = ProcessManager(
+        name="snitchmonitor",
+        target=run_monitor,
+        init_args=(
+            state["Config"],
+            fan_fd,
+            event_send_pipes,
+            q_error,
+        ),
+    )
+    p_fuse = ProcessManager(
+        name="snitchrfuse",
+        target=run_fuse,
+        init_args=(
+            state["Config"],
+            q_error,
+        ),
+    )
+    p_virustotal = ProcessManager(
+        name="snitchvirustotal",
+        target=run_virustotal,
+        init_args=(
+            state["Config"],
+            q_error,
+        ),
+    )
+    p_primary = ProcessManager(
+        name="snitchprimary",
+        target=run_primary,
+        init_args=(
+            state,
+            event_recv_pipes,
+            secondary_send_pipe,
+            q_error,
+        ),
+    )
+    p_secondary = ProcessManager(
+        name="snitchsecondary",
+        target=run_secondary,
+        init_args=(
+            state,
+            fan_fd,
+            p_fuse,
+            p_virustotal,
+            secondary_recv_pipe,
+            p_primary.q_in,
+            q_error,
+        ),
+    )
     # set signals
     subprocesses = [p_monitor, p_fuse, p_virustotal, p_primary, p_secondary]
+
     def clean_exit():
         _ = [p.terminate() for p in subprocesses]
         sys.exit(0)
+
     signal.signal(signal.SIGINT, lambda *args: clean_exit())
     signal.signal(signal.SIGTERM, lambda *args: clean_exit())
     # watch subprocesses
@@ -99,4 +140,3 @@ def run_main_loop(state: dict):
     args = [sys.executable, "-m", "picosnitch", "restart"]
     subprocess.Popen(args)
     return 0
-

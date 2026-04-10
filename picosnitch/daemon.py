@@ -26,6 +26,7 @@ import time
 
 class Daemon:
     """A generic daemon class based on http://www.jejik.com/files/examples/daemon3x.py"""
+
     def __init__(self, pidfile):
         self.pidfile = pidfile
 
@@ -37,10 +38,10 @@ class Daemon:
                 # exit first parent
                 sys.exit(0)
         except OSError as err:
-            sys.stderr.write('fork #1 failed: {0}\n'.format(err))
+            sys.stderr.write("fork #1 failed: {0}\n".format(err))
             sys.exit(1)
         # decouple from parent environment
-        os.chdir('/')
+        os.chdir("/")
         os.setsid()
         os.umask(0)
         # do second fork
@@ -50,22 +51,22 @@ class Daemon:
                 # exit from second parent
                 sys.exit(0)
         except OSError as err:
-            sys.stderr.write('fork #2 failed: {0}\n'.format(err))
+            sys.stderr.write("fork #2 failed: {0}\n".format(err))
             sys.exit(1)
         # redirect standard file descriptors
         sys.stdout.flush()
         sys.stderr.flush()
-        si = open(os.devnull, 'r')
-        so = open(os.devnull, 'a+')
-        se = open(os.devnull, 'a+')
+        si = open(os.devnull, "r")
+        so = open(os.devnull, "a+")
+        se = open(os.devnull, "a+")
         os.dup2(si.fileno(), sys.stdin.fileno())
         os.dup2(so.fileno(), sys.stdout.fileno())
         os.dup2(se.fileno(), sys.stderr.fileno())
         # write pidfile
         atexit.register(self.delpid)
         pid = str(os.getpid())
-        with open(self.pidfile,'w+') as f:
-            f.write(pid + '\n')
+        with open(self.pidfile, "w+") as f:
+            f.write(pid + "\n")
 
     def delpid(self):
         os.remove(self.pidfile)
@@ -84,8 +85,7 @@ class Daemon:
         # Check for a pidfile to see if the daemon already runs
         pid = self.getpid()
         if pid:
-            message = "pidfile {0} already exist. " + \
-                    "picosnitch already running?\n"
+            message = "pidfile {0} already exist. " + "picosnitch already running?\n"
             sys.stderr.write(message.format(self.pidfile))
             sys.exit(1)
         # Start the daemon
@@ -96,10 +96,9 @@ class Daemon:
         """Stop the daemon."""
         pid = self.getpid()
         if not pid:
-            message = "pidfile {0} does not exist. " + \
-                    "picosnitch not running?\n"
+            message = "pidfile {0} does not exist. " + "picosnitch not running?\n"
             sys.stderr.write(message.format(self.pidfile))
-            return # not an error in a restart
+            return  # not an error in a restart
         # Try killing the daemon process
         try:
             while 1:
@@ -111,7 +110,7 @@ class Daemon:
                 if os.path.exists(self.pidfile):
                     os.remove(self.pidfile)
             else:
-                print (str(err.args))
+                print(str(err.args))
                 sys.exit(1)
 
     def restart(self):
@@ -137,4 +136,3 @@ class Daemon:
 
     def run(self):
         """Subclass Daemon and override this method"""
-

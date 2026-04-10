@@ -70,25 +70,15 @@ def check_bpf_requirements() -> None:
 
     # Check kernel BTF support
     if not _check_kernel_btf():
-        errors.append(
-            "Kernel BTF not found at /sys/kernel/btf/vmlinux\n"
-            "  Your kernel must be built with CONFIG_DEBUG_INFO_BTF=y\n"
-            "  Most modern distro kernels (5.8+) have this enabled by default"
-        )
+        errors.append("Kernel BTF not found at /sys/kernel/btf/vmlinux\n  Your kernel must be built with CONFIG_DEBUG_INFO_BTF=y\n  Most modern distro kernels (5.8+) have this enabled by default")
 
     # Check BPF filesystem
     if not _check_bpf_filesystem():
-        errors.append(
-            "BPF filesystem not mounted at /sys/fs/bpf\n"
-            "  Try: sudo mount -t bpf bpf /sys/fs/bpf"
-        )
+        errors.append("BPF filesystem not mounted at /sys/fs/bpf\n  Try: sudo mount -t bpf bpf /sys/fs/bpf")
 
     # Check root/capabilities
     if os.geteuid() != 0:
-        errors.append(
-            "Must run as root (BPF requires CAP_BPF and CAP_PERFMON)\n"
-            "  Try: sudo picosnitch start"
-        )
+        errors.append("Must run as root (BPF requires CAP_BPF and CAP_PERFMON)\n  Try: sudo picosnitch start")
 
     if errors:
         raise RuntimeError("BPF requirements not met:\n\n" + "\n\n".join(errors))
@@ -130,15 +120,9 @@ def compile_bpf(output_path: Optional[str] = None, arch: Optional[str] = None) -
     # Generate vmlinux.h if not present
     if not os.path.exists(vmlinux_h):
         if not os.path.exists("/sys/kernel/btf/vmlinux"):
-            raise RuntimeError(
-                "Cannot generate vmlinux.h: /sys/kernel/btf/vmlinux not found.\n"
-                "Your kernel must be built with CONFIG_DEBUG_INFO_BTF=y"
-            )
+            raise RuntimeError("Cannot generate vmlinux.h: /sys/kernel/btf/vmlinux not found.\nYour kernel must be built with CONFIG_DEBUG_INFO_BTF=y")
         try:
-            result = subprocess.run(
-                ["bpftool", "btf", "dump", "file", "/sys/kernel/btf/vmlinux", "format", "c"],
-                capture_output=True, text=True, check=True
-            )
+            result = subprocess.run(["bpftool", "btf", "dump", "file", "/sys/kernel/btf/vmlinux", "format", "c"], capture_output=True, text=True, check=True)
             with open(vmlinux_h, "w") as f:
                 f.write(result.stdout)
         except FileNotFoundError:
@@ -149,13 +133,18 @@ def compile_bpf(output_path: Optional[str] = None, arch: Optional[str] = None) -
     # Compile BPF program
     clang_cmd = [
         "clang",
-        "-g", "-O2",
-        "-target", "bpf",
+        "-g",
+        "-O2",
+        "-target",
+        "bpf",
         f"-D__TARGET_ARCH_{bpf_target_arch}",
-        "-Wall", "-Werror",
+        "-Wall",
+        "-Werror",
         f"-I{bpf_src_dir}",
-        "-c", bpf_src,
-        "-o", output_path,
+        "-c",
+        bpf_src,
+        "-o",
+        output_path,
     ]
     try:
         subprocess.run(clang_cmd, capture_output=True, text=True, check=True)
@@ -185,6 +174,7 @@ def find_bpf_object() -> str:
     bpf_filename_arch = f"picosnitch.bpf.{arch}.o"
     _pkg_dir = os.path.dirname(os.path.abspath(__file__))
     import sys
+
     search_paths = [
         os.path.join(_pkg_dir, "bpf", bpf_filename_arch),
         os.path.join(_pkg_dir, "bpf", bpf_filename),
@@ -202,14 +192,13 @@ def find_bpf_object() -> str:
     if os.path.exists(bpf_src):
         return compile_bpf()
 
-    raise FileNotFoundError(
-        f"BPF object file not found for {arch}. Searched: {search_paths}"
-    )
+    raise FileNotFoundError(f"BPF object file not found for {arch}. Searched: {search_paths}")
 
 
 # Event structures matching BPF code - must be packed and match exactly
 class ExecEvent(ctypes.Structure):
     """Event from exec_events perf buffer"""
+
     _pack_ = 1
     _fields_ = [
         ("comm", ctypes.c_char * 16),
@@ -226,6 +215,7 @@ class ExecEvent(ctypes.Structure):
 
 class SendRecvEvent(ctypes.Structure):
     """Event from sendmsg_events/recvmsg_events perf buffers (IPv4)"""
+
     _pack_ = 1
     _fields_ = [
         ("comm", ctypes.c_char * 16),
@@ -247,6 +237,7 @@ class SendRecvEvent(ctypes.Structure):
 
 class SendRecv6Event(ctypes.Structure):
     """Event from sendmsg6_events/recvmsg6_events perf buffers (IPv6)"""
+
     _pack_ = 1
     _fields_ = [
         ("comm", ctypes.c_char * 16),
@@ -268,6 +259,7 @@ class SendRecv6Event(ctypes.Structure):
 
 class DNSEvent(ctypes.Structure):
     """Event from dns_events perf buffer"""
+
     _pack_ = 1
     _fields_ = [
         ("host", ctypes.c_char * 80),
@@ -278,13 +270,9 @@ class DNSEvent(ctypes.Structure):
 
 # Callback function types for perf buffers
 # void (*sample_cb)(void *ctx, int cpu, void *data, __u32 size)
-PERF_SAMPLE_CB = ctypes.CFUNCTYPE(
-    None, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32
-)
+PERF_SAMPLE_CB = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32)
 # void (*lost_cb)(void *ctx, int cpu, __u64 cnt)
-PERF_LOST_CB = ctypes.CFUNCTYPE(
-    None, ctypes.c_void_p, ctypes.c_int, ctypes.c_uint64
-)
+PERF_LOST_CB = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int, ctypes.c_uint64)
 
 
 class LibBPF:
@@ -326,19 +314,13 @@ class LibBPF:
 
         if not libbpf_path:
             raise RuntimeError(
-                "libbpf shared library not found!\n\n"
-                "picosnitch requires libbpf to load BPF programs."
-                + _get_install_instructions()
-                + "\nFor more information: https://github.com/libbpf/libbpf"
+                "libbpf shared library not found!\n\npicosnitch requires libbpf to load BPF programs." + _get_install_instructions() + "\nFor more information: https://github.com/libbpf/libbpf"
             )
 
         try:
             self.lib = ctypes.CDLL(libbpf_path)
         except OSError as e:
-            raise RuntimeError(
-                f"Failed to load libbpf from {libbpf_path}: {e}"
-                + _get_install_instructions()
-            )
+            raise RuntimeError(f"Failed to load libbpf from {libbpf_path}: {e}" + _get_install_instructions())
 
         self._setup_function_signatures()
         self._initialized = True
@@ -374,18 +356,16 @@ class LibBPF:
         self.lib.bpf_program__attach.restype = ctypes.c_void_p
 
         # kprobe attachment
-        self.lib.bpf_program__attach_kprobe.argtypes = [
-            ctypes.c_void_p, ctypes.c_bool, ctypes.c_char_p
-        ]
+        self.lib.bpf_program__attach_kprobe.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_char_p]
         self.lib.bpf_program__attach_kprobe.restype = ctypes.c_void_p
 
         # uprobe attachment - we use the opts version for symbol resolution
         self.lib.bpf_program__attach_uprobe_opts.argtypes = [
             ctypes.c_void_p,  # prog
-            ctypes.c_int,     # pid (-1 for all)
+            ctypes.c_int,  # pid (-1 for all)
             ctypes.c_char_p,  # binary_path
             ctypes.c_size_t,  # func_offset (0 when using func_name in opts)
-            ctypes.c_void_p   # opts (bpf_uprobe_opts*)
+            ctypes.c_void_p,  # opts (bpf_uprobe_opts*)
         ]
         self.lib.bpf_program__attach_uprobe_opts.restype = ctypes.c_void_p
 
@@ -402,12 +382,12 @@ class LibBPF:
 
         # Perf buffer operations
         self.lib.perf_buffer__new.argtypes = [
-            ctypes.c_int,     # map_fd
+            ctypes.c_int,  # map_fd
             ctypes.c_size_t,  # page_cnt
             ctypes.c_void_p,  # sample_cb
             ctypes.c_void_p,  # lost_cb
             ctypes.c_void_p,  # ctx
-            ctypes.c_void_p   # opts
+            ctypes.c_void_p,  # opts
         ]
         self.lib.perf_buffer__new.restype = ctypes.c_void_p
 
@@ -425,13 +405,14 @@ class LibBPF:
 # Structure for bpf_uprobe_opts - must match libbpf's definition
 class BpfUprobeOpts(ctypes.Structure):
     """libbpf bpf_uprobe_opts structure for uprobe attachment with symbol name."""
+
     _fields_ = [
-        ("sz", ctypes.c_size_t),           # size of this struct for versioning
+        ("sz", ctypes.c_size_t),  # size of this struct for versioning
         ("ref_ctr_offset", ctypes.c_size_t),
         ("bpf_cookie", ctypes.c_uint64),
-        ("retprobe", ctypes.c_bool),       # is this a return probe?
-        ("func_name", ctypes.c_char_p),    # function name to attach to
-        ("attach_mode", ctypes.c_int),     # enum probe_attach_mode
+        ("retprobe", ctypes.c_bool),  # is this a return probe?
+        ("func_name", ctypes.c_char_p),  # function name to attach to
+        ("attach_mode", ctypes.c_int),  # enum probe_attach_mode
     ]
 
 
@@ -459,12 +440,7 @@ class BPFMap:
             return DNSEvent
         return None
 
-    def open_perf_buffer(
-        self,
-        callback: Callable,
-        lost_cb: Optional[Callable] = None,
-        page_cnt: int = 64
-    ):
+    def open_perf_buffer(self, callback: Callable, lost_cb: Optional[Callable] = None, page_cnt: int = 64):
         """
         Open a perf buffer for this map with BCC-style API.
 
@@ -513,35 +489,24 @@ class BPFObject:
             raise FileNotFoundError(f"BPF object file not found: {self.obj_path}")
 
         # Open object file
-        self.obj = self.libbpf.lib.bpf_object__open_file(
-            self.obj_path.encode(), None
-        )
+        self.obj = self.libbpf.lib.bpf_object__open_file(self.obj_path.encode(), None)
         if not self.obj:
             err = ctypes.get_errno()
-            raise RuntimeError(
-                f"Failed to open BPF object {self.obj_path}: "
-                f"{os.strerror(err) if err else 'unknown error'}"
-            )
+            raise RuntimeError(f"Failed to open BPF object {self.obj_path}: {os.strerror(err) if err else 'unknown error'}")
 
         # Load into kernel
         ret = self.libbpf.lib.bpf_object__load(self.obj)
         if ret != 0:
             self.libbpf.lib.bpf_object__close(self.obj)
             self.obj = None
-            raise RuntimeError(
-                f"Failed to load BPF object into kernel (error {ret}). "
-                "Check dmesg for verifier errors. "
-                "Ensure kernel has BTF support (5.8+)."
-            )
+            raise RuntimeError(f"Failed to load BPF object into kernel (error {ret}). Check dmesg for verifier errors. Ensure kernel has BTF support (5.8+).")
 
         return self
 
     def get_program(self, name: str) -> ctypes.c_void_p:
         """Get a BPF program by name."""
         if name not in self._programs:
-            prog = self.libbpf.lib.bpf_object__find_program_by_name(
-                self.obj, name.encode()
-            )
+            prog = self.libbpf.lib.bpf_object__find_program_by_name(self.obj, name.encode())
             if not prog:
                 raise RuntimeError(f"BPF program '{name}' not found in object")
             self._programs[name] = prog
@@ -550,9 +515,7 @@ class BPFObject:
     def get_map(self, name: str) -> ctypes.c_void_p:
         """Get a BPF map by name."""
         if name not in self._maps:
-            map_obj = self.libbpf.lib.bpf_object__find_map_by_name(
-                self.obj, name.encode()
-            )
+            map_obj = self.libbpf.lib.bpf_object__find_map_by_name(self.obj, name.encode())
             if not map_obj:
                 raise RuntimeError(f"BPF map '{name}' not found in object")
             self._maps[name] = map_obj
@@ -568,23 +531,14 @@ class BPFObject:
     def attach_kprobe(self, prog_name: str, retprobe: bool, fn_name: str):
         """Attach a kprobe/kretprobe program."""
         prog = self.get_program(prog_name)
-        link = self.libbpf.lib.bpf_program__attach_kprobe(
-            prog, retprobe, fn_name.encode()
-        )
+        link = self.libbpf.lib.bpf_program__attach_kprobe(prog, retprobe, fn_name.encode())
         if not link:
             probe_type = "kretprobe" if retprobe else "kprobe"
             raise RuntimeError(f"Failed to attach {probe_type} to {fn_name}")
         self._links.append(link)
         return link
 
-    def attach_uprobe(
-        self,
-        prog_name: str,
-        retprobe: bool,
-        binary_path: str,
-        func_name: str,
-        pid: int = -1
-    ):
+    def attach_uprobe(self, prog_name: str, retprobe: bool, binary_path: str, func_name: str, pid: int = -1):
         """Attach a uprobe/uretprobe program using symbol name."""
         prog = self.get_program(prog_name)
 
@@ -602,14 +556,12 @@ class BPFObject:
             pid,
             binary_path.encode(),
             0,  # offset is 0 when using func_name
-            ctypes.byref(opts)
+            ctypes.byref(opts),
         )
 
         if not link:
             probe_type = "uretprobe" if retprobe else "uprobe"
-            raise RuntimeError(
-                f"Failed to attach {probe_type} to {func_name} in {binary_path}"
-            )
+            raise RuntimeError(f"Failed to attach {probe_type} to {func_name} in {binary_path}")
         self._links.append(link)
         return link
 
@@ -625,13 +577,7 @@ class BPFObject:
         self._links.append(link)
         return link
 
-    def _open_perf_buffer(
-        self,
-        map_name: str,
-        callback: Callable,
-        lost_callback: Optional[Callable],
-        page_cnt: int
-    ):
+    def _open_perf_buffer(self, map_name: str, callback: Callable, lost_callback: Optional[Callable], page_cnt: int):
         """Internal: Open a perf buffer for a map."""
         map_fd = self.get_map_fd(map_name)
 
@@ -662,7 +608,7 @@ class BPFObject:
             sample_cb,
             lost_cb,
             None,  # ctx
-            None   # opts
+            None,  # opts
         )
 
         if not pb:
@@ -728,12 +674,7 @@ class BPF:
     This is the primary interface for picosnitch to interact with BPF.
     """
 
-    def __init__(
-        self,
-        src_file: Optional[str] = None,
-        text: Optional[str] = None,
-        obj_file: Optional[str] = None
-    ):
+    def __init__(self, src_file: Optional[str] = None, text: Optional[str] = None, obj_file: Optional[str] = None):
         """
         Initialize and load a BPF program.
 
@@ -743,10 +684,7 @@ class BPF:
             obj_file: Path to compiled .bpf.o file (required)
         """
         if text is not None or src_file is not None:
-            raise RuntimeError(
-                "Runtime BPF compilation not supported. "
-                "Use obj_file= with a pre-compiled .bpf.o file."
-            )
+            raise RuntimeError("Runtime BPF compilation not supported. Use obj_file= with a pre-compiled .bpf.o file.")
 
         if obj_file is None:
             raise RuntimeError("obj_file parameter is required")
@@ -781,9 +719,7 @@ class BPF:
             libc_path = ctypes.util.find_library("c")
             if not libc_path:
                 # Try common paths
-                for path in ["/lib/x86_64-linux-gnu/libc.so.6",
-                            "/lib/aarch64-linux-gnu/libc.so.6",
-                            "/lib64/libc.so.6"]:
+                for path in ["/lib/x86_64-linux-gnu/libc.so.6", "/lib/aarch64-linux-gnu/libc.so.6", "/lib64/libc.so.6"]:
                     if os.path.exists(path):
                         return path
                 raise RuntimeError("libc not found")
@@ -791,19 +727,14 @@ class BPF:
             if not libc_path.startswith("/"):
                 # Try to find the full path
                 try:
-                    result = subprocess.run(
-                        ["ldconfig", "-p"],
-                        capture_output=True, text=True, check=True
-                    )
+                    result = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True, check=True)
                     for line in result.stdout.splitlines():
                         if "libc.so.6" in line and "=>" in line:
                             return line.split("=>")[1].strip()
                 except Exception:
                     pass
                 # Fallback to common paths
-                for path in ["/lib/x86_64-linux-gnu/libc.so.6",
-                            "/lib/aarch64-linux-gnu/libc.so.6",
-                            "/lib64/libc.so.6"]:
+                for path in ["/lib/x86_64-linux-gnu/libc.so.6", "/lib/aarch64-linux-gnu/libc.so.6", "/lib64/libc.so.6"]:
                     if os.path.exists(path):
                         return path
             return libc_path

@@ -74,6 +74,7 @@ def run_primary(state, event_pipes, secondary_pipe, q_error, q_in, _q_out):
     # init notifications
     if state["Config"]["Desktop notifications"]:
         Notifier().enable_notifications()
+
     # init signal handlers
     def save_state_and_exit(state: dict, q_error: multiprocessing.Queue, event_pipes):
         while not q_error.empty():
@@ -88,8 +89,10 @@ def run_primary(state, event_pipes, secondary_pipe, q_error, q_in, _q_out):
         for event_pipe in event_pipes:
             event_pipe.close()
         sys.exit(0)
+
     signal.signal(signal.SIGTERM, lambda *args: save_state_and_exit(state, q_error, event_pipes))
     signal.signal(signal.SIGINT, lambda *args: save_state_and_exit(state, q_error, event_pipes))
+
     # init thread to receive new connection data over pipe
     def event_pipe_thread(event_pipes, pipe_data: list, listen: threading.Event, ready: threading.Event):
         while True:
@@ -104,9 +107,19 @@ def run_primary(state, event_pipes, secondary_pipe, q_error, q_in, _q_out):
                     while event_pipe.poll():
                         new_processes.append(event_pipe.recv_bytes())
             ready.set()
+
     listen, ready = threading.Event(), threading.Event()
     pipe_data = [[]]
-    thread = threading.Thread(target=event_pipe_thread, args=(event_pipes, pipe_data, listen, ready,), daemon=True)
+    thread = threading.Thread(
+        target=event_pipe_thread,
+        args=(
+            event_pipes,
+            pipe_data,
+            listen,
+            ready,
+        ),
+        daemon=True,
+    )
     thread.start()
     listen.set()
     # main loop

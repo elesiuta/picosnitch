@@ -98,6 +98,7 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
     self_pid = os.getpid()
     # cache of resolved inode -> exe path, for when /proc/PID/exe is gone
     ino_path_cache = {}
+
     # helper to find executable by comm name and inode when /proc/PID/exe is unavailable
     def _find_exe_by_inode(comm: str, st_dev: int, st_ino: int) -> str:
         """Try to find the executable file on disk by comm name and inode match."""
@@ -122,6 +123,7 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
             except Exception:
                 continue
         return ""
+
     # function for getting an existing or opening a new file descriptor based on st_dev and st_ino
     def get_fd(st_dev: int, st_ino: int, pid: int, port: int, comm: str = "") -> typing.Tuple[int, int, int, str, str]:
         st_dev = st_dev & ST_DEV_MASK
@@ -186,6 +188,7 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
             except Exception:
                 pass
         return (st_dev, st_ino, pid, fd_path, exe)
+
     # function for getting or looking up the cmdline for a pid
     @functools.lru_cache(maxsize=PID_CACHE)
     def get_cmdline(pid: int) -> str:
@@ -194,6 +197,7 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
                 return f.read()
         except Exception:
             return ""
+
     # get current connections
     for proc in initial_poll():
         try:
@@ -204,9 +208,34 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
             st_dev, st_ino, pid, fd, exe = get_fd(stat.st_dev, stat.st_ino, proc["pid"], proc["rport"], proc["name"])
             pst_dev, pst_ino, ppid, pfd, pexe = get_fd(pstat.st_dev, pstat.st_ino, proc["ppid"], -1, proc["pname"])
             if EVERY_EXE or proc["rport"] != -1:
-                event_pipe_0.send_bytes(pickle.dumps({"pid": pid, "name": proc["name"], "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
-                                                     "ppid": ppid, "pname": proc["pname"], "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                                     "uid": proc["uid"], "send": 0, "recv": 0, "lport": proc["lport"], "rport": proc["rport"], "laddr": proc["laddr"], "raddr": proc["raddr"], "domain": domain_dict[proc["raddr"]]}))
+                event_pipe_0.send_bytes(
+                    pickle.dumps(
+                        {
+                            "pid": pid,
+                            "name": proc["name"],
+                            "fd": fd,
+                            "dev": st_dev,
+                            "ino": st_ino,
+                            "exe": exe,
+                            "cmdline": cmd,
+                            "ppid": ppid,
+                            "pname": proc["pname"],
+                            "pfd": pfd,
+                            "pdev": pst_dev,
+                            "pino": pst_ino,
+                            "pexe": pexe,
+                            "pcmdline": pcmd,
+                            "uid": proc["uid"],
+                            "send": 0,
+                            "recv": 0,
+                            "lport": proc["lport"],
+                            "rport": proc["rport"],
+                            "laddr": proc["laddr"],
+                            "raddr": proc["raddr"],
+                            "domain": domain_dict[proc["raddr"]],
+                        }
+                    )
+                )
         except Exception:
             pass
     # initialize bpf program - use pre-compiled object file
@@ -243,9 +272,11 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
     except Exception as e:
         q_error.put(f"Failed to attach network monitoring programs: {e}")
         raise
+
     # callbacks for bpf events, read event and put into a pipe for run_primary
     def queue_lost(event, *args):
         q_error.put(f"BPF callbacks not processing fast enough, missed {event} event, try increasing 'Perf ring buffer (pages)' (power of two) if this continues")
+
     def queue_sendv4_event(cpu, data, size):
         event = b["sendmsg_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
@@ -254,9 +285,35 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
         pcmd = get_cmdline(event.ppid)
         laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
         raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
-        event_pipe_0.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
-                                             "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                             "uid": event.uid, "send": event.bytes, "recv": 0, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
+        event_pipe_0.send_bytes(
+            pickle.dumps(
+                {
+                    "pid": pid,
+                    "name": event.comm.decode(),
+                    "fd": fd,
+                    "dev": st_dev,
+                    "ino": st_ino,
+                    "exe": exe,
+                    "cmdline": cmd,
+                    "ppid": ppid,
+                    "pname": event.pcomm.decode(),
+                    "pfd": pfd,
+                    "pdev": pst_dev,
+                    "pino": pst_ino,
+                    "pexe": pexe,
+                    "pcmdline": pcmd,
+                    "uid": event.uid,
+                    "send": event.bytes,
+                    "recv": 0,
+                    "lport": event.lport,
+                    "rport": event.dport,
+                    "laddr": laddr,
+                    "raddr": raddr,
+                    "domain": domain_dict[raddr],
+                }
+            )
+        )
+
     def queue_sendv6_event(cpu, data, size):
         event = b["sendmsg6_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
@@ -265,9 +322,35 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
         pcmd = get_cmdline(event.ppid)
         laddr = socket.inet_ntop(socket.AF_INET6, bytes(event.saddr)[:16])
         raddr = socket.inet_ntop(socket.AF_INET6, bytes(event.daddr)[:16])
-        event_pipe_1.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
-                                             "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                             "uid": event.uid, "send": event.bytes, "recv": 0, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
+        event_pipe_1.send_bytes(
+            pickle.dumps(
+                {
+                    "pid": pid,
+                    "name": event.comm.decode(),
+                    "fd": fd,
+                    "dev": st_dev,
+                    "ino": st_ino,
+                    "exe": exe,
+                    "cmdline": cmd,
+                    "ppid": ppid,
+                    "pname": event.pcomm.decode(),
+                    "pfd": pfd,
+                    "pdev": pst_dev,
+                    "pino": pst_ino,
+                    "pexe": pexe,
+                    "pcmdline": pcmd,
+                    "uid": event.uid,
+                    "send": event.bytes,
+                    "recv": 0,
+                    "lport": event.lport,
+                    "rport": event.dport,
+                    "laddr": laddr,
+                    "raddr": raddr,
+                    "domain": domain_dict[raddr],
+                }
+            )
+        )
+
     def queue_recvv4_event(cpu, data, size):
         event = b["recvmsg_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
@@ -276,9 +359,35 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
         pcmd = get_cmdline(event.ppid)
         laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
         raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
-        event_pipe_2.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
-                                             "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                             "uid": event.uid, "send": 0, "recv": event.bytes, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
+        event_pipe_2.send_bytes(
+            pickle.dumps(
+                {
+                    "pid": pid,
+                    "name": event.comm.decode(),
+                    "fd": fd,
+                    "dev": st_dev,
+                    "ino": st_ino,
+                    "exe": exe,
+                    "cmdline": cmd,
+                    "ppid": ppid,
+                    "pname": event.pcomm.decode(),
+                    "pfd": pfd,
+                    "pdev": pst_dev,
+                    "pino": pst_ino,
+                    "pexe": pexe,
+                    "pcmdline": pcmd,
+                    "uid": event.uid,
+                    "send": 0,
+                    "recv": event.bytes,
+                    "lport": event.lport,
+                    "rport": event.dport,
+                    "laddr": laddr,
+                    "raddr": raddr,
+                    "domain": domain_dict[raddr],
+                }
+            )
+        )
+
     def queue_recvv6_event(cpu, data, size):
         event = b["recvmsg6_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
@@ -287,9 +396,35 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
         pcmd = get_cmdline(event.ppid)
         laddr = socket.inet_ntop(socket.AF_INET6, bytes(event.saddr)[:16])
         raddr = socket.inet_ntop(socket.AF_INET6, bytes(event.daddr)[:16])
-        event_pipe_3.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
-                                             "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                             "uid": event.uid, "send": 0, "recv": event.bytes, "lport": event.lport, "rport": event.dport, "laddr": laddr, "raddr": raddr, "domain": domain_dict[raddr]}))
+        event_pipe_3.send_bytes(
+            pickle.dumps(
+                {
+                    "pid": pid,
+                    "name": event.comm.decode(),
+                    "fd": fd,
+                    "dev": st_dev,
+                    "ino": st_ino,
+                    "exe": exe,
+                    "cmdline": cmd,
+                    "ppid": ppid,
+                    "pname": event.pcomm.decode(),
+                    "pfd": pfd,
+                    "pdev": pst_dev,
+                    "pino": pst_ino,
+                    "pexe": pexe,
+                    "pcmdline": pcmd,
+                    "uid": event.uid,
+                    "send": 0,
+                    "recv": event.bytes,
+                    "lport": event.lport,
+                    "rport": event.dport,
+                    "laddr": laddr,
+                    "raddr": raddr,
+                    "domain": domain_dict[raddr],
+                }
+            )
+        )
+
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, -1, event.comm.decode())
@@ -297,9 +432,35 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
         if EVERY_EXE:
-            event_pipe_4.send_bytes(pickle.dumps({"pid": pid, "name": event.comm.decode(), "fd": fd, "dev": st_dev, "ino": st_ino, "exe": exe, "cmdline": cmd,
-                                                 "ppid": ppid, "pname": event.pcomm.decode(), "pfd": pfd, "pdev": pst_dev, "pino": pst_ino, "pexe": pexe, "pcmdline": pcmd,
-                                                 "uid": event.uid, "send": 0, "recv": 0, "lport": -1, "rport": -1, "laddr": "", "raddr": "", "domain": ""}))
+            event_pipe_4.send_bytes(
+                pickle.dumps(
+                    {
+                        "pid": pid,
+                        "name": event.comm.decode(),
+                        "fd": fd,
+                        "dev": st_dev,
+                        "ino": st_ino,
+                        "exe": exe,
+                        "cmdline": cmd,
+                        "ppid": ppid,
+                        "pname": event.pcomm.decode(),
+                        "pfd": pfd,
+                        "pdev": pst_dev,
+                        "pino": pst_ino,
+                        "pexe": pexe,
+                        "pcmdline": pcmd,
+                        "uid": event.uid,
+                        "send": 0,
+                        "recv": 0,
+                        "lport": -1,
+                        "rport": -1,
+                        "laddr": "",
+                        "raddr": "",
+                        "domain": "",
+                    }
+                )
+            )
+
     def queue_dns_event(cpu, data, size):
         event = b["dns_events"].event(data)
         if event.daddr:
@@ -311,13 +472,14 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
             _ = ipaddress.ip_address(domain)
         except ValueError:
             domain_dict[ip] = ".".join(reversed(domain.split(".")))
+
     b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("exec", *args))
     if use_getaddrinfo_uprobe:
         b["dns_events"].open_perf_buffer(queue_dns_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("dns", *args))
-    b["sendmsg_events"].open_perf_buffer(queue_sendv4_event, page_cnt=PAGE_CNT*4, lost_cb=lambda *args: queue_lost("sendv4", *args))
-    b["sendmsg6_events"].open_perf_buffer(queue_sendv6_event, page_cnt=PAGE_CNT*4, lost_cb=lambda *args: queue_lost("sendv6", *args))
-    b["recvmsg_events"].open_perf_buffer(queue_recvv4_event, page_cnt=PAGE_CNT*4, lost_cb=lambda *args: queue_lost("recvv4", *args))
-    b["recvmsg6_events"].open_perf_buffer(queue_recvv6_event, page_cnt=PAGE_CNT*4, lost_cb=lambda *args: queue_lost("recvv6", *args))
+    b["sendmsg_events"].open_perf_buffer(queue_sendv4_event, page_cnt=PAGE_CNT * 4, lost_cb=lambda *args: queue_lost("sendv4", *args))
+    b["sendmsg6_events"].open_perf_buffer(queue_sendv6_event, page_cnt=PAGE_CNT * 4, lost_cb=lambda *args: queue_lost("sendv6", *args))
+    b["recvmsg_events"].open_perf_buffer(queue_recvv4_event, page_cnt=PAGE_CNT * 4, lost_cb=lambda *args: queue_lost("recvv4", *args))
+    b["recvmsg6_events"].open_perf_buffer(queue_recvv6_event, page_cnt=PAGE_CNT * 4, lost_cb=lambda *args: queue_lost("recvv6", *args))
     # main loop
     while True:
         if not parent_process.is_alive() or not q_in.empty():
@@ -326,4 +488,3 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
             b.perf_buffer_poll(timeout=1000)
         except Exception as e:
             q_error.put("BPF %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
-

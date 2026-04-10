@@ -32,12 +32,14 @@ def run_virustotal(config: dict, q_error, q_vt_pending, q_vt_results):
     parent_process = multiprocessing.parent_process()
     try:
         import requests
+
         vt_enabled = True
     except ImportError:
         vt_enabled = False
     if not (config["VT API key"] and vt_enabled):
         config["VT request limit (seconds)"] = 0
     headers = {"x-apikey": config["VT API key"]}
+
     def get_analysis(analysis_id: dict, sha256: str) -> dict:
         api_url = "https://www.virustotal.com/api/v3/analyses/" + analysis_id["data"]["id"]
         for i in range(90):
@@ -46,6 +48,7 @@ def run_virustotal(config: dict, q_error, q_vt_pending, q_vt_results):
             if response["data"]["attributes"]["status"] == "completed":
                 return response["data"]["attributes"]["stats"]
         return {"timeout": api_url, "sha256": sha256}
+
     while True:
         if not parent_process.is_alive():
             return 0
@@ -102,4 +105,3 @@ def run_virustotal(config: dict, q_error, q_vt_pending, q_vt_results):
             except Exception:
                 analysis = "unknown analysis"
             q_error.put("Last VT Exception on: %s with %s" % (str(proc), str(analysis)))
-

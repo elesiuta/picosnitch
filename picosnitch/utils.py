@@ -59,7 +59,7 @@ def load_state() -> dict:
             "Set st_dev mask": None,
             "VT API key": "",
             "VT file upload": False,
-            "VT request limit (seconds)": 15
+            "VT request limit (seconds)": 15,
         },
         "Error Log": [],
         "Exe Log": [],
@@ -67,7 +67,7 @@ def load_state() -> dict:
         "Names": {},
         "Parent Executables": {},
         "Parent Names": {},
-        "SHA256": {}
+        "SHA256": {},
     }
     data = {k: v for k, v in template.items()}
     data["Config"] = {k: v for k, v in template["Config"].items()}
@@ -111,7 +111,7 @@ def save_state(state: dict, write_config: bool = False, write_record: bool = Tru
     try:
         if write_config:
             with open(config_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
-                json.dump(snitch_config, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
+                json.dump(snitch_config, json_file, indent=2, separators=(",", ": "), sort_keys=True, ensure_ascii=False)
         del state["Config"]
         if state["Error Log"]:
             with open(error_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
@@ -123,7 +123,7 @@ def save_state(state: dict, write_config: bool = False, write_record: bool = Tru
         del state["Exe Log"]
         if write_record:
             with open(record_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
-                json.dump(state, json_file, indent=2, separators=(',', ': '), sort_keys=True, ensure_ascii=False)
+                json.dump(state, json_file, indent=2, separators=(",", ": "), sort_keys=True, ensure_ascii=False)
     except Exception:
         Notifier().toast("picosnitch write error", file=sys.stderr)
     state["Config"] = snitch_config
@@ -231,4 +231,3 @@ def sync_vt_results(state: dict, q_vt: multiprocessing.Queue, q_out: multiproces
         while not q_vt.empty():
             proc, sha256, result, suspicious = pickle.loads(q_vt.get())
             q_out.put(pickle.dumps({"type": "vt_result", "name": proc["name"], "exe": proc["exe"], "sha256": sha256, "result": result, "suspicious": suspicious}))
-
