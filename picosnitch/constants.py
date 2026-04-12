@@ -20,7 +20,6 @@
 import logging
 import os
 import resource
-import sys
 import time
 import tomllib
 import typing
@@ -30,14 +29,8 @@ import psutil
 
 from . import __version__
 
-# picosnitch version and supported platform
+# picosnitch version
 VERSION: typing.Final[str] = __version__
-if sys.version_info < (3, 12):
-    logging.error("Python version >= 3.12 is required")
-    sys.exit(1)
-if not sys.platform.startswith("linux"):
-    logging.error("Did not detect a supported operating system")
-    sys.exit(1)
 
 # FHS standard paths (PICOSNITCH_ROOT is used as a prefix for testing)
 _root: str = os.getenv("PICOSNITCH_ROOT", "")
@@ -56,6 +49,7 @@ try:
         try:
             new_limit = (nofile, resource.getrlimit(resource.RLIMIT_NOFILE)[1])
             resource.setrlimit(resource.RLIMIT_NOFILE, new_limit)
+            logging.info(f"set RLIMIT_NOFILE to {nofile}")
             time.sleep(0.5)
         except Exception as e:
             logging.error(f"{type(e).__name__}{e.args}")

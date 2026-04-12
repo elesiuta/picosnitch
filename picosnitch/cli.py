@@ -116,6 +116,12 @@ def main():
 
 def start_picosnitch():
     """command line interface, pre-startup checks, and run"""
+    if sys.version_info < (3, 12):
+        logging.error("Python version >= 3.12 is required")
+        return 1
+    if not sys.platform.startswith("linux"):
+        logging.error("Did not detect a supported operating system")
+        return 1
     pid_file = RUN_DIR / "picosnitch.pid"
 
     class PicoDaemon(Daemon):
