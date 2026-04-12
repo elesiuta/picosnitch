@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2020 Eric Lesiuta
+from __future__ import annotations
 
 import collections
 import ctypes
@@ -55,7 +56,7 @@ def initial_poll() -> list:
     return initial_processes
 
 
-def run_monitor(config: Config, fan_fd, event_pipes, q_error, q_in, _q_out):
+def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multiprocessing.Queue[str], q_in: multiprocessing.Queue[str], _q_out: multiprocessing.Queue) -> int:
     """runs a bpf program to monitor the system for new connections and puts info into a pipe for run_primary"""
     # initialization of subprocess
     try:
@@ -77,8 +78,8 @@ def run_monitor(config: Config, fan_fd, event_pipes, q_error, q_in, _q_out):
     # domain and file descriptor cache, domains are cached for the life of the program, fd has a fixed size, populate with dummy values
     domain_dict = collections.defaultdict(str)
     fd_dict = collections.OrderedDict()
-    for x in range(FD_CACHE):
-        fd_dict[f"tmp{x}"] = (0,)
+    for cache_idx in range(FD_CACHE):
+        fd_dict[f"tmp{cache_idx}"] = (0,)
     self_pid = os.getpid()
     # cache of resolved inode -> exe path, for when /proc/PID/exe is gone
     ino_path_cache = {}
@@ -109,7 +110,7 @@ def run_monitor(config: Config, fan_fd, event_pipes, q_error, q_in, _q_out):
         return ""
 
     # function for getting an existing or opening a new file descriptor based on st_dev and st_ino
-    def get_fd(st_dev: int, st_ino: int, pid: int, port: int, comm: str = "") -> typing.Tuple[int, int, int, str, str]:
+    def get_fd(st_dev: int, st_ino: int, pid: int, port: int, comm: str = "") -> tuple[int, int, int, str, str]:
         st_dev = st_dev & ST_DEV_MASK
         sig = f"{st_dev} {st_ino}"
         try:
@@ -448,7 +449,7 @@ def run_monitor(config: Config, fan_fd, event_pipes, q_error, q_in, _q_out):
             ip = socket.inet_ntop(socket.AF_INET6, event.daddr6)
         domain = event.host.decode("utf-8", "replace")
         try:
-            _ = ipaddress.ip_address(domain)
+            ipaddress.ip_address(domain)
         except ValueError:
             domain_dict[ip] = ".".join(reversed(domain.split(".")))
 

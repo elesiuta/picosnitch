@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2020 Eric Lesiuta
+from __future__ import annotations
 
 import hashlib
 import multiprocessing
@@ -12,7 +13,7 @@ from ..config import Config
 from ..utils import get_fstat
 
 
-def run_virustotal(config: Config, q_error, q_vt_pending, q_vt_results):
+def run_virustotal(config: Config, q_error: multiprocessing.Queue[str], q_vt_pending: multiprocessing.Queue[bytes], q_vt_results: multiprocessing.Queue[bytes]) -> int:
     """get virustotal results of process executable"""
     parent_process = multiprocessing.parent_process()
     if config.desktop.user:
@@ -34,7 +35,7 @@ def run_virustotal(config: Config, q_error, q_vt_pending, q_vt_results):
 
     def get_analysis(analysis_id: dict, sha256: str) -> dict:
         api_url = "https://www.virustotal.com/api/v3/analyses/" + analysis_id["data"]["id"]
-        for i in range(90):
+        for _ in range(90):
             time.sleep(max(5, request_limit))
             response = requests.get(api_url, headers=headers).json()
             if response["data"]["attributes"]["status"] == "completed":

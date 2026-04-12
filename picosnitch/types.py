@@ -44,3 +44,29 @@ class FanotifyEventMetadata(ctypes.Structure):
         ("fd", ctypes.c_int32),
         ("pid", ctypes.c_int32),
     ]
+
+
+class ProcessHashInfo(typing.TypedDict):
+    """Subset of process fields needed for hashing and VirusTotal submission"""
+
+    pid: int
+    name: str
+    fd: int
+    dev: int
+    ino: int
+    exe: str
+
+
+# functional form required because keys contain spaces
+State = typing.TypedDict(
+    "State",
+    {
+        "Error Log": list[str],
+        "Exe Log": list[str],
+        "Executables": dict[str, list[str]],
+        "Names": dict[str, list[str]],
+        "Parent Executables": dict[str, list[str]],
+        "Parent Names": dict[str, list[str]],
+        "SHA256": dict[str, dict[str, str]],
+    },
+)

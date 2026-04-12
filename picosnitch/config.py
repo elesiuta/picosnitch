@@ -80,7 +80,7 @@ def _dump_toml(config: Config) -> str:
     """Serialize a Config dataclass to a TOML string."""
     lines: list[str] = []
 
-    def _format_value(value) -> str:
+    def _format_value(value: bool | int | str | list) -> str:
         if isinstance(value, bool):
             return "true" if value else "false"
         if isinstance(value, int):
@@ -98,7 +98,7 @@ def _dump_toml(config: Config) -> str:
 
     def _write_section(section_name: str, obj) -> None:
         lines.append(f"[{section_name}]")
-        sub_sections: list[tuple[str, object]] = []
+        sub_sections: list[tuple[str, dict]] = []
         for field in dataclasses.fields(obj):
             value = getattr(obj, field.name)
             if value is None:

@@ -15,7 +15,7 @@ from ..constants import DATA_DIR, RUN_DIR, VERSION
 from .tui import init_geoip
 
 
-def web_dashboard():
+def web_dashboard() -> int:
     """gui with plotly dash"""
     import pandas as pd
     import pandas.io.sql as psql
@@ -501,3 +501,4 @@ def web_dashboard():
         return 0
 
     app.run(host=os.getenv("HOST", "localhost"), port=os.getenv("PORT", "5100"), debug=bool(eval(os.getenv("DASH_DEBUG", "False"))))
+    return 0

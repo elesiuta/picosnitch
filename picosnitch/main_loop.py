@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2020 Eric Lesiuta
+from __future__ import annotations
 
 import ctypes
 import ctypes.util
@@ -20,9 +21,10 @@ from .subprocesses.notifications import run_notifications
 from .subprocesses.primary import run_primary
 from .subprocesses.secondary import run_secondary
 from .subprocesses.virustotal import run_virustotal
+from .types import State
 
 
-def run_main_loop(config: Config, state: dict):
+def run_main_loop(config: Config, state: State) -> int:
     """coordinates all picosnitch subprocesses"""
     # init fanotify
     libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -34,10 +36,10 @@ def run_main_loop(config: Config, state: dict):
         logging.error("fanotify_init() failed")
         sys.exit(1)
     # start subprocesses
-    event_pipes = [multiprocessing.Pipe(duplex=False) for i in range(5)]
+    event_pipes = [multiprocessing.Pipe(duplex=False) for _ in range(5)]
     event_recv_pipes, event_send_pipes = zip(*event_pipes)
     secondary_recv_pipe, secondary_send_pipe = multiprocessing.Pipe(duplex=False)
-    q_error = multiprocessing.Queue()
+    q_error: multiprocessing.Queue[str] = multiprocessing.Queue()
     p_notifications = ProcessManager(
         name="snitchnotify",
         target=run_notifications,
@@ -100,12 +102,13 @@ def run_main_loop(config: Config, state: dict):
     # set signals
     subprocesses = [p_monitor, p_fuse, p_virustotal, p_primary, p_secondary, p_notifications]
 
-    def clean_exit():
-        _ = [p.terminate() for p in subprocesses]
+    def clean_exit() -> None:
+        for p in subprocesses:
+            p.terminate()
         sys.exit(0)
 
-    signal.signal(signal.SIGINT, lambda *args: clean_exit())
-    signal.signal(signal.SIGTERM, lambda *args: clean_exit())
+    signal.signal(signal.SIGINT, lambda signum, frame: clean_exit())
+    signal.signal(signal.SIGTERM, lambda signum, frame: clean_exit())
     # watch subprocesses
     suspend_check_last = time.time()
     try:
@@ -126,16 +129,18 @@ def run_main_loop(config: Config, state: dict):
             if suspend_check_now - suspend_check_last > 20:
                 p_monitor.q_in.put("terminate")
                 p_monitor.terminate()
-                _ = p_monitor.q_in.get()
+                p_monitor.q_in.get()
                 p_monitor.start()
             suspend_check_last = suspend_check_now
     except Exception as e:
-        q_error.put("picosnitch subprocess exception: %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+        tb = sys.exc_info()[2]
+        q_error.put("picosnitch subprocess exception: %s%s on line %s" % (type(e).__name__, str(e.args), tb.tb_lineno if tb else "?"))
     if sys.argv[1] == "start-no-daemon":
         return 1
     # attempt to restart picosnitch (terminate by running `picosnitch stop`)
     time.sleep(5)
-    _ = [p.terminate() for p in subprocesses]
+    for p in subprocesses:
+        p.terminate()
     args = [sys.executable, "-m", "picosnitch", "restart"]
     subprocess.Popen(args)
     return 0

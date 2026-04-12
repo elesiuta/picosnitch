@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2020 Eric Lesiuta
 
+import collections.abc
 import multiprocessing
-import typing
+import multiprocessing.connection
 
 import psutil
 
@@ -10,7 +11,7 @@ import psutil
 class ProcessManager:
     """A class for managing a subprocess"""
 
-    def __init__(self, name: str, target: typing.Callable, init_args: tuple = ()) -> None:
+    def __init__(self, name: str, target: collections.abc.Callable, init_args: tuple = ()) -> None:
         self.name, self.target, self.init_args = name, target, init_args
         self.q_in, self.q_out = multiprocessing.Queue(), multiprocessing.Queue()
         self.start()

@@ -13,10 +13,10 @@ from pathlib import Path
 class Daemon:
     """A generic daemon class based on http://www.jejik.com/files/examples/daemon3x.py"""
 
-    def __init__(self, pidfile: Path):
+    def __init__(self, pidfile: Path) -> None:
         self.pidfile = pidfile
 
-    def daemonize(self):
+    def daemonize(self) -> None:
         """Daemonize class. UNIX double fork mechanism."""
         try:
             pid = os.fork()
@@ -54,10 +54,10 @@ class Daemon:
         with open(self.pidfile, "w+") as f:
             f.write(pid + "\n")
 
-    def delpid(self):
+    def delpid(self) -> None:
         self.pidfile.unlink(missing_ok=True)
 
-    def getpid(self):
+    def getpid(self) -> int | None:
         """Get the pid from the pidfile"""
         try:
             with open(self.pidfile, "r") as f:
@@ -66,7 +66,7 @@ class Daemon:
             pid = None
         return pid
 
-    def start(self):
+    def start(self) -> None:
         """Start the daemon."""
         # Check for a pidfile to see if the daemon already runs
         pid = self.getpid()
@@ -78,7 +78,7 @@ class Daemon:
         self.daemonize()
         self.run()
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the daemon."""
         pid = self.getpid()
         if not pid:
@@ -99,12 +99,12 @@ class Daemon:
                 logging.error(f"{err.args}")
                 sys.exit(1)
 
-    def restart(self):
+    def restart(self) -> None:
         """Restart the daemon."""
         self.stop()
         self.start()
 
-    def status(self):
+    def status(self) -> None:
         """Get daemon status."""
         pid = self.getpid()
         if pid:
@@ -120,5 +120,5 @@ class Daemon:
         else:
             logging.info("picosnitch does not appear to be running.")
 
-    def run(self):
+    def run(self) -> None:
         """Subclass Daemon and override this method"""

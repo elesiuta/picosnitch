@@ -20,15 +20,15 @@ from .ui.webui import web_dashboard
 from .utils import apply_data_permissions, load_state
 
 
-def check_root(cmd: str) -> int | None:
+def check_root(cmd: str) -> int:
     """check for root privileges, return exit code on failure"""
     if os.getuid() != 0:
         logging.error(f"This command requires root. Try: sudo {Path(sys.argv[0]).resolve()} {cmd}")
         return 1
-    return None
+    return 0
 
 
-def check_bpf() -> int | None:
+def check_bpf() -> int:
     """check BPF capabilities and requirements, return exit code on failure"""
     with open("/proc/self/status", "r") as f:
         proc_status = f.read()
@@ -43,10 +43,10 @@ def check_bpf() -> int | None:
     except (RuntimeError, FileNotFoundError) as e:
         logging.error(f"{e}")
         return 1
-    return None
+    return 0
 
 
-def check_database() -> int | None:
+def check_database() -> int:
     """check database exists and has correct version, return exit code on failure"""
     db_path = DATA_DIR / "picosnitch.db"
     if not db_path.exists():
@@ -61,7 +61,7 @@ def check_database() -> int | None:
     if user_version != 3:
         logging.error(f"Unsupported database version {user_version}, expected 3")
         return 1
-    return None
+    return 0
 
 
 def init_dirs_and_config() -> None:
@@ -83,7 +83,7 @@ def init_dirs_and_config() -> None:
     apply_data_permissions(CONFIG_DIR, DATA_DIR, LOG_DIR, CACHE_DIR)
 
 
-def main():
+def main() -> None:
     """init picosnitch"""
     # master copy of config and state, all subprocesses only receive a static copy from this point in time
     config = load_config()
@@ -98,7 +98,7 @@ def main():
     sys.exit(run_main_loop(config, state))
 
 
-def start_picosnitch():
+def start_picosnitch() -> int:
     """command line interface, pre-startup checks, and run"""
     if sys.version_info < (3, 12):
         logging.error("Python version >= 3.12 is required")
@@ -109,7 +109,7 @@ def start_picosnitch():
     pid_file = RUN_DIR / "picosnitch.pid"
 
     class PicoDaemon(Daemon):
-        def run(self):
+        def run(self) -> None:
             main()
 
     readme = textwrap.dedent(f"""    Monitor your system for applications that make network connections, track their

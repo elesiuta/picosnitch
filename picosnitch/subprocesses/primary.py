@@ -1,21 +1,22 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2020 Eric Lesiuta
+from __future__ import annotations
 
 import logging
 import multiprocessing
+import multiprocessing.connection
 import os
 import pickle
 import signal
 import sys
 import threading
 import time
-import typing
 
-from ..types import BpfEvent
+from ..types import BpfEvent, State
 from ..utils import save_state
 
 
-def _toast(q_notify: multiprocessing.Queue, msg: str, level=logging.INFO) -> None:
+def _toast(q_notify: multiprocessing.Queue[str], msg: str, level: int = logging.INFO) -> None:
     """send notification message to the notification subprocess"""
     try:
         q_notify.put_nowait(msg)
@@ -23,13 +24,13 @@ def _toast(q_notify: multiprocessing.Queue, msg: str, level=logging.INFO) -> Non
         logging.log(level, msg)
 
 
-def handle_new_processes(state: dict, new_processes: typing.List[bytes], q_notify: multiprocessing.Queue) -> None:
+def handle_new_processes(state: State, new_processes: list[bytes], q_notify: multiprocessing.Queue[str]) -> None:
     """iterate over the list of process/connection data to update the state dictionary and create notifications on new entries"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     for proc_pickle in new_processes:
         proc: BpfEvent = pickle.loads(proc_pickle)
         proc_name, proc_exe, state_names, state_executables, parent = proc["name"], proc["exe"], state["Names"], state["Executables"], ""
-        for i in range(2):
+        for _ in range(2):
             notification = []
             if proc_name in state_names:
                 if proc_exe not in state_names[proc_name]:
@@ -51,7 +52,15 @@ def handle_new_processes(state: dict, new_processes: typing.List[bytes], q_notif
             proc_name, proc_exe, state_names, state_executables, parent = proc["pname"], proc["pexe"], state["Parent Names"], state["Parent Executables"], " (parent)"
 
 
-def run_primary(state, event_pipes, secondary_pipe, q_error, q_notify, q_in, _q_out):
+def run_primary(
+    state: State,
+    event_pipes: tuple,
+    secondary_pipe: multiprocessing.connection.Connection,
+    q_error: multiprocessing.Queue[str],
+    q_notify: multiprocessing.Queue[str],
+    q_in: multiprocessing.Queue[bytes],
+    _q_out: multiprocessing.Queue,
+) -> None:
     """first to receive connection data from monitor, more responsive than secondary, creates notifications and writes exe.log, error.log, and state.json"""
     try:
         os.nice(-20)
@@ -65,7 +74,7 @@ def run_primary(state, event_pipes, secondary_pipe, q_error, q_notify, q_in, _q_
     processes_to_send = []
 
     # init signal handlers
-    def save_state_and_exit(state: dict, q_error: multiprocessing.Queue, event_pipes):
+    def save_state_and_exit(state: State, q_error: multiprocessing.Queue, event_pipes: tuple) -> None:
         while not q_error.empty():
             error = q_error.get()
             state["Error Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
@@ -83,12 +92,12 @@ def run_primary(state, event_pipes, secondary_pipe, q_error, q_notify, q_in, _q_
     signal.signal(signal.SIGINT, lambda *args: save_state_and_exit(state, q_error, event_pipes))
 
     # init thread to receive new connection data over pipe
-    def event_pipe_thread(event_pipes, pipe_data: list, listen: threading.Event, ready: threading.Event):
+    def event_pipe_thread(event_pipes: tuple, pipe_data: list, listen: threading.Event, ready: threading.Event) -> None:
         while True:
             listen.wait()
             new_processes = pipe_data[0]
             while listen.is_set():
-                for i in range(5):
+                for _ in range(5):
                     if any(event_pipe.poll() for event_pipe in event_pipes):
                         break
                     time.sleep(1)

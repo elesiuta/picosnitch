@@ -1,26 +1,35 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2020 Eric Lesiuta
+from __future__ import annotations
 
 import collections
 import importlib
 import ipaddress
 import logging
 import multiprocessing
+import multiprocessing.connection
 import pickle
 import shlex
 import sqlite3
 import sys
 import time
-import typing
 
 from ..config import Config
 from ..constants import DATA_DIR, LOG_DIR, VERSION
 from ..process_manager import ProcessManager
-from ..types import BpfEvent
+from ..types import BpfEvent, ProcessHashInfo, State
 from ..utils import get_fanotify_events, get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup, sync_vt_results
 
 
-def resolve_hash(state: dict, fan_mod_cnt: dict, proc: dict, p_fuse: ProcessManager, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue) -> str:
+def resolve_hash(
+    state: State,
+    fan_mod_cnt: dict[str, int],
+    proc: ProcessHashInfo,
+    p_fuse: ProcessManager,
+    q_vt: multiprocessing.Queue[bytes],
+    q_out: multiprocessing.Queue[bytes],
+    q_error: multiprocessing.Queue[str],
+) -> str:
     """get sha256 of executable and submit to primary or virustotal subprocess if necessary"""
     sha_fd_error = ""
     sha_pid_error = ""
@@ -63,15 +72,15 @@ def resolve_hash(state: dict, fan_mod_cnt: dict, proc: dict, p_fuse: ProcessMana
 
 def build_log_entries(
     config: Config,
-    state: dict,
-    fan_mod_cnt: dict,
-    new_processes: typing.List[bytes],
+    state: State,
+    fan_mod_cnt: dict[str, int],
+    new_processes: list[bytes],
     p_fuse: ProcessManager,
-    q_vt: multiprocessing.Queue,
-    q_out: multiprocessing.Queue,
-    q_error: multiprocessing.Queue,
+    q_vt: multiprocessing.Queue[bytes],
+    q_out: multiprocessing.Queue[bytes],
+    q_error: multiprocessing.Queue[str],
     ignored_networks: list,
-) -> typing.List[tuple]:
+) -> list[tuple]:
     """iterate over the list of process/connection data to generate a list of entries for the sql database"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     traffic_counter = collections.defaultdict(int)
@@ -83,7 +92,7 @@ def build_log_entries(
             continue
         # get the sha256 of the process executable and its parent
         sha256 = resolve_hash(state, fan_mod_cnt, proc, p_fuse, q_vt, q_out, q_error)
-        pproc = {"pid": proc["ppid"], "name": proc["pname"], "exe": proc["pexe"], "fd": proc["pfd"], "dev": proc["pdev"], "ino": proc["pino"]}
+        pproc: ProcessHashInfo = {"pid": proc["ppid"], "name": proc["pname"], "exe": proc["pexe"], "fd": proc["pfd"], "dev": proc["pdev"], "ino": proc["pino"]}
         psha256 = resolve_hash(state, fan_mod_cnt, pproc, p_fuse, q_vt, q_out, q_error)
         # join or omit commands from logs
         if config.log.commands:
@@ -144,7 +153,18 @@ def build_log_entries(
     return [(datetime_now, traffic_counter["send " + str(event)], traffic_counter["recv " + str(event)], *event) for event in transaction]
 
 
-def run_secondary(config: Config, state, fan_fd, p_fuse: ProcessManager, p_virustotal: ProcessManager, secondary_pipe, q_primary_in, q_error, _q_in, _q_out):
+def run_secondary(
+    config: Config,
+    state: State,
+    fan_fd: int,
+    p_fuse: ProcessManager,
+    p_virustotal: ProcessManager,
+    secondary_pipe: multiprocessing.connection.Connection,
+    q_primary_in: multiprocessing.Queue[bytes],
+    q_error: multiprocessing.Queue[str],
+    _q_in: multiprocessing.Queue,
+    _q_out: multiprocessing.Queue,
+) -> int:
     """second to receive connection data from monitor, less responsive than primary, coordinates connection data with virustotal subprocess and checks fanotify, updates connection logs and reports sha256/vt_results back to primary subprocess if needed"""
     parent_process = multiprocessing.parent_process()
     # maintain a separate copy of the state dictionary here and coordinate with the primary subprocess (sha256 and vt_results)
@@ -211,7 +231,7 @@ def run_secondary(config: Config, state, fan_fd, p_fuse: ProcessManager, p_virus
                     transfer_size -= 1
                 timeout_counter += 1
                 if pickle.loads(new_processes[-1]) == "done":
-                    _ = new_processes.pop()
+                    new_processes.pop()
                     transfer_size += 1
                     break
                 elif timeout_counter > 30:

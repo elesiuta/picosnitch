@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2020 Eric Lesiuta
+from __future__ import annotations
 
 import multiprocessing
 import pickle
@@ -10,7 +11,7 @@ from ..config import Config
 from ..utils import get_sha256_fd, get_sha256_pid
 
 
-def run_fuse(config: Config, q_error, q_in, q_out):
+def run_fuse(config: Config, q_error: multiprocessing.Queue[str], q_in: multiprocessing.Queue[bytes], q_out: multiprocessing.Queue[str]) -> int:
     """runs as user to read executables for FUSE/AppImage (since real, effective, and saved UID must match)"""
     parent_process = multiprocessing.parent_process()
     if config.desktop.user:

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2020 Eric Lesiuta
+from __future__ import annotations
 
 import ctypes
 import fcntl
@@ -16,12 +17,11 @@ import pwd
 import socket
 import sys
 import termios
-import typing
 from pathlib import Path
 
 from .config import load_config
 from .constants import DATA_DIR, LOG_DIR, PID_CACHE, ST_DEV_MASK
-from .types import FanotifyEventMetadata
+from .types import FanotifyEventMetadata, State
 
 
 def drop_root_permanent(uid: int, gid: int) -> None:
@@ -77,9 +77,9 @@ def apply_data_permissions(config_dir: Path, data_dir: Path, log_dir: Path, cach
                 os.chown(entry, uid, gid)
 
 
-def load_state() -> dict:
+def load_state() -> State:
     """read data for the state dictionary from state.json or init new if not found"""
-    template = {
+    data: State = {
         "Error Log": [],
         "Exe Log": [],
         "Executables": {},
@@ -88,7 +88,6 @@ def load_state() -> dict:
         "Parent Names": {},
         "SHA256": {},
     }
-    data = {k: v for k, v in template.items()}
     state_path = DATA_DIR / "state.json"
     if state_path.exists():
         with open(state_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
@@ -96,13 +95,13 @@ def load_state() -> dict:
         for key in ["Executables", "Names", "Parent Executables", "Parent Names", "SHA256"]:
             if key in state_record:
                 data[key] = state_record[key]
-    if not all(type(data[key]) is type(template[key]) for key in template):
-        logging.error("Invalid state.json")
-        sys.exit(1)
+            if not isinstance(data[key], dict):
+                logging.error("Invalid state.json")
+                sys.exit(1)
     return data
 
 
-def save_state(state: dict, write_record: bool = True) -> None:
+def save_state(state: State, write_record: bool = True) -> None:
     """write the state dictionary to state.json, exe.log, and error.log"""
     state_path = DATA_DIR / "state.json"
     exe_log_path = LOG_DIR / "exe.log"
@@ -111,18 +110,23 @@ def save_state(state: dict, write_record: bool = True) -> None:
         if state["Error Log"]:
             with open(error_log_path, "a", encoding="utf-8", errors="surrogateescape") as f:
                 f.write("\n".join(state["Error Log"]) + "\n")
-        del state["Error Log"]
+        state["Error Log"] = []
+    except Exception as e:
+        logging.error(f"picosnitch write error (error.log): {type(e).__name__}{e.args}")
+    try:
         if state["Exe Log"]:
             with open(exe_log_path, "a", encoding="utf-8", errors="surrogateescape") as f:
                 f.write("\n".join(state["Exe Log"]) + "\n")
-        del state["Exe Log"]
-        if write_record:
-            with open(state_path, "w", encoding="utf-8", errors="surrogateescape") as f:
-                json.dump(state, f, indent=2, separators=(",", ": "), sort_keys=True, ensure_ascii=False)
+        state["Exe Log"] = []
     except Exception as e:
-        logging.error(f"picosnitch write error: {type(e).__name__}{e.args}")
-    state["Error Log"] = []
-    state["Exe Log"] = []
+        logging.error(f"picosnitch write error (exe.log): {type(e).__name__}{e.args}")
+    try:
+        if write_record:
+            state_data = {k: state[k] for k in ("Executables", "Names", "Parent Executables", "Parent Names", "SHA256")}
+            with open(state_path, "w", encoding="utf-8", errors="surrogateescape") as f:
+                json.dump(state_data, f, indent=2, separators=(",", ": "), sort_keys=True, ensure_ascii=False)
+    except Exception as e:
+        logging.error(f"picosnitch write error (state.json): {type(e).__name__}{e.args}")
 
 
 @functools.lru_cache(maxsize=None)
@@ -131,7 +135,7 @@ def reverse_dns_lookup(ip: str) -> str:
     try:
         host = socket.getnameinfo((ip, 0), 0)[0]
         try:
-            _ = ipaddress.ip_address(host)
+            ipaddress.ip_address(host)
             return ip
         except ValueError:
             return ".".join(reversed(host.split(".")))
@@ -172,7 +176,7 @@ def get_sha256_pid(pid: int, st_dev: int, st_ino: int) -> str:
 
 
 @functools.lru_cache(maxsize=PID_CACHE)
-def get_sha256_fuse(q_in: multiprocessing.Queue, q_out: multiprocessing.Queue, path: str, pid: int, st_dev: int, st_ino: int, _mod_cnt: int) -> str:
+def get_sha256_fuse(q_in: multiprocessing.Queue[bytes], q_out: multiprocessing.Queue[str], path: str, pid: int, st_dev: int, st_ino: int, _mod_cnt: int) -> str:
     """get sha256 of process executable from a fuse mount"""
     q_in.put(pickle.dumps((path, pid, st_dev, st_ino)))
     try:
@@ -181,7 +185,7 @@ def get_sha256_fuse(q_in: multiprocessing.Queue, q_out: multiprocessing.Queue, p
         return "!!! FUSE Subprocess Error"
 
 
-def get_fstat(fd: int) -> typing.Tuple[int, int]:
+def get_fstat(fd: int) -> tuple[int, int]:
     """get (st_dev, st_ino) or (0, 0) if fails"""
     try:
         stat = os.fstat(fd)
@@ -190,12 +194,12 @@ def get_fstat(fd: int) -> typing.Tuple[int, int]:
         return 0, 0
 
 
-def get_fanotify_events(fan_fd: int, fan_mod_cnt: dict, q_error: multiprocessing.Queue) -> None:
+def get_fanotify_events(fan_fd: int, fan_mod_cnt: dict[str, int], q_error: multiprocessing.Queue[str]) -> None:
     """check if any watched executables were modified and increase count to trigger rehash"""
     sizeof_event = ctypes.sizeof(FanotifyEventMetadata)
     bytes_avail = ctypes.c_int()
     fcntl.ioctl(fan_fd, termios.FIONREAD, bytes_avail)
-    for i in range(0, bytes_avail.value, sizeof_event):
+    for _ in range(0, bytes_avail.value, sizeof_event):
         try:
             fanotify_event_metadata = FanotifyEventMetadata()
             buf = os.read(fan_fd, sizeof_event)
@@ -207,7 +211,7 @@ def get_fanotify_events(fan_fd: int, fan_mod_cnt: dict, q_error: multiprocessing
             q_error.put("Fanotify Event %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
 
 
-def sync_vt_results(state: dict, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, check_pending: bool = False) -> None:
+def sync_vt_results(state: State, q_vt: multiprocessing.Queue[bytes], q_out: multiprocessing.Queue[bytes], check_pending: bool = False) -> None:
     """get virustotal results from subprocess and update state, q_vt = q_in if check_pending else q_out"""
     if check_pending:
         for exe in state["SHA256"]:

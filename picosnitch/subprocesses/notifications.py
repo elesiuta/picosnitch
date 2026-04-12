@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2020 Eric Lesiuta
+from __future__ import annotations
 
 import logging
 import multiprocessing
@@ -9,7 +10,7 @@ import sys
 from ..config import Config
 
 
-def run_notifications(config: Config, q_error, q_in, _q_out):
+def run_notifications(config: Config, q_error: multiprocessing.Queue[str], q_in: multiprocessing.Queue[str], _q_out: multiprocessing.Queue) -> int:
     """notification subprocess: drops root then sends desktop notifications via D-Bus"""
     parent_process = multiprocessing.parent_process()
     # drop root before importing dbus
