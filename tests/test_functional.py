@@ -28,20 +28,12 @@ PICOSNITCH_DIR = Path(__file__).parent.parent
 PYTHON_EXE = sys.executable
 
 
-# Use standard config location - handle sudo case where SUDO_UID is set
-def get_config_dir() -> Path:
-    """Get the picosnitch config directory, handling sudo properly."""
-    sudo_uid = os.environ.get("SUDO_UID")
-    if sudo_uid:
-        import pwd
-
-        home = pwd.getpwuid(int(sudo_uid)).pw_dir
-    else:
-        home = str(Path.home())
-    return Path(home) / ".config" / "picosnitch"
-
-
-CONFIG_DIR = get_config_dir()
+# FHS standard paths
+CONFIG_DIR = Path("/etc/picosnitch")
+DATA_DIR = Path("/var/lib/picosnitch")
+LOG_DIR = Path("/var/log/picosnitch")
+RUN_DIR = Path("/run/picosnitch")
+CACHE_DIR = Path("/var/cache/picosnitch")
 
 # Test configuration
 DB_WRITE_LIMIT = 5  # seconds - we set this in config
@@ -86,6 +78,10 @@ def restore_config(backup_dir: Path):
             shutil.rmtree(CONFIG_DIR)
         shutil.copytree(backup_dir, CONFIG_DIR)
         shutil.rmtree(backup_dir)
+    # also clean up data/log dirs created during tests
+    for d in [DATA_DIR, LOG_DIR, RUN_DIR, CACHE_DIR]:
+        if d.exists():
+            shutil.rmtree(d)
 
 
 def clear_config():
@@ -151,8 +147,8 @@ def stop_picosnitch(proc: subprocess.Popen):
 
 
 def query_db(query: str) -> list:
-    """Execute a query on the snitch database."""
-    db_path = CONFIG_DIR / "snitch.db"
+    """Execute a query on the picosnitch database."""
+    db_path = DATA_DIR / "picosnitch.db"
     if not db_path.exists():
         return []
     con = sqlite3.connect(str(db_path))
@@ -179,6 +175,9 @@ def picosnitch_session():
     backup_dir = backup_config()
     stop_existing_picosnitch()
     clear_config()
+
+    # Init directories
+    subprocess.run([PYTHON_EXE, "-m", "picosnitch", "init"], capture_output=True, timeout=30)
 
     proc = start_picosnitch()
 
@@ -266,7 +265,7 @@ class TestShortLivedProcesses:
 
     def test_no_read_errors(self, picosnitch_session):
         """Test that there are no Read Errors in the error log after curl/wget."""
-        error_log = CONFIG_DIR / "error.log"
+        error_log = LOG_DIR / "error.log"
         if error_log.exists():
             content = error_log.read_text()
             read_errors = [line for line in content.splitlines() if "Read Error" in line and "curl" in line]
@@ -281,7 +280,7 @@ class TestDatabaseIntegrity:
         subprocess.run(["curl", "-s", "http://example.com", "-o", "/dev/null"], capture_output=True, timeout=30)
         time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
 
-        db_path = CONFIG_DIR / "snitch.db"
+        db_path = DATA_DIR / "picosnitch.db"
         assert db_path.exists(), "Database should exist"
 
         con = sqlite3.connect(str(db_path))
@@ -300,7 +299,7 @@ class TestDatabaseIntegrity:
         subprocess.run(["curl", "-s", "http://example.com", "-o", "/dev/null"], capture_output=True, timeout=30)
         time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
 
-        error_log = CONFIG_DIR / "error.log"
+        error_log = LOG_DIR / "error.log"
         if error_log.exists():
             content = error_log.read_text()
             assert content.count("Exe inode changed") == 0, "Should not have inode changed errors"

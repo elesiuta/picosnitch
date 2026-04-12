@@ -6,7 +6,22 @@ Type=simple
 Restart=always
 RestartSec=5
 ExecStart=/usr/bin/picosnitch start-no-daemon
-PIDFile=/run/picosnitch.pid
+PIDFile=/run/picosnitch/picosnitch.pid
+
+# Hardening
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/var/lib/picosnitch /var/log/picosnitch /run/picosnitch /var/cache/picosnitch
+PrivateTmp=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_BPF CAP_PERFMON CAP_NET_ADMIN CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
 
 [Install]
 WantedBy=multi-user.target

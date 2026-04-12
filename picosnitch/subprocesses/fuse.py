@@ -18,7 +18,6 @@
 # https://github.com/elesiuta/picosnitch
 
 import multiprocessing
-import os
 import pickle
 import queue
 import sys
@@ -29,11 +28,12 @@ from ..utils import get_sha256_fd, get_sha256_pid
 def run_fuse(config: dict, q_error, q_in, q_out):
     """runs as user to read executables for FUSE/AppImage (since real, effective, and saved UID must match)"""
     parent_process = multiprocessing.parent_process()
-    try:
-        os.setgid(int(os.getenv("SUDO_UID")))
-        os.setuid(int(os.getenv("SUDO_UID")))
-    except Exception:
-        pass
+    if config["Desktop user"]:
+        from ..utils import drop_root_permanent, resolve_group, resolve_owner
+
+        uid = resolve_owner(config["Desktop user"])
+        gid = resolve_group(config["Desktop user"])
+        drop_root_permanent(uid, gid)
     while True:
         if not parent_process.is_alive():
             return 0

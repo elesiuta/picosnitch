@@ -19,16 +19,11 @@
 
 import json
 import os
-import pwd
 import resource
-import site
 import sys
 import time
 import typing
 
-# add site dirs for system and user installed packages (for dependencies when picosnitch is installed via pipx/venv, or dependencies installed via user)
-site.addsitedir("/usr/lib/python3/dist-packages")
-site.addsitedir(os.path.expandvars("$PYTHON_USER_SITE"))
 import psutil
 
 # picosnitch version and supported platform
@@ -40,37 +35,16 @@ assert sys.platform.startswith("linux"), "Did not detect a supported operating s
 if sys.flags.optimize > 0:
     print("Warning: picosnitch does not function properly with the -O (optimize) flag", file=sys.stderr)
 
-# set constants and RLIMIT_NOFILE if configured
+# FHS standard paths
+CONFIG_DIR: typing.Final[str] = "/etc/picosnitch"
+DATA_DIR: typing.Final[str] = "/var/lib/picosnitch"
+LOG_DIR: typing.Final[str] = "/var/log/picosnitch"
+RUN_DIR: typing.Final[str] = "/run/picosnitch"
+CACHE_DIR: typing.Final[str] = "/var/cache/picosnitch"
+
+# set RLIMIT_NOFILE if configured
 try:
-    if os.getuid() == 0:
-        if os.getenv("SUDO_UID"):
-            home_user = pwd.getpwuid(int(os.getenv("SUDO_UID"))).pw_name
-        elif os.getenv("SUDO_USER"):
-            home_user = os.getenv("SUDO_USER")
-        elif os.getenv("DOAS_USER"):
-            home_user = os.getenv("DOAS_USER")
-        else:
-            for home_user in os.listdir("/home"):
-                try:
-                    if pwd.getpwnam(home_user).pw_uid >= 1000:
-                        break
-                except Exception:
-                    pass
-        home_dir = pwd.getpwnam(home_user).pw_dir
-        if not os.getenv("SUDO_UID"):
-            os.environ["SUDO_UID"] = str(pwd.getpwnam(home_user).pw_uid)
-        if not os.getenv("DBUS_SESSION_BUS_ADDRESS"):
-            os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{pwd.getpwnam(home_user).pw_uid}/bus"
-    else:
-        home_dir = os.path.expanduser("~")
-        if sys.executable.startswith("/snap/"):
-            home_dir = home_dir.split("/snap/picosnitch")[0]
-except Exception:
-    # fallback if there are no regular users on the system, this will likely be /root
-    home_dir = os.path.expanduser("~")
-BASE_PATH: typing.Final[str] = os.path.join(home_dir, ".config", "picosnitch")
-try:
-    file_path = os.path.join(BASE_PATH, "config.json")
+    file_path = os.path.join(CONFIG_DIR, "config.json")
     with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
         nofile = json.load(json_file)["Set RLIMIT_NOFILE"]
     if isinstance(nofile, int):
@@ -90,14 +64,13 @@ try:
     for part in psutil.disk_partitions():
         if part.fstype == "btrfs":
             st_dev_mask = 0
-            if not os.path.exists(os.path.join(BASE_PATH, "config.json")):
-                # only warn users about btrfs on first run (by checking for config.json)
+            if not os.path.exists(os.path.join(CONFIG_DIR, "config.json")):
                 print(
                     "Warning: running picosnitch on systems with btrfs is not fully supported due to dev number strangeness and non-unique inodes (this is still fine for most use cases)",
                     file=sys.stderr,
                 )
             break
-    file_path = os.path.join(BASE_PATH, "config.json")
+    file_path = os.path.join(CONFIG_DIR, "config.json")
     with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
         set_mask = json.load(json_file)["Set st_dev mask"]
     if isinstance(set_mask, int):

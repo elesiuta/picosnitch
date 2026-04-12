@@ -26,12 +26,19 @@ import threading
 import time
 import typing
 
-from ..notifications import Notifier
 from ..types import BpfEvent
 from ..utils import save_state
 
 
-def handle_new_processes(state: dict, new_processes: typing.List[bytes]) -> None:
+def _toast(q_notify: multiprocessing.Queue, msg: str, file=sys.stdout) -> None:
+    """send notification message to the notification subprocess"""
+    try:
+        q_notify.put_nowait(msg)
+    except Exception:
+        print(msg, file=file)
+
+
+def handle_new_processes(state: dict, new_processes: typing.List[bytes], q_notify: multiprocessing.Queue) -> None:
     """iterate over the list of process/connection data to update the state dictionary and create notifications on new entries"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     for proc_pickle in new_processes:
@@ -55,12 +62,12 @@ def handle_new_processes(state: dict, new_processes: typing.List[bytes]) -> None
                     state["SHA256"][proc_exe] = {}
             if notification:
                 state["Exe Log"].append(f"{datetime_now} {proc_name:<16.16} {proc_exe} (new {', '.join(notification)}){parent}")
-                Notifier().toast(f"picosnitch: {proc_name} {proc_exe}")
+                _toast(q_notify, f"picosnitch: {proc_name} {proc_exe}")
             proc_name, proc_exe, state_names, state_executables, parent = proc["pname"], proc["pexe"], state["Parent Names"], state["Parent Executables"], " (parent)"
 
 
-def run_primary(state, event_pipes, secondary_pipe, q_error, q_in, _q_out):
-    """first to receive connection data from monitor, more responsive than secondary, creates notifications and writes exe.log, error.log, and record.json"""
+def run_primary(state, event_pipes, secondary_pipe, q_error, q_notify, q_in, _q_out):
+    """first to receive connection data from monitor, more responsive than secondary, creates notifications and writes exe.log, error.log, and state.json"""
     try:
         os.nice(-20)
     except Exception:
@@ -71,9 +78,6 @@ def run_primary(state, event_pipes, secondary_pipe, q_error, q_in, _q_out):
     last_write = 0
     write_record = False
     processes_to_send = []
-    # init notifications
-    if state["Config"]["Desktop notifications"]:
-        Notifier().enable_notifications()
 
     # init signal handlers
     def save_state_and_exit(state: dict, q_error: multiprocessing.Queue, event_pipes):
@@ -84,7 +88,7 @@ def run_primary(state, event_pipes, secondary_pipe, q_error, q_in, _q_out):
             error = error.replace("FD Read Error and PID Read Error and FUSE Read Error for", "Read Error for")
             if len(error) > 50:
                 error = error[:47] + "..."
-            Notifier().toast(error, file=sys.stderr)
+            _toast(q_notify, error, file=sys.stderr)
         save_state(state)
         for event_pipe in event_pipes:
             event_pipe.close()
@@ -139,7 +143,7 @@ def run_primary(state, event_pipes, secondary_pipe, q_error, q_in, _q_out):
                 # don't need to toast fallback success messages
                 if error.startswith("Fallback to FUSE hash successful on ") or error.startswith("Fallback to PID hash successful on "):
                     continue
-                Notifier().toast(error, file=sys.stderr)
+                _toast(q_notify, error, file=sys.stderr)
             # get list of new processes and connections since last update
             listen.clear()
             if not ready.wait(timeout=300):
@@ -150,7 +154,7 @@ def run_primary(state, event_pipes, secondary_pipe, q_error, q_in, _q_out):
             ready.clear()
             listen.set()
             # process the list and update state, send new process/connection data to secondary subprocess if ready
-            handle_new_processes(state, new_processes)
+            handle_new_processes(state, new_processes, q_notify)
             processes_to_send += new_processes
             while not q_in.empty():
                 msg: dict = pickle.loads(q_in.get())
@@ -166,23 +170,23 @@ def run_primary(state, event_pipes, secondary_pipe, q_error, q_in, _q_out):
                         if msg["sha256"] not in state["SHA256"][msg["exe"]]:
                             state["SHA256"][msg["exe"]][msg["sha256"]] = "VT Pending"
                             state["Exe Log"].append(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg['sha256']:<16.16} {msg['exe']} (new hash)")
-                            Notifier().toast(f"New sha256: {msg['exe']}")
+                            _toast(q_notify, f"New sha256: {msg['exe']}")
                     else:
                         state["SHA256"][msg["exe"]] = {msg["sha256"]: "VT Pending"}
                 elif msg["type"] == "vt_result":
                     if msg["exe"] in state["SHA256"]:
                         if msg["sha256"] not in state["SHA256"][msg["exe"]]:
                             state["Exe Log"].append(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg['sha256']:<16.16} {msg['exe']} (new hash)")
-                            Notifier().toast(f"New sha256: {msg['exe']}")
+                            _toast(q_notify, f"New sha256: {msg['exe']}")
                         state["SHA256"][msg["exe"]][msg["sha256"]] = msg["result"]
                     else:
                         state["SHA256"][msg["exe"]] = {msg["sha256"]: msg["result"]}
                     if msg["suspicious"]:
                         state["Exe Log"].append(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg['sha256']:<16.16} {msg['exe']} (suspicious)")
-                        Notifier().toast(f"Suspicious VT results: {msg['exe']}")
+                        _toast(q_notify, f"Suspicious VT results: {msg['exe']}")
                     else:
                         state["Exe Log"].append(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg['sha256']:<16.16} {msg['exe']} (clean)")
-            # write the state dictionary to record.json, error.log, and exe.log (limit writes to reduce disk wear)
+            # write the state dictionary to state.json, error.log, and exe.log (limit writes to reduce disk wear)
             if state["Error Log"] or state["Exe Log"] or time.time() - last_write > 30:
                 new_record = pickle.dumps([state["Executables"], state["Names"], state["Parent Executables"], state["Parent Names"], state["SHA256"]])
                 if new_record != state_record:

@@ -30,6 +30,12 @@ from ..utils import get_fstat
 def run_virustotal(config: dict, q_error, q_vt_pending, q_vt_results):
     """get virustotal results of process executable"""
     parent_process = multiprocessing.parent_process()
+    if config["Desktop user"]:
+        from ..utils import drop_root_permanent, resolve_group, resolve_owner
+
+        uid = resolve_owner(config["Desktop user"])
+        gid = resolve_group(config["Desktop user"])
+        drop_root_permanent(uid, gid)
     try:
         import requests
 

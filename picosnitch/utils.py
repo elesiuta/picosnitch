@@ -18,27 +18,82 @@
 # https://github.com/elesiuta/picosnitch
 
 import ctypes
-import ctypes.util
 import fcntl
 import functools
+import grp
 import hashlib
 import ipaddress
 import json
 import multiprocessing
 import os
 import pickle
+import pwd
 import socket
 import sys
 import termios
 import typing
 
-from .constants import BASE_PATH, PID_CACHE, ST_DEV_MASK
-from .notifications import Notifier
+from .constants import CONFIG_DIR, DATA_DIR, LOG_DIR, PID_CACHE, ST_DEV_MASK
 from .types import FanotifyEventMetadata
 
 
+def drop_root_permanent(uid: int, gid: int) -> None:
+    """Permanently drop root privileges. Cannot be reversed."""
+    if os.getuid() != 0:
+        return
+    os.setgroups([])
+    os.setgid(gid)
+    os.setuid(uid)
+    if os.getuid() != uid or os.getgid() != gid:
+        print("Failed to drop root privileges", file=sys.stderr)
+        sys.exit(1)
+    try:
+        os.setuid(0)
+    except PermissionError:
+        return
+    print("FATAL: was able to regain root after dropping privileges", file=sys.stderr)
+    sys.exit(1)
+
+
+def resolve_owner(owner: str) -> int:
+    """Resolve a username or numeric string to a UID."""
+    try:
+        return int(owner)
+    except ValueError:
+        return pwd.getpwnam(owner).pw_uid
+
+
+def resolve_group(group: str) -> int:
+    """Resolve a group name or numeric string to a GID."""
+    try:
+        return int(group)
+    except ValueError:
+        return grp.getgrnam(group).gr_gid
+
+
+def apply_data_permissions(config_dir: str, data_dir: str, log_dir: str, cache_dir: str) -> None:
+    """Apply configured ownership and permissions to data, log, and cache directories."""
+    config_path = os.path.join(config_dir, "config.json")
+    if not os.path.exists(config_path):
+        return
+    with open(config_path, "r", encoding="utf-8", errors="surrogateescape") as f:
+        config = json.load(f)
+    uid = resolve_owner(config.get("Data owner", "root"))
+    gid = resolve_group(config.get("Data group", "root"))
+    mode = int(config.get("Data mode", "0644"), 8)
+    dir_mode = mode | 0o111  # add execute bits for directories
+    for d in [data_dir, log_dir, cache_dir]:
+        os.chmod(d, dir_mode)
+        os.chown(d, uid, gid)
+        for entry in os.listdir(d):
+            path = os.path.join(d, entry)
+            if os.path.isfile(path) and not os.path.islink(path):
+                os.chmod(path, mode)
+                os.chown(path, uid, gid)
+
+
 def load_state() -> dict:
-    """read data for the state dictionary from config.json and record.json or init new files if not found"""
+    """read data for the state dictionary from config.json and state.json or init new files if not found"""
     template = {
         "Config": {
             "DB retention (days)": 30,
@@ -48,7 +103,11 @@ def load_state() -> dict:
             "DB write limit (seconds)": 10,
             "Dash scroll zoom": True,
             "Dash theme": "",
+            "Data group": "root",
+            "Data mode": "0644",
+            "Data owner": "root",
             "Desktop notifications": True,
+            "Desktop user": "",
             "Every exe (not just conns)": False,
             "GeoIP lookup": True,
             "Log addresses": True,
@@ -72,61 +131,48 @@ def load_state() -> dict:
     }
     data = {k: v for k, v in template.items()}
     data["Config"] = {k: v for k, v in template["Config"].items()}
-    write_config = False
-    config_path = os.path.join(BASE_PATH, "config.json")
-    record_path = os.path.join(BASE_PATH, "record.json")
+    config_path = os.path.join(CONFIG_DIR, "config.json")
+    state_path = os.path.join(DATA_DIR, "state.json")
     if os.path.exists(config_path):
         with open(config_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             data["Config"] = json.load(json_file)
         for key in template["Config"]:
             if key not in data["Config"]:
                 data["Config"][key] = template["Config"][key]
-                write_config = True
-    else:
-        write_config = True
-    if os.path.exists(record_path):
-        with open(record_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
+    if not data["Config"]["Desktop user"] and os.environ.get("SUDO_UID"):
+        data["Config"]["Desktop user"] = os.environ["SUDO_UID"]
+    if os.path.exists(state_path):
+        with open(state_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             state_record = json.load(json_file)
         for key in ["Executables", "Names", "Parent Executables", "Parent Names", "SHA256"]:
             if key in state_record:
                 data[key] = state_record[key]
     assert all(type(data[key]) is type(template[key]) for key in template), "Invalid json files"
     assert all(key in ["Set RLIMIT_NOFILE", "Set st_dev mask"] or type(data["Config"][key]) is type(template["Config"][key]) for key in template["Config"]), "Invalid config"
-    if write_config:
-        save_state(data, write_config=True)
     return data
 
 
-def save_state(state: dict, write_config: bool = False, write_record: bool = True) -> None:
-    """write the state dictionary to config.json, record.json, exe.log, and error.log"""
-    config_path = os.path.join(BASE_PATH, "config.json")
-    record_path = os.path.join(BASE_PATH, "record.json")
-    exe_log_path = os.path.join(BASE_PATH, "exe.log")
-    error_log_path = os.path.join(BASE_PATH, "error.log")
-    assert os.getuid() == 0, "Requires root privileges to write config and log files"
-    if not os.path.isdir(BASE_PATH):
-        os.makedirs(BASE_PATH)
-    if os.stat(BASE_PATH).st_uid == 0 and os.getenv("SUDO_UID"):
-        os.chown(BASE_PATH, int(os.getenv("SUDO_UID")), int(os.getenv("SUDO_UID")))
+def save_state(state: dict, write_record: bool = True) -> None:
+    """write the state dictionary to state.json, exe.log, and error.log (never overwrites config.json)"""
+    state_path = os.path.join(DATA_DIR, "state.json")
+    exe_log_path = os.path.join(LOG_DIR, "exe.log")
+    error_log_path = os.path.join(LOG_DIR, "error.log")
     snitch_config = state["Config"]
     try:
-        if write_config:
-            with open(config_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
-                json.dump(snitch_config, json_file, indent=2, separators=(",", ": "), sort_keys=True, ensure_ascii=False)
-        del state["Config"]
         if state["Error Log"]:
-            with open(error_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
-                text_file.write("\n".join(state["Error Log"]) + "\n")
+            with open(error_log_path, "a", encoding="utf-8", errors="surrogateescape") as f:
+                f.write("\n".join(state["Error Log"]) + "\n")
         del state["Error Log"]
         if state["Exe Log"]:
-            with open(exe_log_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
-                text_file.write("\n".join(state["Exe Log"]) + "\n")
+            with open(exe_log_path, "a", encoding="utf-8", errors="surrogateescape") as f:
+                f.write("\n".join(state["Exe Log"]) + "\n")
         del state["Exe Log"]
+        del state["Config"]
         if write_record:
-            with open(record_path, "w", encoding="utf-8", errors="surrogateescape") as json_file:
-                json.dump(state, json_file, indent=2, separators=(",", ": "), sort_keys=True, ensure_ascii=False)
-    except Exception:
-        Notifier().toast("picosnitch write error", file=sys.stderr)
+            with open(state_path, "w", encoding="utf-8", errors="surrogateescape") as f:
+                json.dump(state, f, indent=2, separators=(",", ": "), sort_keys=True, ensure_ascii=False)
+    except Exception as e:
+        print(f"picosnitch write error: {type(e).__name__}{e.args}", file=sys.stderr)
     state["Config"] = snitch_config
     state["Error Log"] = []
     state["Exe Log"] = []

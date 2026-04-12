@@ -30,6 +30,7 @@ from .constants import FD_CACHE
 from .process_manager import ProcessManager
 from .subprocesses.fuse import run_fuse
 from .subprocesses.monitor import run_monitor
+from .subprocesses.notifications import run_notifications
 from .subprocesses.primary import run_primary
 from .subprocesses.secondary import run_secondary
 from .subprocesses.virustotal import run_virustotal
@@ -49,6 +50,14 @@ def run_main_loop(state: dict):
     event_recv_pipes, event_send_pipes = zip(*event_pipes)
     secondary_recv_pipe, secondary_send_pipe = multiprocessing.Pipe(duplex=False)
     q_error = multiprocessing.Queue()
+    p_notifications = ProcessManager(
+        name="snitchnotify",
+        target=run_notifications,
+        init_args=(
+            state["Config"],
+            q_error,
+        ),
+    )
     p_monitor = ProcessManager(
         name="snitchmonitor",
         target=run_monitor,
@@ -83,6 +92,7 @@ def run_main_loop(state: dict):
             event_recv_pipes,
             secondary_send_pipe,
             q_error,
+            p_notifications.q_in,
         ),
     )
     p_secondary = ProcessManager(
@@ -99,7 +109,7 @@ def run_main_loop(state: dict):
         ),
     )
     # set signals
-    subprocesses = [p_monitor, p_fuse, p_virustotal, p_primary, p_secondary]
+    subprocesses = [p_monitor, p_fuse, p_virustotal, p_primary, p_secondary, p_notifications]
 
     def clean_exit():
         _ = [p.terminate() for p in subprocesses]

@@ -237,19 +237,14 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
                 )
         except Exception:
             pass
-    # initialize bpf program - use pre-compiled object file
-    try:
-        bpf_obj_path = find_bpf_object()
-    except FileNotFoundError as e:
-        q_error.put(str(e))
-        raise
+    # pre-flight checks and BPF program init
     try:
         check_bpf_requirements()
-    except RuntimeError as e:
+    except (RuntimeError, FileNotFoundError) as e:
         q_error.put(f"BPF requirements check failed: {e}")
         raise
     try:
-        assert BPF.support_kfunc(), "BPF kfunc support check failed"
+        bpf_obj_path = find_bpf_object()
         b = BPF(obj_file=bpf_obj_path)
         b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
     except Exception as e:

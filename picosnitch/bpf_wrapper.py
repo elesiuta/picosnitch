@@ -63,25 +63,41 @@ def _check_bpf_filesystem() -> bool:
 
 def check_bpf_requirements() -> None:
     """
-    Check all BPF requirements and raise RuntimeError with helpful messages if not met.
-    Call this before attempting to load BPF programs.
+    Check all BPF requirements before starting: kernel BTF, bpf filesystem,
+    kfunc support, libbpf availability, and BPF object file.
+    Raises RuntimeError with helpful messages if anything is missing.
+    Note: does not check root/capabilities — caller is responsible for that.
     """
     errors = []
 
     # Check kernel BTF support
     if not _check_kernel_btf():
-        errors.append("Kernel BTF not found at /sys/kernel/btf/vmlinux\n  Your kernel must be built with CONFIG_DEBUG_INFO_BTF=y\n  Most modern distro kernels (5.8+) have this enabled by default")
+        errors.append("Kernel BTF not found at /sys/kernel/btf/vmlinux\n  Your kernel must be built with CONFIG_DEBUG_INFO_BTF=y")
 
     # Check BPF filesystem
     if not _check_bpf_filesystem():
         errors.append("BPF filesystem not mounted at /sys/fs/bpf\n  Try: sudo mount -t bpf bpf /sys/fs/bpf")
 
-    # Check root/capabilities
-    if os.geteuid() != 0:
-        errors.append("Must run as root (BPF requires CAP_BPF and CAP_PERFMON)\n  Try: sudo picosnitch start")
+    # Check kfunc/fentry/fexit support
+    try:
+        with open("/proc/version", "r") as f:
+            version_str = f.read()
+        match = re.search(r"Linux version (\d+)\.(\d+)", version_str)
+        if match:
+            major, minor = int(match.group(1)), int(match.group(2))
+            if (major, minor) < (5, 5):
+                errors.append("BPF fentry/fexit not supported by your kernel\n  Your kernel must have BTF support and BPF CO-RE enabled")
+    except Exception:
+        pass
 
     if errors:
         raise RuntimeError("BPF requirements not met:\n\n" + "\n\n".join(errors))
+
+    # Check libbpf availability (raises RuntimeError with install instructions)
+    LibBPF()
+
+    # Check BPF object file exists (or can be compiled)
+    find_bpf_object()
 
 
 def compile_bpf(output_path: Optional[str] = None, arch: Optional[str] = None) -> str:
@@ -499,7 +515,7 @@ class BPFObject:
         if ret != 0:
             self.libbpf.lib.bpf_object__close(self.obj)
             self.obj = None
-            raise RuntimeError(f"Failed to load BPF object into kernel (error {ret}). Check dmesg for verifier errors. Ensure kernel has BTF support (5.8+).")
+            raise RuntimeError(f"Failed to load BPF object into kernel (error {ret}). Check dmesg for verifier errors.")
 
         return self
 
@@ -787,22 +803,6 @@ class BPF:
         elif arch == "aarch64":
             return f"__arm64_sys_{syscall}"
         return f"sys_{syscall}"
-
-    @staticmethod
-    def support_kfunc() -> bool:
-        """Check if kernel supports kfunc/fentry/fexit (requires 5.5+)."""
-        try:
-            with open("/proc/version", "r") as f:
-                version_str = f.read()
-            # Extract kernel version
-            match = re.search(r"Linux version (\d+)\.(\d+)", version_str)
-            if match:
-                major, minor = int(match.group(1)), int(match.group(2))
-                return (major, minor) >= (5, 5)
-        except Exception:
-            pass
-        # Assume modern kernel if we can't determine
-        return True
 
     def __enter__(self):
         return self

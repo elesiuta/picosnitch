@@ -19,7 +19,6 @@
 
 import collections
 import importlib
-import importlib.util
 import ipaddress
 import multiprocessing
 import os
@@ -30,7 +29,7 @@ import sys
 import time
 import typing
 
-from ..constants import BASE_PATH, VERSION
+from ..constants import DATA_DIR, LOG_DIR, VERSION
 from ..process_manager import ProcessManager
 from ..types import BpfEvent
 from ..utils import get_fanotify_events, get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup, sync_vt_results
@@ -156,13 +155,13 @@ def run_secondary(state, fan_fd, p_fuse: ProcessManager, p_virustotal: ProcessMa
     # (contime text, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text)
     # (datetime_now, traffic_counter["send " + str(event)], traffic_counter["recv " + str(event)], *(proc["exe"], proc["name"], proc["cmdline"], sha256, proc["pexe"], proc["pname"], proc["pcmdline"], psha256, proc["uid"], proc["lport"], proc["rport"], proc["laddr"], proc["raddr"], proc["domain"]))
     sqlite_query = """ INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) """
-    file_path = os.path.join(BASE_PATH, "snitch.db")
-    text_path = os.path.join(BASE_PATH, "conn.log")
+    file_path = os.path.join(DATA_DIR, "picosnitch.db")
+    text_path = os.path.join(LOG_DIR, "conn.log")
     if state["Config"]["DB sql log"]:
         con = sqlite3.connect(file_path)
         cur = con.cursor()
         cur.execute(""" PRAGMA user_version """)
-        assert cur.fetchone()[0] == 3, f"Incorrect database version of snitch.db for picosnitch v{VERSION}"
+        assert cur.fetchone()[0] == 3, f"Incorrect database version of picosnitch.db for picosnitch v{VERSION}"
         cur.execute(""" DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") """ % int(state["Config"]["DB retention (days)"]))
         con.commit()
         con.close()

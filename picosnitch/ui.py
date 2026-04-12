@@ -27,26 +27,25 @@ import os
 import pwd
 import queue
 import signal
-import site
 import sqlite3
 import sys
 import textwrap
 import threading
 import time
 
-from .constants import BASE_PATH, VERSION
+from .constants import CACHE_DIR, CONFIG_DIR, DATA_DIR, RUN_DIR, VERSION
 
 
 def init_geoip():
     """init a geoip2 reader and return it (along with updating geoip db), or None if not available"""
-    with open(os.path.join(BASE_PATH, "config.json"), "r", encoding="utf-8", errors="surrogateescape") as json_file:
-        if not json.load(json_file)["GeoIP lookup"]:
+    with open(os.path.join(CONFIG_DIR, "config.json"), "r", encoding="utf-8", errors="surrogateescape") as json_file:
+        if not json.load(json_file).get("GeoIP lookup", True):
             return None
     try:
         import geoip2.database
 
         # download latest database if out of date or does not exist, then create geoip_reader
-        geoip_mmdb = os.path.join(BASE_PATH, "dbip-country-lite.mmdb")
+        geoip_mmdb = os.path.join(CACHE_DIR, "dbip-country-lite.mmdb")
         geoip_url = datetime.datetime.now().strftime("https://download.db-ip.com/free/dbip-country-lite-%Y-%m.mmdb.gz")
         if not os.path.isfile(geoip_mmdb) or datetime.datetime.fromtimestamp(os.path.getmtime(geoip_mmdb)).strftime("%Y%m") != datetime.datetime.now().strftime("%Y%m"):
             try:
@@ -79,7 +78,7 @@ def init_geoip():
 def tui_loop(stdscr: curses.window, splash: str) -> int:
     """for curses wrapper"""
     # thread for querying database
-    file_path = os.path.join(BASE_PATH, "snitch.db")
+    file_path = os.path.join(DATA_DIR, "picosnitch.db")
     q_query_results = queue.Queue()
     kill_thread_query = threading.Event()
 
@@ -284,14 +283,14 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
             thread_query.start()
             # check daemon pid for status bar
             try:
-                with open("/run/picosnitch.pid", "r") as f:
+                with open(os.path.join(RUN_DIR, "picosnitch.pid"), "r") as f:
                     run_status = "pid: " + f.read().strip()
             except Exception:
                 run_status = "not running"
             print(f"\033]0;picosnitch v{VERSION} ({run_status})\a", end="", flush=True)
             # check if any new virustotal results
             try:
-                with open(os.path.join(BASE_PATH, "record.json"), "r") as f:
+                with open(os.path.join(DATA_DIR, "state.json"), "r") as f:
                     sha256_record = json.load(f)["SHA256"]
                 for exe, hashes in sha256_record.items():
                     for sha256, status in hashes.items():
@@ -500,12 +499,12 @@ def tui_init() -> int:
     Loading database ...
     """)
     # init sql connection
-    file_path = os.path.join(BASE_PATH, "snitch.db")
+    file_path = os.path.join(DATA_DIR, "picosnitch.db")
     con = sqlite3.connect(file_path, timeout=15)
     # check for table
     cur = con.cursor()
     cur.execute(""" PRAGMA user_version """)
-    assert cur.fetchone()[0] == 3, f"Incorrect database version of snitch.db for picosnitch v{VERSION}"
+    assert cur.fetchone()[0] == 3, f"Incorrect database version of picosnitch.db for picosnitch v{VERSION}"
     con.close()
     # start curses
     for err_count in reversed(range(30)):
@@ -519,14 +518,6 @@ def tui_init() -> int:
 
 def web_dashboard():
     """gui with plotly dash"""
-    site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
-    site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
-    site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash-bootstrap-components/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
-    site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash-bootstrap-components/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
-    site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/dash-bootstrap-templates/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
-    site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/dash-bootstrap-templates/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
-    site.addsitedir(os.path.expanduser(f"~/.local/pipx/venvs/geoip2/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
-    site.addsitedir(os.path.expandvars(f"$PIPX_HOME/venvs/geoip2/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"))
     import pandas as pd
     import pandas.io.sql as psql
     import plotly.express as px
@@ -534,9 +525,9 @@ def web_dashboard():
     from dash.dependencies import Input, Output, State
     from dash.exceptions import PreventUpdate
 
-    with open(os.path.join(BASE_PATH, "config.json"), "r", encoding="utf-8", errors="surrogateescape") as json_file:
+    with open(os.path.join(CONFIG_DIR, "config.json"), "r", encoding="utf-8", errors="surrogateescape") as json_file:
         config = json.load(json_file)
-    file_path = os.path.join(BASE_PATH, "snitch.db")
+    file_path = os.path.join(DATA_DIR, "picosnitch.db")
     all_dims = ["exe", "name", "cmdline", "sha256", "uid", "lport", "rport", "laddr", "raddr", "domain", "pexe", "pname", "pcmdline", "psha256"]
     dim_labels = {
         "exe": "Executable",
@@ -630,7 +621,7 @@ def web_dashboard():
 
     def serve_layout():
         try:
-            with open("/run/picosnitch.pid", "r") as f:
+            with open(os.path.join(RUN_DIR, "picosnitch.pid"), "r") as f:
                 run_status = "pid: " + f.read().strip()
         except Exception:
             run_status = "not running"
