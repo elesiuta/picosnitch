@@ -22,7 +22,6 @@ import importlib
 import ipaddress
 import logging
 import multiprocessing
-import os
 import pickle
 import shlex
 import sqlite3
@@ -170,8 +169,8 @@ def run_secondary(config: Config, state, fan_fd, p_fuse: ProcessManager, p_virus
     # (contime text, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text)
     # (datetime_now, traffic_counter["send " + str(event)], traffic_counter["recv " + str(event)], *(proc["exe"], proc["name"], proc["cmdline"], sha256, proc["pexe"], proc["pname"], proc["pcmdline"], psha256, proc["uid"], proc["lport"], proc["rport"], proc["laddr"], proc["raddr"], proc["domain"]))
     sqlite_query = """ INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) """
-    file_path = os.path.join(DATA_DIR, "picosnitch.db")
-    text_path = os.path.join(LOG_DIR, "conn.log")
+    file_path = DATA_DIR / "picosnitch.db"
+    text_path = LOG_DIR / "conn.log"
     if config.database.enabled:
         con = sqlite3.connect(file_path)
         cur = con.cursor()

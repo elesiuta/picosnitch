@@ -18,12 +18,12 @@
 # https://github.com/elesiuta/picosnitch
 
 import logging
-import os
 import resource
 import sys
 import time
 import tomllib
 import typing
+from pathlib import Path
 
 import psutil
 
@@ -39,15 +39,15 @@ if not sys.platform.startswith("linux"):
     sys.exit(1)
 
 # FHS standard paths
-CONFIG_DIR: typing.Final[str] = "/etc/picosnitch"
-DATA_DIR: typing.Final[str] = "/var/lib/picosnitch"
-LOG_DIR: typing.Final[str] = "/var/log/picosnitch"
-RUN_DIR: typing.Final[str] = "/run/picosnitch"
-CACHE_DIR: typing.Final[str] = "/var/cache/picosnitch"
+CONFIG_DIR: typing.Final[Path] = Path("/etc/picosnitch")
+DATA_DIR: typing.Final[Path] = Path("/var/lib/picosnitch")
+LOG_DIR: typing.Final[Path] = Path("/var/log/picosnitch")
+RUN_DIR: typing.Final[Path] = Path("/run/picosnitch")
+CACHE_DIR: typing.Final[Path] = Path("/var/cache/picosnitch")
 
 # set RLIMIT_NOFILE if configured
 try:
-    file_path = os.path.join(CONFIG_DIR, "config.toml")
+    file_path = CONFIG_DIR / "config.toml"
     with open(file_path, "rb") as toml_file:
         nofile = tomllib.load(toml_file).get("monitoring", {}).get("rlimit_nofile")
     if isinstance(nofile, int):
@@ -67,10 +67,10 @@ try:
     for part in psutil.disk_partitions():
         if part.fstype == "btrfs":
             st_dev_mask = 0
-            if not os.path.exists(os.path.join(CONFIG_DIR, "config.toml")):
+            if not (CONFIG_DIR / "config.toml").exists():
                 logging.warning("running picosnitch on systems with btrfs is not fully supported due to dev number strangeness and non-unique inodes (this is still fine for most use cases)")
             break
-    file_path = os.path.join(CONFIG_DIR, "config.toml")
+    file_path = CONFIG_DIR / "config.toml"
     with open(file_path, "rb") as toml_file:
         set_mask = tomllib.load(toml_file).get("monitoring", {}).get("st_dev_mask")
     if isinstance(set_mask, int):

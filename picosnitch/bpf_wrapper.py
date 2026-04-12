@@ -13,6 +13,8 @@ import os
 import platform
 import re
 import subprocess
+import sys
+from pathlib import Path
 from typing import Callable, Dict, Optional
 
 
@@ -53,12 +55,12 @@ def _get_install_instructions() -> str:
 
 def _check_kernel_btf() -> bool:
     """Check if kernel has BTF support."""
-    return os.path.exists("/sys/kernel/btf/vmlinux")
+    return Path("/sys/kernel/btf/vmlinux").exists()
 
 
 def _check_bpf_filesystem() -> bool:
     """Check if BPF filesystem is mounted."""
-    return os.path.exists("/sys/fs/bpf")
+    return Path("/sys/fs/bpf").exists()
 
 
 def check_bpf_requirements() -> None:
@@ -123,19 +125,19 @@ def compile_bpf(output_path: Optional[str] = None, arch: Optional[str] = None) -
     }
     bpf_target_arch = arch_to_bpf_target.get(arch, arch)
 
-    bpf_src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bpf")
-    bpf_src = os.path.join(bpf_src_dir, "picosnitch.bpf.c")
-    vmlinux_h = os.path.join(bpf_src_dir, "vmlinux.h")
+    bpf_src_dir = Path(__file__).resolve().parent / "bpf"
+    bpf_src = bpf_src_dir / "picosnitch.bpf.c"
+    vmlinux_h = bpf_src_dir / "vmlinux.h"
 
     if output_path is None:
-        output_path = os.path.join(bpf_src_dir, "picosnitch.bpf.o")
+        output_path = str(bpf_src_dir / "picosnitch.bpf.o")
 
-    if not os.path.exists(bpf_src):
+    if not bpf_src.exists():
         raise FileNotFoundError(f"BPF source not found: {bpf_src}")
 
     # Generate vmlinux.h if not present
-    if not os.path.exists(vmlinux_h):
-        if not os.path.exists("/sys/kernel/btf/vmlinux"):
+    if not vmlinux_h.exists():
+        if not Path("/sys/kernel/btf/vmlinux").exists():
             raise RuntimeError("Cannot generate vmlinux.h: /sys/kernel/btf/vmlinux not found.\nYour kernel must be built with CONFIG_DEBUG_INFO_BTF=y")
         try:
             result = subprocess.run(["bpftool", "btf", "dump", "file", "/sys/kernel/btf/vmlinux", "format", "c"], capture_output=True, text=True, check=True)
@@ -158,9 +160,9 @@ def compile_bpf(output_path: Optional[str] = None, arch: Optional[str] = None) -
         "-Werror",
         f"-I{bpf_src_dir}",
         "-c",
-        bpf_src,
+        str(bpf_src),
         "-o",
-        output_path,
+        str(output_path),
     ]
     try:
         subprocess.run(clang_cmd, capture_output=True, text=True, check=True)
@@ -171,7 +173,7 @@ def compile_bpf(output_path: Optional[str] = None, arch: Optional[str] = None) -
 
     # Strip debug info to reduce size
     try:
-        subprocess.run(["llvm-strip", "-g", output_path], capture_output=True, check=True)
+        subprocess.run(["llvm-strip", "-g", str(output_path)], capture_output=True, check=True)
     except (FileNotFoundError, subprocess.CalledProcessError):
         pass  # Non-fatal: llvm-strip is optional
 
@@ -188,24 +190,23 @@ def find_bpf_object() -> str:
     arch = platform.machine()
     bpf_filename = "picosnitch.bpf.o"
     bpf_filename_arch = f"picosnitch.bpf.{arch}.o"
-    _pkg_dir = os.path.dirname(os.path.abspath(__file__))
-    import sys
+    _pkg_dir = Path(__file__).resolve().parent
 
     search_paths = [
-        os.path.join(_pkg_dir, "bpf", bpf_filename_arch),
-        os.path.join(_pkg_dir, "bpf", bpf_filename),
-        f"/usr/share/picosnitch/bpf/{bpf_filename_arch}",
-        f"/usr/share/picosnitch/bpf/{bpf_filename}",
-        os.path.join(sys.prefix, "share", "picosnitch", "bpf", bpf_filename_arch),
-        os.path.join(sys.prefix, "share", "picosnitch", "bpf", bpf_filename),
+        _pkg_dir / "bpf" / bpf_filename_arch,
+        _pkg_dir / "bpf" / bpf_filename,
+        Path("/usr/share/picosnitch/bpf") / bpf_filename_arch,
+        Path("/usr/share/picosnitch/bpf") / bpf_filename,
+        Path(sys.prefix) / "share" / "picosnitch" / "bpf" / bpf_filename_arch,
+        Path(sys.prefix) / "share" / "picosnitch" / "bpf" / bpf_filename,
     ]
     for path in search_paths:
-        if os.path.exists(path):
-            return path
+        if path.exists():
+            return str(path)
 
     # Fallback: compile from source
-    bpf_src = os.path.join(_pkg_dir, "bpf", "picosnitch.bpf.c")
-    if os.path.exists(bpf_src):
+    bpf_src = _pkg_dir / "bpf" / "picosnitch.bpf.c"
+    if bpf_src.exists():
         return compile_bpf()
 
     raise FileNotFoundError(f"BPF object file not found for {arch}. Searched: {search_paths}")
@@ -324,7 +325,7 @@ class LibBPF:
                 "/lib64/libbpf.so.1",  # Older Fedora
             ]
             for path in common_paths:
-                if os.path.exists(path):
+                if Path(path).exists():
                     libbpf_path = path
                     break
 

@@ -23,7 +23,6 @@ import datetime
 import ipaddress
 import json
 import logging
-import os
 import pwd
 import queue
 import sqlite3
@@ -45,29 +44,30 @@ def init_geoip():
         import geoip2.database
 
         # download latest database if out of date or does not exist, then create geoip_reader
-        geoip_mmdb = os.path.join(CACHE_DIR, "dbip-country-lite.mmdb")
+        geoip_mmdb = CACHE_DIR / "dbip-country-lite.mmdb"
+        geoip_mmdb_gz = CACHE_DIR / "dbip-country-lite.mmdb.gz"
         geoip_url = datetime.datetime.now().strftime("https://download.db-ip.com/free/dbip-country-lite-%Y-%m.mmdb.gz")
-        if not os.path.isfile(geoip_mmdb) or datetime.datetime.fromtimestamp(os.path.getmtime(geoip_mmdb)).strftime("%Y%m") != datetime.datetime.now().strftime("%Y%m"):
+        if not geoip_mmdb.is_file() or datetime.datetime.fromtimestamp(geoip_mmdb.stat().st_mtime).strftime("%Y%m") != datetime.datetime.now().strftime("%Y%m"):
             try:
                 import urllib.request
 
                 try:
                     request = urllib.request.Request(geoip_url, headers={"User-Agent": "Mozilla/5.0"})
-                    with urllib.request.urlopen(request) as response, open(geoip_mmdb + ".gz", "wb") as f:
+                    with urllib.request.urlopen(request) as response, open(geoip_mmdb_gz, "wb") as f:
                         f.write(response.read())
                 except Exception:
                     # try previous month if current month is not available
                     geoip_url = (datetime.datetime.now() - datetime.timedelta(days=30)).strftime("https://download.db-ip.com/free/dbip-country-lite-%Y-%m.mmdb.gz")
                     request = urllib.request.Request(geoip_url, headers={"User-Agent": "Mozilla/5.0"})
-                    with urllib.request.urlopen(request) as response, open(geoip_mmdb + ".gz", "wb") as f:
+                    with urllib.request.urlopen(request) as response, open(geoip_mmdb_gz, "wb") as f:
                         f.write(response.read())
                 import gzip
 
-                with gzip.open(geoip_mmdb + ".gz", "rb") as f_in, open(geoip_mmdb, "wb") as f_out:
+                with gzip.open(geoip_mmdb_gz, "rb") as f_in, open(geoip_mmdb, "wb") as f_out:
                     f_out.write(f_in.read())
-                os.remove(geoip_mmdb + ".gz")
+                geoip_mmdb_gz.unlink()
             except Exception:
-                if not os.path.isfile(geoip_mmdb):
+                if not geoip_mmdb.is_file():
                     raise Exception("Could not download GeoIP database")
                 logging.warning("Could not update GeoIP database, using old version")
         return geoip2.database.Reader(geoip_mmdb)
@@ -78,7 +78,7 @@ def init_geoip():
 def tui_loop(stdscr: curses.window, splash: str) -> int:
     """for curses wrapper"""
     # thread for querying database
-    file_path = os.path.join(DATA_DIR, "picosnitch.db")
+    file_path = DATA_DIR / "picosnitch.db"
     q_query_results = queue.Queue()
     kill_thread_query = threading.Event()
 
@@ -283,14 +283,14 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
             thread_query.start()
             # check daemon pid for status bar
             try:
-                with open(os.path.join(RUN_DIR, "picosnitch.pid"), "r") as f:
+                with open(RUN_DIR / "picosnitch.pid", "r") as f:
                     run_status = "pid: " + f.read().strip()
             except Exception:
                 run_status = "not running"
             print(f"\033]0;picosnitch v{VERSION} ({run_status})\a", end="", flush=True)
             # check if any new virustotal results
             try:
-                with open(os.path.join(DATA_DIR, "state.json"), "r") as f:
+                with open(DATA_DIR / "state.json", "r") as f:
                     sha256_record = json.load(f)["SHA256"]
                 for exe, hashes in sha256_record.items():
                     for sha256, status in hashes.items():
@@ -499,7 +499,7 @@ def tui_init() -> int:
     Loading database ...
     """)
     # init sql connection
-    file_path = os.path.join(DATA_DIR, "picosnitch.db")
+    file_path = DATA_DIR / "picosnitch.db"
     con = sqlite3.connect(file_path, timeout=15)
     # check for table
     cur = con.cursor()

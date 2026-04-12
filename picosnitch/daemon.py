@@ -23,12 +23,13 @@ import os
 import signal
 import sys
 import time
+from pathlib import Path
 
 
 class Daemon:
     """A generic daemon class based on http://www.jejik.com/files/examples/daemon3x.py"""
 
-    def __init__(self, pidfile):
+    def __init__(self, pidfile: Path):
         self.pidfile = pidfile
 
     def daemonize(self):
@@ -70,7 +71,7 @@ class Daemon:
             f.write(pid + "\n")
 
     def delpid(self):
-        os.remove(self.pidfile)
+        self.pidfile.unlink(missing_ok=True)
 
     def getpid(self):
         """Get the pid from the pidfile"""
@@ -108,8 +109,8 @@ class Daemon:
         except OSError as err:
             e = str(err.args)
             if e.find("No such process") > 0:
-                if os.path.exists(self.pidfile):
-                    os.remove(self.pidfile)
+                if self.pidfile.exists():
+                    self.pidfile.unlink()
             else:
                 logging.error(f"{err.args}")
                 sys.exit(1)

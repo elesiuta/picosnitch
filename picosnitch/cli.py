@@ -25,6 +25,7 @@ import sqlite3
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 from .config import load_config, write_default_config
 from .constants import CACHE_DIR, CONFIG_DIR, DATA_DIR, LOG_DIR, RUN_DIR, VERSION
@@ -38,7 +39,7 @@ from .utils import apply_data_permissions, load_state
 def check_root(cmd: str) -> int | None:
     """check for root privileges, return exit code on failure"""
     if os.getuid() != 0:
-        logging.error(f"This command requires root. Try: sudo {os.path.abspath(sys.argv[0])} {cmd}")
+        logging.error(f"This command requires root. Try: sudo {Path(sys.argv[0]).resolve()} {cmd}")
         return 1
     return None
 
@@ -63,10 +64,10 @@ def check_bpf() -> int | None:
 
 def check_database() -> int | None:
     """check database exists and has correct version, return exit code on failure"""
-    db_path = os.path.join(DATA_DIR, "picosnitch.db")
-    if not os.path.exists(db_path):
+    db_path = DATA_DIR / "picosnitch.db"
+    if not db_path.exists():
         logging.error(f"Database not found: {db_path}")
-        logging.error(f"Run: sudo {os.path.abspath(sys.argv[0])} init")
+        logging.error(f"Run: sudo {Path(sys.argv[0]).resolve()} init")
         return 1
     con = sqlite3.connect(db_path)
     cur = con.cursor()
@@ -82,12 +83,12 @@ def check_database() -> int | None:
 def init_dirs_and_config() -> None:
     """create FHS directories, write default config, and create database if missing"""
     for d in [CONFIG_DIR, DATA_DIR, LOG_DIR, RUN_DIR, CACHE_DIR]:
-        os.makedirs(d, exist_ok=True)
-    config_path = os.path.join(CONFIG_DIR, "config.toml")
-    if not os.path.exists(config_path):
+        d.mkdir(parents=True, exist_ok=True)
+    config_path = CONFIG_DIR / "config.toml"
+    if not config_path.exists():
         write_default_config(config_path)
-    db_path = os.path.join(DATA_DIR, "picosnitch.db")
-    if not os.path.exists(db_path):
+    db_path = DATA_DIR / "picosnitch.db"
+    if not db_path.exists():
         con = sqlite3.connect(db_path)
         cur = con.cursor()
         cur.execute(""" CREATE TABLE connections
@@ -104,7 +105,7 @@ def main():
     config = load_config()
     state = load_state()
     # start picosnitch process monitor
-    pid_file = os.path.join(RUN_DIR, "picosnitch.pid")
+    pid_file = RUN_DIR / "picosnitch.pid"
     with open(pid_file, "r") as f:
         pid = int(f.read().strip())
     if pid != os.getpid():
@@ -115,7 +116,7 @@ def main():
 
 def start_picosnitch():
     """command line interface, pre-startup checks, and run"""
-    pid_file = os.path.join(RUN_DIR, "picosnitch.pid")
+    pid_file = RUN_DIR / "picosnitch.pid"
 
     class PicoDaemon(Daemon):
         def run(self):
@@ -130,7 +131,7 @@ def start_picosnitch():
 
     website: https://github.com/elesiuta/picosnitch
     version: {VERSION}
-    entrypoint: {os.path.abspath(sys.argv[0])}
+    entrypoint: {Path(sys.argv[0]).resolve()}
     config: {CONFIG_DIR}
     data: {DATA_DIR}
     logs: {LOG_DIR}
@@ -206,7 +207,7 @@ def start_picosnitch():
         return 0
     elif cmd == "version":
         print(f"version: {VERSION}")
-        print(f"entrypoint: {os.path.abspath(sys.argv[0])}")
+        print(f"entrypoint: {Path(sys.argv[0]).resolve()}")
         print(f"config: {CONFIG_DIR}")
         print(f"data: {DATA_DIR}")
         print(f"logs: {LOG_DIR}")
@@ -232,7 +233,7 @@ def start_picosnitch():
     elif cmd == "stop":
         if err := check_root(cmd):
             return err
-        if os.path.exists("/usr/lib/systemd/system/picosnitch.service") or os.path.exists("/etc/systemd/system/picosnitch.service"):
+        if Path("/usr/lib/systemd/system/picosnitch.service").exists() or Path("/etc/systemd/system/picosnitch.service").exists():
             logging.info("Found picosnitch.service but you are not using systemctl")
             if sys.stdin.isatty():
                 confirm = input(f"Did you intend to run `systemctl {cmd} picosnitch` (y/N)? ")
@@ -252,7 +253,7 @@ def start_picosnitch():
             return err
         # offer systemctl for start/restart
         if cmd in ("start", "restart"):
-            if os.path.exists("/usr/lib/systemd/system/picosnitch.service") or os.path.exists("/etc/systemd/system/picosnitch.service"):
+            if Path("/usr/lib/systemd/system/picosnitch.service").exists() or Path("/etc/systemd/system/picosnitch.service").exists():
                 logging.info("Found picosnitch.service but you are not using systemctl")
                 if sys.stdin.isatty():
                     confirm = input(f"Did you intend to run `systemctl {cmd} picosnitch` (y/N)? ")
@@ -285,18 +286,18 @@ def start_picosnitch():
             logging.info("restarting picosnitch daemon")
             PicoDaemon(pid_file).restart()
         elif cmd == "start-no-daemon":
-            if os.path.exists(pid_file):
+            if pid_file.exists():
                 logging.error(f"pid file already exists: {pid_file}")
                 return 1
 
             def delpid():
                 try:
-                    os.remove(pid_file)
+                    pid_file.unlink()
                 except FileNotFoundError:
                     pass
 
             atexit.register(delpid)
-            os.makedirs(RUN_DIR, exist_ok=True)
+            RUN_DIR.mkdir(parents=True, exist_ok=True)
             with open(pid_file, "w") as f:
                 f.write(str(os.getpid()) + "\n")
             logging.info("starting picosnitch in simple mode")

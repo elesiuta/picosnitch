@@ -33,6 +33,7 @@ import socket
 import sys
 import termios
 import typing
+from pathlib import Path
 
 from .config import load_config
 from .constants import DATA_DIR, LOG_DIR, PID_CACHE, ST_DEV_MASK
@@ -73,10 +74,10 @@ def resolve_group(group: str) -> int:
         return grp.getgrnam(group).gr_gid
 
 
-def apply_data_permissions(config_dir: str, data_dir: str, log_dir: str, cache_dir: str) -> None:
+def apply_data_permissions(config_dir: Path, data_dir: Path, log_dir: Path, cache_dir: Path) -> None:
     """Apply configured ownership and permissions to data, log, and cache directories."""
-    config_path = os.path.join(config_dir, "config.toml")
-    if not os.path.exists(config_path):
+    config_path = config_dir / "config.toml"
+    if not config_path.exists():
         return
     config = load_config(config_dir)
     uid = resolve_owner(config.data.owner)
@@ -84,13 +85,12 @@ def apply_data_permissions(config_dir: str, data_dir: str, log_dir: str, cache_d
     mode = int(config.data.mode, 8)
     dir_mode = mode | 0o111  # add execute bits for directories
     for d in [data_dir, log_dir, cache_dir]:
-        os.chmod(d, dir_mode)
+        d.chmod(dir_mode)
         os.chown(d, uid, gid)
-        for entry in os.listdir(d):
-            path = os.path.join(d, entry)
-            if os.path.isfile(path) and not os.path.islink(path):
-                os.chmod(path, mode)
-                os.chown(path, uid, gid)
+        for entry in d.iterdir():
+            if entry.is_file() and not entry.is_symlink():
+                entry.chmod(mode)
+                os.chown(entry, uid, gid)
 
 
 def load_state() -> dict:
@@ -105,8 +105,8 @@ def load_state() -> dict:
         "SHA256": {},
     }
     data = {k: v for k, v in template.items()}
-    state_path = os.path.join(DATA_DIR, "state.json")
-    if os.path.exists(state_path):
+    state_path = DATA_DIR / "state.json"
+    if state_path.exists():
         with open(state_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             state_record = json.load(json_file)
         for key in ["Executables", "Names", "Parent Executables", "Parent Names", "SHA256"]:
@@ -120,9 +120,9 @@ def load_state() -> dict:
 
 def save_state(state: dict, write_record: bool = True) -> None:
     """write the state dictionary to state.json, exe.log, and error.log"""
-    state_path = os.path.join(DATA_DIR, "state.json")
-    exe_log_path = os.path.join(LOG_DIR, "exe.log")
-    error_log_path = os.path.join(LOG_DIR, "error.log")
+    state_path = DATA_DIR / "state.json"
+    exe_log_path = LOG_DIR / "exe.log"
+    error_log_path = LOG_DIR / "error.log"
     try:
         if state["Error Log"]:
             with open(error_log_path, "a", encoding="utf-8", errors="surrogateescape") as f:

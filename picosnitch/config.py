@@ -21,6 +21,7 @@ import dataclasses
 import logging
 import os
 import tomllib
+from pathlib import Path
 
 from .constants import CONFIG_DIR
 
@@ -137,11 +138,11 @@ def _dump_toml(config: Config) -> str:
     return "\n".join(lines)
 
 
-def load_config(config_dir: str = CONFIG_DIR) -> Config:
+def load_config(config_dir: Path = CONFIG_DIR) -> Config:
     """Load config from config.toml, merging with defaults."""
-    config_path = os.path.join(config_dir, "config.toml")
+    config_path = config_dir / "config.toml"
     config = Config()
-    if os.path.exists(config_path):
+    if config_path.exists():
         with open(config_path, "rb") as f:
             raw = tomllib.load(f)
         for section_field in dataclasses.fields(config):
@@ -158,7 +159,7 @@ def load_config(config_dir: str = CONFIG_DIR) -> Config:
     return config
 
 
-def write_default_config(config_path: str) -> None:
+def write_default_config(config_path: Path) -> None:
     """Write the default config to a TOML file."""
     with open(config_path, "w", encoding="utf-8") as f:
         f.write(_dump_toml(Config()))

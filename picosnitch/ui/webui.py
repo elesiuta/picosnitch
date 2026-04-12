@@ -41,7 +41,7 @@ def web_dashboard():
     from dash.exceptions import PreventUpdate
 
     config = load_config()
-    file_path = os.path.join(DATA_DIR, "picosnitch.db")
+    file_path = DATA_DIR / "picosnitch.db"
     all_dims = ["exe", "name", "cmdline", "sha256", "uid", "lport", "rport", "laddr", "raddr", "domain", "pexe", "pname", "pcmdline", "psha256"]
     dim_labels = {
         "exe": "Executable",
@@ -135,7 +135,7 @@ def web_dashboard():
 
     def serve_layout():
         try:
-            with open(os.path.join(RUN_DIR, "picosnitch.pid"), "r") as f:
+            with open(RUN_DIR / "picosnitch.pid", "r") as f:
                 run_status = "pid: " + f.read().strip()
         except Exception:
             run_status = "not running"
