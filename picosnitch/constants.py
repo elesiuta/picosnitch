@@ -18,6 +18,7 @@
 # https://github.com/elesiuta/picosnitch
 
 import logging
+import os
 import resource
 import sys
 import time
@@ -38,12 +39,13 @@ if not sys.platform.startswith("linux"):
     logging.error("Did not detect a supported operating system")
     sys.exit(1)
 
-# FHS standard paths
-CONFIG_DIR: typing.Final[Path] = Path("/etc/picosnitch")
-DATA_DIR: typing.Final[Path] = Path("/var/lib/picosnitch")
-LOG_DIR: typing.Final[Path] = Path("/var/log/picosnitch")
-RUN_DIR: typing.Final[Path] = Path("/run/picosnitch")
-CACHE_DIR: typing.Final[Path] = Path("/var/cache/picosnitch")
+# FHS standard paths (PICOSNITCH_ROOT is used as a prefix for testing)
+_root: str = os.getenv("PICOSNITCH_ROOT", "")
+CONFIG_DIR: typing.Final[Path] = Path(f"{_root}/etc/picosnitch")
+DATA_DIR: typing.Final[Path] = Path(f"{_root}/var/lib/picosnitch")
+LOG_DIR: typing.Final[Path] = Path(f"{_root}/var/log/picosnitch")
+RUN_DIR: typing.Final[Path] = Path(f"{_root}/run/picosnitch")
+CACHE_DIR: typing.Final[Path] = Path(f"{_root}/var/cache/picosnitch")
 
 # set RLIMIT_NOFILE if configured
 try:

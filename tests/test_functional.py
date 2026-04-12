@@ -26,13 +26,16 @@ import pytest
 PICOSNITCH_DIR = Path(__file__).parent.parent
 PYTHON_EXE = sys.executable
 
+# Use a root prefix so tests don't touch the real picosnitch directories
+TEST_ROOT = "/tmp/picosnitch-test"
+os.environ["PICOSNITCH_ROOT"] = TEST_ROOT
 
-# FHS standard paths
-CONFIG_DIR = Path("/etc/picosnitch")
-DATA_DIR = Path("/var/lib/picosnitch")
-LOG_DIR = Path("/var/log/picosnitch")
-RUN_DIR = Path("/run/picosnitch")
-CACHE_DIR = Path("/var/cache/picosnitch")
+# FHS standard paths (under test root)
+CONFIG_DIR = Path(f"{TEST_ROOT}/etc/picosnitch")
+DATA_DIR = Path(f"{TEST_ROOT}/var/lib/picosnitch")
+LOG_DIR = Path(f"{TEST_ROOT}/var/log/picosnitch")
+RUN_DIR = Path(f"{TEST_ROOT}/run/picosnitch")
+CACHE_DIR = Path(f"{TEST_ROOT}/var/cache/picosnitch")
 
 # Test configuration
 DB_WRITE_LIMIT = 5  # seconds - we set this in config
@@ -60,33 +63,11 @@ def find_executable(name: str) -> str:
     return None
 
 
-def backup_config():
-    """Backup existing picosnitch config if it exists."""
-    backup_dir = CONFIG_DIR.parent / "picosnitch_backup"
-    if CONFIG_DIR.exists():
-        if backup_dir.exists():
-            shutil.rmtree(backup_dir)
-        shutil.copytree(CONFIG_DIR, backup_dir)
-    return backup_dir
-
-
-def restore_config(backup_dir: Path):
-    """Restore picosnitch config from backup."""
-    if backup_dir.exists():
-        if CONFIG_DIR.exists():
-            shutil.rmtree(CONFIG_DIR)
-        shutil.copytree(backup_dir, CONFIG_DIR)
-        shutil.rmtree(backup_dir)
-    # also clean up data/log dirs created during tests
-    for d in [DATA_DIR, LOG_DIR, RUN_DIR, CACHE_DIR]:
-        if d.exists():
-            shutil.rmtree(d)
-
-
-def clear_config():
-    """Clear picosnitch config directory for fresh test."""
-    if CONFIG_DIR.exists():
-        shutil.rmtree(CONFIG_DIR)
+def clean_test_dirs():
+    """Remove and recreate test directories for a fresh test."""
+    test_root = Path(TEST_ROOT)
+    if test_root.exists():
+        shutil.rmtree(test_root)
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -191,9 +172,8 @@ def picosnitch_session():
     if os.geteuid() != 0:
         pytest.skip("Tests require root privileges. Run with: sudo uv run pytest tests/test_functional.py -v")
 
-    backup_dir = backup_config()
     stop_existing_picosnitch()
-    clear_config()
+    clean_test_dirs()
 
     # Init directories
     subprocess.run([PYTHON_EXE, "-m", "picosnitch", "init"], capture_output=True, timeout=30)
@@ -203,7 +183,10 @@ def picosnitch_session():
     yield proc
 
     stop_picosnitch(proc)
-    restore_config(backup_dir)
+    # Clean up test root
+    test_root = Path(TEST_ROOT)
+    if test_root.exists():
+        shutil.rmtree(test_root)
 
 
 class TestShortLivedProcesses:
