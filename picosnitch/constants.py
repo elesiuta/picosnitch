@@ -58,3 +58,25 @@ try:
 except Exception:
     pass
 ST_DEV_MASK: typing.Final[int] = st_dev_mask
+
+# database schema version and table definitions
+DB_VERSION: typing.Final[int] = 4
+SCHEMA_EXECUTABLES: typing.Final[str] = """
+    id INTEGER PRIMARY KEY,
+    exe TEXT NOT NULL,
+    name TEXT NOT NULL,
+    cmdline TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    UNIQUE(exe, name, cmdline, sha256)"""
+SCHEMA_CONNECTIONS: typing.Final[str] = """
+    contime INTEGER NOT NULL,
+    send INTEGER NOT NULL,
+    recv INTEGER NOT NULL,
+    exe_id INTEGER NOT NULL,
+    pexe_id INTEGER NOT NULL,
+    uid INTEGER NOT NULL,
+    lport INTEGER NOT NULL,
+    rport INTEGER NOT NULL,
+    laddr TEXT NOT NULL DEFAULT '',
+    raddr TEXT NOT NULL DEFAULT '',
+    domain TEXT NOT NULL DEFAULT ''"""

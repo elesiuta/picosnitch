@@ -12,7 +12,7 @@ import textwrap
 from pathlib import Path
 
 from .config import load_config, write_default_config
-from .constants import CACHE_DIR, CONFIG_DIR, DATA_DIR, LOG_DIR, RUN_DIR, VERSION
+from .constants import CACHE_DIR, CONFIG_DIR, DATA_DIR, DB_VERSION, LOG_DIR, RUN_DIR, SCHEMA_CONNECTIONS, SCHEMA_EXECUTABLES, VERSION
 from .daemon import Daemon
 from .main_loop import run_main_loop
 from .ui.tui import tui_init
@@ -58,8 +58,8 @@ def check_database() -> int:
     cur.execute(""" PRAGMA user_version """)
     user_version = cur.fetchone()[0]
     con.close()
-    if user_version != 4:
-        logging.error(f"Unsupported database version {user_version}, expected 4")
+    if user_version != DB_VERSION:
+        logging.error(f"Unsupported database version {user_version}, expected {DB_VERSION}")
         return 1
     return 0
 
@@ -75,30 +75,15 @@ def init_dirs_and_config() -> None:
     if not db_path.exists():
         con = sqlite3.connect(db_path)
         cur = con.cursor()
-        cur.execute(""" CREATE TABLE executables (
-                        id INTEGER PRIMARY KEY,
-                        exe TEXT NOT NULL,
-                        name TEXT NOT NULL,
-                        cmdline TEXT NOT NULL,
-                        sha256 TEXT NOT NULL,
-                        UNIQUE(exe, name, cmdline, sha256)) """)
-        cur.execute(""" CREATE TABLE connections (
-                        contime INTEGER NOT NULL,
-                        send INTEGER NOT NULL,
-                        recv INTEGER NOT NULL,
-                        exe_id INTEGER NOT NULL REFERENCES executables(id),
-                        pexe_id INTEGER NOT NULL REFERENCES executables(id),
-                        uid INTEGER NOT NULL,
-                        lport INTEGER NOT NULL,
-                        rport INTEGER NOT NULL,
-                        laddr TEXT NOT NULL DEFAULT '',
-                        raddr TEXT NOT NULL DEFAULT '',
-                        domain TEXT NOT NULL DEFAULT '') """)
-        cur.execute(""" CREATE INDEX idx_contime ON connections(contime) """)
-        cur.execute(""" CREATE INDEX idx_exe_id ON connections(exe_id) """)
-        cur.execute(""" CREATE INDEX idx_pexe_id ON connections(pexe_id) """)
-        cur.execute(""" PRAGMA journal_mode=WAL """)
-        cur.execute(""" PRAGMA user_version = 4 """)
+        cur.execute(f"CREATE TABLE executables ({SCHEMA_EXECUTABLES})")
+        cur.execute(f"""CREATE TABLE connections (
+            {SCHEMA_CONNECTIONS},
+            FOREIGN KEY (exe_id) REFERENCES executables(id),
+            FOREIGN KEY (pexe_id) REFERENCES executables(id))""")
+        cur.execute("CREATE INDEX idx_contime ON connections(contime)")
+        cur.execute("CREATE INDEX idx_exe_id_contime ON connections(exe_id, contime)")
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute(f"PRAGMA user_version = {DB_VERSION}")
         con.commit()
         con.close()
     apply_data_permissions(CONFIG_DIR, DATA_DIR, LOG_DIR, CACHE_DIR)
@@ -275,32 +260,19 @@ def start_picosnitch() -> int:
         config = load_config()
         if sql_kwargs := dict(config.database.remote):
             sql_client = sql_kwargs.pop("client", "no client error")
-            table_name = sql_kwargs.pop("table_name", "connections")
+            conn_table = sql_kwargs.pop("connections_table", "connections")
+            exe_table = sql_kwargs.pop("executables_table", "executables")
             sql = importlib.import_module(sql_client)
             if sql_client not in ["mariadb", "psycopg", "psycopg2", "pymysql"]:
                 logging.warning(f'using {sql_client} for database.remote "client" may not be supported, ensure it implements PEP 249')
             try:
                 con = sql.connect(**sql_kwargs)
                 cur = con.cursor()
-                cur.execute(f""" CREATE TABLE IF NOT EXISTS {table_name}_executables (
-                                 id INTEGER PRIMARY KEY AUTO_INCREMENT,
-                                 exe TEXT NOT NULL,
-                                 name TEXT NOT NULL,
-                                 cmdline TEXT NOT NULL,
-                                 sha256 TEXT NOT NULL,
-                                 UNIQUE(exe(255), name(255), cmdline(255), sha256(64))) """)
-                cur.execute(f""" CREATE TABLE IF NOT EXISTS {table_name} (
-                                 contime INTEGER NOT NULL,
-                                 send INTEGER NOT NULL,
-                                 recv INTEGER NOT NULL,
-                                 exe_id INTEGER NOT NULL,
-                                 pexe_id INTEGER NOT NULL,
-                                 uid INTEGER NOT NULL,
-                                 lport INTEGER NOT NULL,
-                                 rport INTEGER NOT NULL,
-                                 laddr TEXT NOT NULL DEFAULT '',
-                                 raddr TEXT NOT NULL DEFAULT '',
-                                 domain TEXT NOT NULL DEFAULT '') """)
+                remote_exe_schema = SCHEMA_EXECUTABLES.replace("INTEGER PRIMARY KEY", "INTEGER PRIMARY KEY AUTO_INCREMENT").replace(
+                    "UNIQUE(exe, name, cmdline, sha256)", "UNIQUE(exe(255), name(255), cmdline(255), sha256(64))"
+                )
+                cur.execute(f"CREATE TABLE IF NOT EXISTS {exe_table} ({remote_exe_schema})")
+                cur.execute(f"CREATE TABLE IF NOT EXISTS {conn_table} ({SCHEMA_CONNECTIONS})")
                 con.commit()
                 con.close()
             except Exception as e:

@@ -15,7 +15,7 @@ import sys
 import time
 
 from ..config import Config
-from ..constants import DATA_DIR, LOG_DIR, VERSION
+from ..constants import DATA_DIR, DB_VERSION, LOG_DIR, VERSION
 from ..process_manager import ProcessManager
 from ..types import BpfEvent, ProcessHashInfo, State
 from ..utils import get_fanotify_events, get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup, sync_vt_results
@@ -180,7 +180,7 @@ def run_secondary(
         cur = con.cursor()
         cur.execute(""" PRAGMA user_version """)
         db_version = cur.fetchone()[0]
-        if db_version != 4:
+        if db_version != DB_VERSION:
             logging.error(f"Incorrect database version of picosnitch.db for picosnitch v{VERSION}")
             sys.exit(1)
         retention_cutoff = int(time.time()) - int(config.database.retention_days) * 86400
@@ -189,11 +189,12 @@ def run_secondary(
         con.close()
     if sql_kwargs := dict(config.database.remote):
         sql_client = sql_kwargs.pop("client", "no client error")
-        table_name = sql_kwargs.pop("table_name", "connections")
+        conn_table = sql_kwargs.pop("connections_table", "connections")
+        exe_table = sql_kwargs.pop("executables_table", "executables")
         sql = importlib.import_module(sql_client)
-        sql_insert_exe = sqlite_insert_exe.replace("?", "%s").replace("OR IGNORE ", "IGNORE ").replace("executables", f"{table_name}_executables")
-        sql_select_exe = sqlite_select_exe.replace("?", "%s").replace("executables", f"{table_name}_executables")
-        sql_insert_conn = sqlite_insert_conn.replace("?", "%s").replace("connections", table_name)
+        sql_insert_exe = sqlite_insert_exe.replace("?", "%s").replace("OR IGNORE ", "IGNORE ").replace("executables", exe_table)
+        sql_select_exe = sqlite_select_exe.replace("?", "%s").replace("executables", exe_table)
+        sql_insert_conn = sqlite_insert_conn.replace("?", "%s").replace("connections", conn_table)
     log_destinations = int(bool(config.database.enabled)) + int(bool(sql_kwargs)) + int(bool(config.database.text_log))
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)

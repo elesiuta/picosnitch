@@ -24,6 +24,8 @@ from pathlib import Path
 
 import pytest
 
+from picosnitch.constants import DB_VERSION
+
 # Constants
 PICOSNITCH_DIR = Path(__file__).parent.parent
 PYTHON_EXE = sys.executable
@@ -291,7 +293,7 @@ class TestDatabaseIntegrity:
         cur = con.cursor()
         cur.execute("PRAGMA user_version")
         version = cur.fetchone()[0]
-        assert version == 4, f"Database version should be 4, got {version}"
+        assert version == DB_VERSION, f"Database version should be {DB_VERSION}, got {version}"
 
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='connections'")
         tables = cur.fetchall()

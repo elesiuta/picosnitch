@@ -16,7 +16,7 @@ import threading
 import time
 
 from ..config import load_config
-from ..constants import CACHE_DIR, DATA_DIR, RUN_DIR, VERSION
+from ..constants import CACHE_DIR, DATA_DIR, DB_VERSION, RUN_DIR, VERSION
 
 
 def init_geoip():
@@ -499,7 +499,7 @@ def tui_init() -> int:
     cur = con.cursor()
     cur.execute(""" PRAGMA user_version """)
     db_version = cur.fetchone()[0]
-    if db_version != 4:
+    if db_version != DB_VERSION:
         logging.error(f"Incorrect database version of picosnitch.db for picosnitch v{VERSION}")
         sys.exit(1)
     con.close()
