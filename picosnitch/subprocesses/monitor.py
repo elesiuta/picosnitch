@@ -36,6 +36,7 @@ import typing
 import psutil
 
 from ..bpf_wrapper import BPF, check_bpf_requirements, find_bpf_object
+from ..config import Config
 from ..constants import FD_CACHE, PID_CACHE, ST_DEV_MASK
 from ..utils import get_fstat
 
@@ -70,7 +71,7 @@ def initial_poll() -> list:
     return initial_processes
 
 
-def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
+def run_monitor(config: Config, fan_fd, event_pipes, q_error, q_in, _q_out):
     """runs a bpf program to monitor the system for new connections and puts info into a pipe for run_primary"""
     # initialization of subprocess
     try:
@@ -80,8 +81,8 @@ def run_monitor(config: dict, fan_fd, event_pipes, q_error, q_in, _q_out):
     parent_process = multiprocessing.parent_process()
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
     event_pipe_0, event_pipe_1, event_pipe_2, event_pipe_3, event_pipe_4 = event_pipes
-    EVERY_EXE: typing.Final[bool] = config["Every exe (not just conns)"]
-    PAGE_CNT: typing.Final[int] = config["Perf ring buffer (pages)"]
+    EVERY_EXE: typing.Final[bool] = config.monitoring.every_exe
+    PAGE_CNT: typing.Final[int] = config.monitoring.perf_ring_buffer_pages
     # fanotify (for watching executables for modification)
     libc = ctypes.CDLL(ctypes.util.find_library("c"))
     _FAN_MARK_ADD = 0x1

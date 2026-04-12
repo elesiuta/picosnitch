@@ -24,17 +24,18 @@ import queue
 import sys
 import time
 
+from ..config import Config
 from ..utils import get_fstat
 
 
-def run_virustotal(config: dict, q_error, q_vt_pending, q_vt_results):
+def run_virustotal(config: Config, q_error, q_vt_pending, q_vt_results):
     """get virustotal results of process executable"""
     parent_process = multiprocessing.parent_process()
-    if config["Desktop user"]:
+    if config.desktop.user:
         from ..utils import drop_root_permanent, resolve_group, resolve_owner
 
-        uid = resolve_owner(config["Desktop user"])
-        gid = resolve_group(config["Desktop user"])
+        uid = resolve_owner(config.desktop.user)
+        gid = resolve_group(config.desktop.user)
         drop_root_permanent(uid, gid)
     try:
         import requests
@@ -42,14 +43,15 @@ def run_virustotal(config: dict, q_error, q_vt_pending, q_vt_results):
         vt_enabled = True
     except ImportError:
         vt_enabled = False
-    if not (config["VT API key"] and vt_enabled):
-        config["VT request limit (seconds)"] = 0
-    headers = {"x-apikey": config["VT API key"]}
+    request_limit = config.virustotal.request_limit_seconds
+    if not (config.virustotal.api_key and vt_enabled):
+        request_limit = 0
+    headers = {"x-apikey": config.virustotal.api_key}
 
     def get_analysis(analysis_id: dict, sha256: str) -> dict:
         api_url = "https://www.virustotal.com/api/v3/analyses/" + analysis_id["data"]["id"]
         for i in range(90):
-            time.sleep(max(5, config["VT request limit (seconds)"]))
+            time.sleep(max(5, request_limit))
             response = requests.get(api_url, headers=headers).json()
             if response["data"]["attributes"]["status"] == "completed":
                 return response["data"]["attributes"]["stats"]
@@ -59,16 +61,16 @@ def run_virustotal(config: dict, q_error, q_vt_pending, q_vt_results):
         if not parent_process.is_alive():
             return 0
         try:
-            time.sleep(config["VT request limit (seconds)"])
+            time.sleep(request_limit)
             proc, analysis = None, None
             proc, sha256 = pickle.loads(q_vt_pending.get(block=True, timeout=15))
             suspicious = False
-            if config["VT API key"] and vt_enabled:
+            if config.virustotal.api_key and vt_enabled:
                 try:
                     analysis = requests.get("https://www.virustotal.com/api/v3/files/" + sha256, headers=headers).json()
                     analysis = analysis["data"]["attributes"]["last_analysis_stats"]
                 except Exception:
-                    if config["VT file upload"]:
+                    if config.virustotal.file_upload:
                         try:
                             with open(proc["fd"], "rb") as f:
                                 if (proc["dev"], proc["ino"]) != get_fstat(f.fileno()):

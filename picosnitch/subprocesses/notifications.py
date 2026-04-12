@@ -22,21 +22,23 @@ import multiprocessing
 import queue
 import sys
 
+from ..config import Config
 
-def run_notifications(config: dict, q_error, q_in, _q_out):
+
+def run_notifications(config: Config, q_error, q_in, _q_out):
     """notification subprocess: drops root then sends desktop notifications via D-Bus"""
     parent_process = multiprocessing.parent_process()
     # drop root before importing dbus
-    if config["Desktop user"]:
+    if config.desktop.user:
         from ..utils import drop_root_permanent, resolve_group, resolve_owner
 
-        uid = resolve_owner(config["Desktop user"])
-        gid = resolve_group(config["Desktop user"])
+        uid = resolve_owner(config.desktop.user)
+        gid = resolve_group(config.desktop.user)
         drop_root_permanent(uid, gid)
     # try to set up dbus notifications
     dbus_ready = False
     system_notification = None
-    if config["Desktop notifications"]:
+    if config.desktop.notifications:
         try:
             import dbus
 
@@ -63,7 +65,7 @@ def run_notifications(config: dict, q_error, q_in, _q_out):
             else:
                 logging.warning(msg)
                 pending.append(msg)
-                if config["Desktop notifications"]:
+                if config.desktop.notifications:
                     try:
                         import dbus
 

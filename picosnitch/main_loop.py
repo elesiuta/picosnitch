@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 
+from .config import Config
 from .constants import FD_CACHE
 from .process_manager import ProcessManager
 from .subprocesses.fuse import run_fuse
@@ -37,7 +38,7 @@ from .subprocesses.secondary import run_secondary
 from .subprocesses.virustotal import run_virustotal
 
 
-def run_main_loop(state: dict):
+def run_main_loop(config: Config, state: dict):
     """coordinates all picosnitch subprocesses"""
     # init fanotify
     libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -57,7 +58,7 @@ def run_main_loop(state: dict):
         name="snitchnotify",
         target=run_notifications,
         init_args=(
-            state["Config"],
+            config,
             q_error,
         ),
     )
@@ -65,7 +66,7 @@ def run_main_loop(state: dict):
         name="snitchmonitor",
         target=run_monitor,
         init_args=(
-            state["Config"],
+            config,
             fan_fd,
             event_send_pipes,
             q_error,
@@ -75,7 +76,7 @@ def run_main_loop(state: dict):
         name="snitchrfuse",
         target=run_fuse,
         init_args=(
-            state["Config"],
+            config,
             q_error,
         ),
     )
@@ -83,7 +84,7 @@ def run_main_loop(state: dict):
         name="snitchvirustotal",
         target=run_virustotal,
         init_args=(
-            state["Config"],
+            config,
             q_error,
         ),
     )
@@ -102,6 +103,7 @@ def run_main_loop(state: dict):
         name="snitchsecondary",
         target=run_secondary,
         init_args=(
+            config,
             state,
             fan_fd,
             p_fuse,

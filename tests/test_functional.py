@@ -11,7 +11,6 @@ These tests verify:
 """
 
 import hashlib
-import json
 import os
 import shutil
 import signal
@@ -97,30 +96,50 @@ def stop_existing_picosnitch():
     time.sleep(2)
 
 
-def start_picosnitch(extra_config: dict = None) -> subprocess.Popen:
+def start_picosnitch(extra_config_toml: str = "") -> subprocess.Popen:
     """Start picosnitch daemon in start-no-daemon mode and return the process."""
-    config = {
-        "DB retention (days)": 1,
-        "DB sql log": True,
-        "DB sql server": {},
-        "DB text log": False,
-        "DB write limit (seconds)": DB_WRITE_LIMIT,
-        "Desktop notifications": False,
-        "Log addresses": True,
-        "Log commands": True,
-        "Log ignore": [],
-        "Set RLIMIT_NOFILE": None,
-        "VT API key": "",
-        "VT file upload": False,
-        "VT request limit (seconds)": 15,
-    }
-    if extra_config:
-        config.update(extra_config)
+    config_toml = f"""\
+[database]
+enabled = true
+retention_days = 1
+write_limit_seconds = {DB_WRITE_LIMIT}
+text_log = false
 
-    config_file = CONFIG_DIR / "config.json"
+[dash]
+scroll_zoom = true
+theme = ""
+
+[data]
+owner = "root"
+group = "root"
+mode = "0644"
+
+[log]
+addresses = true
+commands = true
+ports = true
+
+[desktop]
+user = ""
+notifications = false
+
+[monitoring]
+every_exe = false
+geoip_lookup = true
+perf_ring_buffer_pages = 256
+
+[virustotal]
+api_key = ""
+file_upload = false
+request_limit_seconds = 15
+"""
+    if extra_config_toml:
+        config_toml += "\n" + extra_config_toml
+
+    config_file = CONFIG_DIR / "config.toml"
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     with open(config_file, "w") as f:
-        json.dump(config, f)
+        f.write(config_toml)
 
     proc = subprocess.Popen([PYTHON_EXE, "-m", "picosnitch", "start-no-daemon"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 

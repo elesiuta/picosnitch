@@ -22,17 +22,18 @@ import pickle
 import queue
 import sys
 
+from ..config import Config
 from ..utils import get_sha256_fd, get_sha256_pid
 
 
-def run_fuse(config: dict, q_error, q_in, q_out):
+def run_fuse(config: Config, q_error, q_in, q_out):
     """runs as user to read executables for FUSE/AppImage (since real, effective, and saved UID must match)"""
     parent_process = multiprocessing.parent_process()
-    if config["Desktop user"]:
+    if config.desktop.user:
         from ..utils import drop_root_permanent, resolve_group, resolve_owner
 
-        uid = resolve_owner(config["Desktop user"])
-        gid = resolve_group(config["Desktop user"])
+        uid = resolve_owner(config.desktop.user)
+        gid = resolve_group(config.desktop.user)
         drop_root_permanent(uid, gid)
     while True:
         if not parent_process.is_alive():

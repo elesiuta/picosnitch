@@ -34,7 +34,8 @@ import sys
 import termios
 import typing
 
-from .constants import CONFIG_DIR, DATA_DIR, LOG_DIR, PID_CACHE, ST_DEV_MASK
+from .config import load_config
+from .constants import DATA_DIR, LOG_DIR, PID_CACHE, ST_DEV_MASK
 from .types import FanotifyEventMetadata
 
 
@@ -74,14 +75,13 @@ def resolve_group(group: str) -> int:
 
 def apply_data_permissions(config_dir: str, data_dir: str, log_dir: str, cache_dir: str) -> None:
     """Apply configured ownership and permissions to data, log, and cache directories."""
-    config_path = os.path.join(config_dir, "config.json")
+    config_path = os.path.join(config_dir, "config.toml")
     if not os.path.exists(config_path):
         return
-    with open(config_path, "r", encoding="utf-8", errors="surrogateescape") as f:
-        config = json.load(f)
-    uid = resolve_owner(config.get("Data owner", "root"))
-    gid = resolve_group(config.get("Data group", "root"))
-    mode = int(config.get("Data mode", "0644"), 8)
+    config = load_config(config_dir)
+    uid = resolve_owner(config.data.owner)
+    gid = resolve_group(config.data.group)
+    mode = int(config.data.mode, 8)
     dir_mode = mode | 0o111  # add execute bits for directories
     for d in [data_dir, log_dir, cache_dir]:
         os.chmod(d, dir_mode)
@@ -94,34 +94,8 @@ def apply_data_permissions(config_dir: str, data_dir: str, log_dir: str, cache_d
 
 
 def load_state() -> dict:
-    """read data for the state dictionary from config.json and state.json or init new files if not found"""
+    """read data for the state dictionary from state.json or init new if not found"""
     template = {
-        "Config": {
-            "DB retention (days)": 30,
-            "DB sql log": True,
-            "DB sql server": {},
-            "DB text log": False,
-            "DB write limit (seconds)": 10,
-            "Dash scroll zoom": True,
-            "Dash theme": "",
-            "Data group": "root",
-            "Data mode": "0644",
-            "Data owner": "root",
-            "Desktop notifications": True,
-            "Desktop user": "",
-            "Every exe (not just conns)": False,
-            "GeoIP lookup": True,
-            "Log addresses": True,
-            "Log commands": True,
-            "Log ignore": [],
-            "Log ports": True,
-            "Perf ring buffer (pages)": 256,
-            "Set RLIMIT_NOFILE": None,
-            "Set st_dev mask": None,
-            "VT API key": "",
-            "VT file upload": False,
-            "VT request limit (seconds)": 15,
-        },
         "Error Log": [],
         "Exe Log": [],
         "Executables": {},
@@ -131,17 +105,7 @@ def load_state() -> dict:
         "SHA256": {},
     }
     data = {k: v for k, v in template.items()}
-    data["Config"] = {k: v for k, v in template["Config"].items()}
-    config_path = os.path.join(CONFIG_DIR, "config.json")
     state_path = os.path.join(DATA_DIR, "state.json")
-    if os.path.exists(config_path):
-        with open(config_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
-            data["Config"] = json.load(json_file)
-        for key in template["Config"]:
-            if key not in data["Config"]:
-                data["Config"][key] = template["Config"][key]
-    if not data["Config"]["Desktop user"] and os.environ.get("SUDO_UID"):
-        data["Config"]["Desktop user"] = os.environ["SUDO_UID"]
     if os.path.exists(state_path):
         with open(state_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             state_record = json.load(json_file)
@@ -149,20 +113,16 @@ def load_state() -> dict:
             if key in state_record:
                 data[key] = state_record[key]
     if not all(type(data[key]) is type(template[key]) for key in template):
-        logging.error("Invalid json files")
-        sys.exit(1)
-    if not all(key in ["Set RLIMIT_NOFILE", "Set st_dev mask"] or type(data["Config"][key]) is type(template["Config"][key]) for key in template["Config"]):
-        logging.error("Invalid config")
+        logging.error("Invalid state.json")
         sys.exit(1)
     return data
 
 
 def save_state(state: dict, write_record: bool = True) -> None:
-    """write the state dictionary to state.json, exe.log, and error.log (never overwrites config.json)"""
+    """write the state dictionary to state.json, exe.log, and error.log"""
     state_path = os.path.join(DATA_DIR, "state.json")
     exe_log_path = os.path.join(LOG_DIR, "exe.log")
     error_log_path = os.path.join(LOG_DIR, "error.log")
-    snitch_config = state["Config"]
     try:
         if state["Error Log"]:
             with open(error_log_path, "a", encoding="utf-8", errors="surrogateescape") as f:
@@ -172,13 +132,11 @@ def save_state(state: dict, write_record: bool = True) -> None:
             with open(exe_log_path, "a", encoding="utf-8", errors="surrogateescape") as f:
                 f.write("\n".join(state["Exe Log"]) + "\n")
         del state["Exe Log"]
-        del state["Config"]
         if write_record:
             with open(state_path, "w", encoding="utf-8", errors="surrogateescape") as f:
                 json.dump(state, f, indent=2, separators=(",", ": "), sort_keys=True, ensure_ascii=False)
     except Exception as e:
         logging.error(f"picosnitch write error: {type(e).__name__}{e.args}")
-    state["Config"] = snitch_config
     state["Error Log"] = []
     state["Exe Log"] = []
 

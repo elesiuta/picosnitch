@@ -30,6 +30,7 @@ import sys
 import time
 import typing
 
+from ..config import Config
 from ..constants import DATA_DIR, LOG_DIR, VERSION
 from ..process_manager import ProcessManager
 from ..types import BpfEvent
@@ -78,7 +79,15 @@ def resolve_hash(state: dict, fan_mod_cnt: dict, proc: dict, p_fuse: ProcessMana
 
 
 def build_log_entries(
-    state: dict, fan_mod_cnt: dict, new_processes: typing.List[bytes], p_fuse: ProcessManager, q_vt: multiprocessing.Queue, q_out: multiprocessing.Queue, q_error: multiprocessing.Queue
+    config: Config,
+    state: dict,
+    fan_mod_cnt: dict,
+    new_processes: typing.List[bytes],
+    p_fuse: ProcessManager,
+    q_vt: multiprocessing.Queue,
+    q_out: multiprocessing.Queue,
+    q_error: multiprocessing.Queue,
+    ignored_networks: list,
 ) -> typing.List[tuple]:
     """iterate over the list of process/connection data to generate a list of entries for the sql database"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -94,35 +103,40 @@ def build_log_entries(
         pproc = {"pid": proc["ppid"], "name": proc["pname"], "exe": proc["pexe"], "fd": proc["pfd"], "dev": proc["pdev"], "ino": proc["pino"]}
         psha256 = resolve_hash(state, fan_mod_cnt, pproc, p_fuse, q_vt, q_out, q_error)
         # join or omit commands from logs
-        if state["Config"]["Log commands"]:
+        if config.log.commands:
             proc["cmdline"] = shlex.join(proc["cmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").strip("\0\t\n ").split("\0"))
             proc["pcmdline"] = shlex.join(proc["pcmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").strip("\0\t\n ").split("\0"))
         else:
             proc["cmdline"] = ""
             proc["pcmdline"] = ""
         # reverse dns lookup or omit with IP from logs
-        if state["Config"]["Log addresses"]:
+        if config.log.addresses:
             if not proc["domain"]:
                 proc["domain"] = reverse_dns_lookup(proc["raddr"])
         else:
             proc["domain"], proc["raddr"] = "", ""
-        if not state["Config"]["Log ports"]:
+        if not config.log.ports:
             proc["lport"] = min(0, proc["lport"])
             proc["rport"] = min(0, proc["rport"])
         # omit entry from logs
         ignored = False
-        for ignore in state["Config"]["Log ignore"]:
-            if (proc["rport"] == ignore) or (proc["lport"] == ignore) or (sha256 == ignore) or (isinstance(ignore, str) and proc["domain"].startswith(ignore)):
-                ignored = True
-                break
+        if proc["rport"] in config.log.ignore_ports or proc["lport"] in config.log.ignore_ports:
+            ignored = True
+        if not ignored and sha256 in config.log.ignore_sha256:
+            ignored = True
+        if not ignored:
+            for domain_prefix in config.log.ignore_domains:
+                if proc["domain"].startswith(domain_prefix):
+                    ignored = True
+                    break
         if ignored:
             continue
-        if state["Config"]["Log ignore IP"] and proc["raddr"]:
+        if ignored_networks and proc["raddr"]:
             raddr = ipaddress.ip_address(proc["raddr"])
-            if any(raddr in network for network in state["Config"]["Log ignore IP"]):
+            if any(raddr in network for network in ignored_networks):
                 continue
             laddr = ipaddress.ip_address(proc["laddr"])
-            if any(laddr in network for network in state["Config"]["Log ignore IP"]):
+            if any(laddr in network for network in ignored_networks):
                 continue
         # create sql entry
         event = (
@@ -147,7 +161,7 @@ def build_log_entries(
     return [(datetime_now, traffic_counter["send " + str(event)], traffic_counter["recv " + str(event)], *event) for event in transaction]
 
 
-def run_secondary(state, fan_fd, p_fuse: ProcessManager, p_virustotal: ProcessManager, secondary_pipe, q_primary_in, q_error, _q_in, _q_out):
+def run_secondary(config: Config, state, fan_fd, p_fuse: ProcessManager, p_virustotal: ProcessManager, secondary_pipe, q_primary_in, q_error, _q_in, _q_out):
     """second to receive connection data from monitor, less responsive than primary, coordinates connection data with virustotal subprocess and checks fanotify, updates connection logs and reports sha256/vt_results back to primary subprocess if needed"""
     parent_process = multiprocessing.parent_process()
     # maintain a separate copy of the state dictionary here and coordinate with the primary subprocess (sha256 and vt_results)
@@ -158,7 +172,7 @@ def run_secondary(state, fan_fd, p_fuse: ProcessManager, p_virustotal: ProcessMa
     sqlite_query = """ INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) """
     file_path = os.path.join(DATA_DIR, "picosnitch.db")
     text_path = os.path.join(LOG_DIR, "conn.log")
-    if state["Config"]["DB sql log"]:
+    if config.database.enabled:
         con = sqlite3.connect(file_path)
         cur = con.cursor()
         cur.execute(""" PRAGMA user_version """)
@@ -166,26 +180,19 @@ def run_secondary(state, fan_fd, p_fuse: ProcessManager, p_virustotal: ProcessMa
         if db_version != 3:
             logging.error(f"Incorrect database version of picosnitch.db for picosnitch v{VERSION}")
             sys.exit(1)
-        cur.execute(""" DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") """ % int(state["Config"]["DB retention (days)"]))
+        cur.execute(""" DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") """ % int(config.database.retention_days))
         con.commit()
         con.close()
-    if sql_kwargs := state["Config"]["DB sql server"]:
+    if sql_kwargs := dict(config.database.remote):
         sql_client = sql_kwargs.pop("client", "no client error")
         table_name = sql_kwargs.pop("table_name", "connections")
         sql = importlib.import_module(sql_client)
         sql_query = sqlite_query.replace("?", "%s").replace("connections", table_name)
-    log_destinations = int(bool(state["Config"]["DB sql log"])) + int(bool(sql_kwargs)) + int(bool(state["Config"]["DB text log"]))
+    log_destinations = int(bool(config.database.enabled)) + int(bool(sql_kwargs)) + int(bool(config.database.text_log))
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
     # get network address and mask for ignored IP subnets
-    ignored_ips = []
-    for ip_subnet in reversed(state["Config"]["Log ignore"]):
-        try:
-            ignored_ips.append(ipaddress.ip_network(ip_subnet))
-            state["Config"]["Log ignore"].remove(ip_subnet)
-        except Exception:
-            pass
-    state["Config"]["Log ignore IP"] = ignored_ips
+    ignored_networks = [ipaddress.ip_network(ip_subnet) for ip_subnet in config.log.ignore_ips]
     # main loop
     transaction = []
     new_processes = []
@@ -234,13 +241,13 @@ def run_secondary(state, fan_fd, p_fuse: ProcessManager, p_virustotal: ProcessMa
             sync_vt_results(state, p_virustotal.q_out, q_primary_in, False)
             get_fanotify_events(fan_fd, fan_mod_cnt, q_error)
             # process connection data
-            if time.time() - last_write > state["Config"]["DB write limit (seconds)"] and (transaction or new_processes):
+            if time.time() - last_write > config.database.write_limit_seconds and (transaction or new_processes):
                 current_write = time.time()
-                transaction += build_log_entries(state, fan_mod_cnt, new_processes, p_fuse, p_virustotal.q_in, q_primary_in, q_error)
+                transaction += build_log_entries(config, state, fan_mod_cnt, new_processes, p_fuse, p_virustotal.q_in, q_primary_in, q_error, ignored_networks)
                 new_processes = []
                 transaction_success = False
                 try:
-                    if state["Config"]["DB sql log"]:
+                    if config.database.enabled:
                         con = sqlite3.connect(file_path)
                         with con:
                             con.executemany(sqlite_query, transaction)
@@ -259,7 +266,7 @@ def run_secondary(state, fan_fd, p_fuse: ProcessManager, p_virustotal: ProcessMa
                 except Exception as e:
                     q_error.put("SQL server execute %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transaction)))
                 try:
-                    if state["Config"]["DB text log"]:
+                    if config.database.text_log:
                         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
                             for entry in transaction:
                                 clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in entry]

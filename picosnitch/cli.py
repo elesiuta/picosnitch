@@ -19,7 +19,6 @@
 
 import atexit
 import importlib
-import json
 import logging
 import os
 import sqlite3
@@ -27,6 +26,7 @@ import subprocess
 import sys
 import textwrap
 
+from .config import load_config, write_default_config
 from .constants import CACHE_DIR, CONFIG_DIR, DATA_DIR, LOG_DIR, RUN_DIR, VERSION
 from .daemon import Daemon
 from .main_loop import run_main_loop
@@ -83,12 +83,9 @@ def init_dirs_and_config() -> None:
     """create FHS directories, write default config, and create database if missing"""
     for d in [CONFIG_DIR, DATA_DIR, LOG_DIR, RUN_DIR, CACHE_DIR]:
         os.makedirs(d, exist_ok=True)
-    config_path = os.path.join(CONFIG_DIR, "config.json")
+    config_path = os.path.join(CONFIG_DIR, "config.toml")
     if not os.path.exists(config_path):
-        state = load_state()
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(state["Config"], f, indent=2, separators=(",", ": "), sort_keys=True, ensure_ascii=False)
-        logging.info(f"wrote default config to {config_path}")
+        write_default_config(config_path)
     db_path = os.path.join(DATA_DIR, "picosnitch.db")
     if not os.path.exists(db_path):
         con = sqlite3.connect(db_path)
@@ -103,7 +100,8 @@ def init_dirs_and_config() -> None:
 
 def main():
     """init picosnitch"""
-    # master copy of the state dictionary, all subprocesses only receive a static copy of it from this point in time
+    # master copy of config and state, all subprocesses only receive a static copy from this point in time
+    config = load_config()
     state = load_state()
     # start picosnitch process monitor
     pid_file = os.path.join(RUN_DIR, "picosnitch.pid")
@@ -112,7 +110,7 @@ def main():
     if pid != os.getpid():
         logging.error(f"PID mismatch: pidfile has {pid}, current process is {os.getpid()}")
         sys.exit(1)
-    sys.exit(run_main_loop(state))
+    sys.exit(run_main_loop(config, state))
 
 
 def start_picosnitch():
@@ -262,13 +260,13 @@ def start_picosnitch():
                         subprocess.run(["systemctl", cmd, "picosnitch"])
                         return 0
         # optional remote database
-        tmp_state = load_state()
-        if sql_kwargs := tmp_state["Config"]["DB sql server"]:
+        config = load_config()
+        if sql_kwargs := dict(config.database.remote):
             sql_client = sql_kwargs.pop("client", "no client error")
             table_name = sql_kwargs.pop("table_name", "connections")
             sql = importlib.import_module(sql_client)
             if sql_client not in ["mariadb", "psycopg", "psycopg2", "pymysql"]:
-                logging.warning(f'using {sql_client} for "DB sql server" "client" may not be supported, ensure it implements PEP 249')
+                logging.warning(f'using {sql_client} for database.remote "client" may not be supported, ensure it implements PEP 249')
             try:
                 con = sql.connect(**sql_kwargs)
                 cur = con.cursor()

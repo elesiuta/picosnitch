@@ -32,14 +32,15 @@ import textwrap
 import threading
 import time
 
-from ..constants import CACHE_DIR, CONFIG_DIR, DATA_DIR, RUN_DIR, VERSION
+from ..config import load_config
+from ..constants import CACHE_DIR, DATA_DIR, RUN_DIR, VERSION
 
 
 def init_geoip():
     """init a geoip2 reader and return it (along with updating geoip db), or None if not available"""
-    with open(os.path.join(CONFIG_DIR, "config.json"), "r", encoding="utf-8", errors="surrogateescape") as json_file:
-        if not json.load(json_file).get("GeoIP lookup", True):
-            return None
+    config = load_config()
+    if not config.monitoring.geoip_lookup:
+        return None
     try:
         import geoip2.database
 

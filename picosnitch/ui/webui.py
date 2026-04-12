@@ -20,14 +20,14 @@
 import collections
 import datetime
 import ipaddress
-import json
 import math
 import os
 import pwd
 import signal
 import sqlite3
 
-from ..constants import CONFIG_DIR, DATA_DIR, RUN_DIR, VERSION
+from ..config import load_config
+from ..constants import DATA_DIR, RUN_DIR, VERSION
 from .tui import init_geoip
 
 
@@ -40,8 +40,7 @@ def web_dashboard():
     from dash.dependencies import Input, Output, State
     from dash.exceptions import PreventUpdate
 
-    with open(os.path.join(CONFIG_DIR, "config.json"), "r", encoding="utf-8", errors="surrogateescape") as json_file:
-        config = json.load(json_file)
+    config = load_config()
     file_path = os.path.join(DATA_DIR, "picosnitch.db")
     all_dims = ["exe", "name", "cmdline", "sha256", "uid", "lport", "rport", "laddr", "raddr", "domain", "pexe", "pname", "pcmdline", "psha256"]
     dim_labels = {
@@ -276,8 +275,8 @@ def web_dashboard():
                 dcc.Store(id="store_time", data={"time_i": 8}),
                 dcc.Store(id="store_send", data={"rev": 0, "visible": {}}),
                 dcc.Store(id="store_recv", data={"rev": 0, "visible": {}}),
-                dcc.Graph(id="send", config={"scrollZoom": config["Dash scroll zoom"]}),
-                dcc.Graph(id="recv", config={"scrollZoom": config["Dash scroll zoom"]}),
+                dcc.Graph(id="send", config={"scrollZoom": config.dash.scroll_zoom}),
+                dcc.Graph(id="recv", config={"scrollZoom": config.dash.scroll_zoom}),
                 html.Footer(f"picosnitch v{VERSION} ({run_status}) (using {file_path})"),
             ]
         )
@@ -287,8 +286,8 @@ def web_dashboard():
         import dash_bootstrap_components as dbc
         from dash_bootstrap_templates import load_figure_template
 
-        load_figure_template(config["Dash theme"].lower())
-        app = Dash(__name__, external_stylesheets=[getattr(dbc.themes, config["Dash theme"].upper())])
+        load_figure_template(config.dash.theme.lower())
+        app = Dash(__name__, external_stylesheets=[getattr(dbc.themes, config.dash.theme.upper())])
     except Exception:
         app = Dash(__name__)
     app.layout = serve_layout
