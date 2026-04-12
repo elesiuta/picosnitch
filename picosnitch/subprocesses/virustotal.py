@@ -71,7 +71,8 @@ def run_virustotal(config: dict, q_error, q_vt_pending, q_vt_results):
                     if config["VT file upload"]:
                         try:
                             with open(proc["fd"], "rb") as f:
-                                assert (proc["dev"], proc["ino"]) == get_fstat(f.fileno())
+                                if (proc["dev"], proc["ino"]) != get_fstat(f.fileno()):
+                                    raise ValueError("file stat mismatch")
                                 files = {"file": (proc["exe"], f)}
                                 analysis_id = requests.post("https://www.virustotal.com/api/v3/files", headers=headers, files=files).json()
                             analysis = get_analysis(analysis_id, sha256)
@@ -81,7 +82,8 @@ def run_virustotal(config: dict, q_error, q_vt_pending, q_vt_results):
                                 with open(proc["exe"], "rb") as f:
                                     while data := f.read(1048576):
                                         readlink_exe_sha256.update(data)
-                                assert readlink_exe_sha256.hexdigest() == sha256
+                                if readlink_exe_sha256.hexdigest() != sha256:
+                                    raise ValueError("sha256 mismatch")
                                 with open(proc["exe"], "rb") as f:
                                     files = {"file": (proc["exe"], f)}
                                     analysis_id = requests.post("https://www.virustotal.com/api/v3/files", headers=headers, files=files).json()

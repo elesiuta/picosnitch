@@ -18,6 +18,7 @@
 # https://github.com/elesiuta/picosnitch
 
 import atexit
+import logging
 import os
 import signal
 import sys
@@ -38,7 +39,7 @@ class Daemon:
                 # exit first parent
                 sys.exit(0)
         except OSError as err:
-            sys.stderr.write("fork #1 failed: {0}\n".format(err))
+            logging.error(f"fork #1 failed: {err}")
             sys.exit(1)
         # decouple from parent environment
         os.chdir("/")
@@ -51,7 +52,7 @@ class Daemon:
                 # exit from second parent
                 sys.exit(0)
         except OSError as err:
-            sys.stderr.write("fork #2 failed: {0}\n".format(err))
+            logging.error(f"fork #2 failed: {err}")
             sys.exit(1)
         # redirect standard file descriptors
         sys.stdout.flush()
@@ -85,8 +86,8 @@ class Daemon:
         # Check for a pidfile to see if the daemon already runs
         pid = self.getpid()
         if pid:
-            message = "pidfile {0} already exist. " + "picosnitch already running?\n"
-            sys.stderr.write(message.format(self.pidfile))
+            message = f"pidfile {self.pidfile} already exist. picosnitch already running?"
+            logging.error(message)
             sys.exit(1)
         # Start the daemon
         self.daemonize()
@@ -96,8 +97,8 @@ class Daemon:
         """Stop the daemon."""
         pid = self.getpid()
         if not pid:
-            message = "pidfile {0} does not exist. " + "picosnitch not running?\n"
-            sys.stderr.write(message.format(self.pidfile))
+            message = f"pidfile {self.pidfile} does not exist. picosnitch not running?"
+            logging.warning(message)
             return  # not an error in a restart
         # Try killing the daemon process
         try:
@@ -110,7 +111,7 @@ class Daemon:
                 if os.path.exists(self.pidfile):
                     os.remove(self.pidfile)
             else:
-                print(str(err.args))
+                logging.error(f"{err.args}")
                 sys.exit(1)
 
     def restart(self):
@@ -128,11 +129,11 @@ class Daemon:
             except Exception:
                 cmdline = ""
             if "picosnitch" in cmdline:
-                print(f"picosnitch is currently running with pid {pid}.")
+                logging.info(f"picosnitch is currently running with pid {pid}.")
             else:
-                print("pidfile exists however picosnitch was not detected.")
+                logging.info("pidfile exists however picosnitch was not detected.")
         else:
-            print("picosnitch does not appear to be running.")
+            logging.info("picosnitch does not appear to be running.")
 
     def run(self):
         """Subclass Daemon and override this method"""

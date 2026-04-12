@@ -17,6 +17,7 @@
 
 # https://github.com/elesiuta/picosnitch
 
+import logging
 import multiprocessing
 import os
 import pickle
@@ -30,12 +31,12 @@ from ..types import BpfEvent
 from ..utils import save_state
 
 
-def _toast(q_notify: multiprocessing.Queue, msg: str, file=sys.stdout) -> None:
+def _toast(q_notify: multiprocessing.Queue, msg: str, level=logging.INFO) -> None:
     """send notification message to the notification subprocess"""
     try:
         q_notify.put_nowait(msg)
     except Exception:
-        print(msg, file=file)
+        logging.log(level, msg)
 
 
 def handle_new_processes(state: dict, new_processes: typing.List[bytes], q_notify: multiprocessing.Queue) -> None:
@@ -88,7 +89,7 @@ def run_primary(state, event_pipes, secondary_pipe, q_error, q_notify, q_in, _q_
             error = error.replace("FD Read Error and PID Read Error and FUSE Read Error for", "Read Error for")
             if len(error) > 50:
                 error = error[:47] + "..."
-            _toast(q_notify, error, file=sys.stderr)
+            _toast(q_notify, error, level=logging.WARNING)
         save_state(state)
         for event_pipe in event_pipes:
             event_pipe.close()
@@ -143,7 +144,7 @@ def run_primary(state, event_pipes, secondary_pipe, q_error, q_notify, q_in, _q_
                 # don't need to toast fallback success messages
                 if error.startswith("Fallback to FUSE hash successful on ") or error.startswith("Fallback to PID hash successful on "):
                     continue
-                _toast(q_notify, error, file=sys.stderr)
+                _toast(q_notify, error, level=logging.WARNING)
             # get list of new processes and connections since last update
             listen.clear()
             if not ready.wait(timeout=300):

@@ -24,6 +24,7 @@ import grp
 import hashlib
 import ipaddress
 import json
+import logging
 import multiprocessing
 import os
 import pickle
@@ -45,13 +46,13 @@ def drop_root_permanent(uid: int, gid: int) -> None:
     os.setgid(gid)
     os.setuid(uid)
     if os.getuid() != uid or os.getgid() != gid:
-        print("Failed to drop root privileges", file=sys.stderr)
+        logging.error("Failed to drop root privileges")
         sys.exit(1)
     try:
         os.setuid(0)
     except PermissionError:
         return
-    print("FATAL: was able to regain root after dropping privileges", file=sys.stderr)
+    logging.error("FATAL: was able to regain root after dropping privileges")
     sys.exit(1)
 
 
@@ -147,8 +148,12 @@ def load_state() -> dict:
         for key in ["Executables", "Names", "Parent Executables", "Parent Names", "SHA256"]:
             if key in state_record:
                 data[key] = state_record[key]
-    assert all(type(data[key]) is type(template[key]) for key in template), "Invalid json files"
-    assert all(key in ["Set RLIMIT_NOFILE", "Set st_dev mask"] or type(data["Config"][key]) is type(template["Config"][key]) for key in template["Config"]), "Invalid config"
+    if not all(type(data[key]) is type(template[key]) for key in template):
+        logging.error("Invalid json files")
+        sys.exit(1)
+    if not all(key in ["Set RLIMIT_NOFILE", "Set st_dev mask"] or type(data["Config"][key]) is type(template["Config"][key]) for key in template["Config"]):
+        logging.error("Invalid config")
+        sys.exit(1)
     return data
 
 
@@ -172,7 +177,7 @@ def save_state(state: dict, write_record: bool = True) -> None:
             with open(state_path, "w", encoding="utf-8", errors="surrogateescape") as f:
                 json.dump(state, f, indent=2, separators=(",", ": "), sort_keys=True, ensure_ascii=False)
     except Exception as e:
-        print(f"picosnitch write error: {type(e).__name__}{e.args}", file=sys.stderr)
+        logging.error(f"picosnitch write error: {type(e).__name__}{e.args}")
     state["Config"] = snitch_config
     state["Error Log"] = []
     state["Exe Log"] = []

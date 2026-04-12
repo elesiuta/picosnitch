@@ -17,6 +17,7 @@
 
 # https://github.com/elesiuta/picosnitch
 
+import logging
 import multiprocessing
 import queue
 import sys
@@ -60,7 +61,7 @@ def run_notifications(config: dict, q_error, q_in, _q_out):
                     last_notification = msg
                     system_notification(msg)
             else:
-                print(msg, file=sys.stderr)
+                logging.warning(msg)
                 pending.append(msg)
                 if config["Desktop notifications"]:
                     try:

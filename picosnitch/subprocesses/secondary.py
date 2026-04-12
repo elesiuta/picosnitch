@@ -20,6 +20,7 @@
 import collections
 import importlib
 import ipaddress
+import logging
 import multiprocessing
 import os
 import pickle
@@ -161,7 +162,10 @@ def run_secondary(state, fan_fd, p_fuse: ProcessManager, p_virustotal: ProcessMa
         con = sqlite3.connect(file_path)
         cur = con.cursor()
         cur.execute(""" PRAGMA user_version """)
-        assert cur.fetchone()[0] == 3, f"Incorrect database version of picosnitch.db for picosnitch v{VERSION}"
+        db_version = cur.fetchone()[0]
+        if db_version != 3:
+            logging.error(f"Incorrect database version of picosnitch.db for picosnitch v{VERSION}")
+            sys.exit(1)
         cur.execute(""" DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") """ % int(state["Config"]["DB retention (days)"]))
         con.commit()
         con.close()

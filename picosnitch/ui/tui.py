@@ -22,6 +22,7 @@ import curses
 import datetime
 import ipaddress
 import json
+import logging
 import os
 import pwd
 import queue
@@ -67,7 +68,7 @@ def init_geoip():
             except Exception:
                 if not os.path.isfile(geoip_mmdb):
                     raise Exception("Could not download GeoIP database")
-                print("Could not update GeoIP database, using old version", file=sys.stderr)
+                logging.warning("Could not update GeoIP database, using old version")
         return geoip2.database.Reader(geoip_mmdb)
     except Exception:
         return None
@@ -502,13 +503,16 @@ def tui_init() -> int:
     # check for table
     cur = con.cursor()
     cur.execute(""" PRAGMA user_version """)
-    assert cur.fetchone()[0] == 3, f"Incorrect database version of picosnitch.db for picosnitch v{VERSION}"
+    db_version = cur.fetchone()[0]
+    if db_version != 3:
+        logging.error(f"Incorrect database version of picosnitch.db for picosnitch v{VERSION}")
+        sys.exit(1)
     con.close()
     # start curses
     for err_count in reversed(range(30)):
         try:
             return curses.wrapper(tui_loop, splash)
         except curses.error:
-            print("CURSES DISPLAY ERROR: try resizing your terminal, ui will close in %s seconds" % (err_count + 1), file=sys.stderr)
+            logging.warning(f"CURSES DISPLAY ERROR: try resizing your terminal, ui will close in {err_count + 1} seconds")
             time.sleep(1)
     return 1

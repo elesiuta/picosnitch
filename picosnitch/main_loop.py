@@ -19,6 +19,7 @@
 
 import ctypes
 import ctypes.util
+import logging
 import multiprocessing
 import os
 import signal
@@ -44,7 +45,9 @@ def run_main_loop(state: dict):
     _FAN_UNLIMITED_MARKS = 0x20
     flags = _FAN_CLASS_CONTENT if FD_CACHE < 8192 else _FAN_CLASS_CONTENT | _FAN_UNLIMITED_MARKS
     fan_fd = libc.fanotify_init(flags, os.O_RDONLY)
-    assert fan_fd >= 0, "fanotify_init() failed"
+    if fan_fd < 0:
+        logging.error("fanotify_init() failed")
+        sys.exit(1)
     # start subprocesses
     event_pipes = [multiprocessing.Pipe(duplex=False) for i in range(5)]
     event_recv_pipes, event_send_pipes = zip(*event_pipes)

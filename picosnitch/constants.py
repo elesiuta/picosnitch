@@ -18,6 +18,7 @@
 # https://github.com/elesiuta/picosnitch
 
 import json
+import logging
 import os
 import resource
 import sys
@@ -28,12 +29,12 @@ import psutil
 
 # picosnitch version and supported platform
 VERSION: typing.Final[str] = "1.0.3"
-assert sys.version_info >= (3, 12), "Python version >= 3.12 is required"
-assert sys.platform.startswith("linux"), "Did not detect a supported operating system"
-
-# warning about -O (optimize) flag since asserts are disabled and some are critical
-if sys.flags.optimize > 0:
-    print("Warning: picosnitch does not function properly with the -O (optimize) flag", file=sys.stderr)
+if sys.version_info < (3, 12):
+    logging.error("Python version >= 3.12 is required")
+    sys.exit(1)
+if not sys.platform.startswith("linux"):
+    logging.error("Did not detect a supported operating system")
+    sys.exit(1)
 
 # FHS standard paths
 CONFIG_DIR: typing.Final[str] = "/etc/picosnitch"
@@ -53,8 +54,8 @@ try:
             resource.setrlimit(resource.RLIMIT_NOFILE, new_limit)
             time.sleep(0.5)
         except Exception as e:
-            print(type(e).__name__ + str(e.args), file=sys.stderr)
-            print("Error: Set RLIMIT_NOFILE was found in config.json but it could not be set", file=sys.stderr)
+            logging.error(f"{type(e).__name__}{e.args}")
+            logging.error("Set RLIMIT_NOFILE was found in config.json but it could not be set")
 except Exception:
     pass
 FD_CACHE: typing.Final[int] = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128
@@ -65,10 +66,7 @@ try:
         if part.fstype == "btrfs":
             st_dev_mask = 0
             if not os.path.exists(os.path.join(CONFIG_DIR, "config.json")):
-                print(
-                    "Warning: running picosnitch on systems with btrfs is not fully supported due to dev number strangeness and non-unique inodes (this is still fine for most use cases)",
-                    file=sys.stderr,
-                )
+                logging.warning("running picosnitch on systems with btrfs is not fully supported due to dev number strangeness and non-unique inodes (this is still fine for most use cases)")
             break
     file_path = os.path.join(CONFIG_DIR, "config.json")
     with open(file_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:

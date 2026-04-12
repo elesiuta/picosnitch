@@ -20,6 +20,7 @@
 import atexit
 import importlib
 import json
+import logging
 import os
 import sqlite3
 import subprocess
@@ -37,7 +38,7 @@ from .utils import apply_data_permissions, load_state
 def check_root(cmd: str) -> int | None:
     """check for root privileges, return exit code on failure"""
     if os.getuid() != 0:
-        print(f"This command requires root. Try: sudo {os.path.abspath(sys.argv[0])} {cmd}", file=sys.stderr)
+        logging.error(f"This command requires root. Try: sudo {os.path.abspath(sys.argv[0])} {cmd}")
         return 1
     return None
 
@@ -48,14 +49,14 @@ def check_bpf() -> int | None:
         proc_status = f.read()
     capeff = int(proc_status[proc_status.find("CapEff:") + 8 :].splitlines()[0].strip(), base=16)
     if not (capeff & (1 << 21)):
-        print("Missing capability CAP_SYS_ADMIN", file=sys.stderr)
+        logging.error("Missing capability CAP_SYS_ADMIN")
         return 1
     from .bpf_wrapper import check_bpf_requirements
 
     try:
         check_bpf_requirements()
     except (RuntimeError, FileNotFoundError) as e:
-        print(str(e), file=sys.stderr)
+        logging.error(f"{e}")
         return 1
     return None
 
@@ -64,8 +65,8 @@ def check_database() -> int | None:
     """check database exists and has correct version, return exit code on failure"""
     db_path = os.path.join(DATA_DIR, "picosnitch.db")
     if not os.path.exists(db_path):
-        print(f"Database not found: {db_path}", file=sys.stderr)
-        print(f"Run: sudo {os.path.abspath(sys.argv[0])} init", file=sys.stderr)
+        logging.error(f"Database not found: {db_path}")
+        logging.error(f"Run: sudo {os.path.abspath(sys.argv[0])} init")
         return 1
     con = sqlite3.connect(db_path)
     cur = con.cursor()
@@ -73,7 +74,7 @@ def check_database() -> int | None:
     user_version = cur.fetchone()[0]
     con.close()
     if user_version != 3:
-        print(f"Unsupported database version {user_version}, expected 3", file=sys.stderr)
+        logging.error(f"Unsupported database version {user_version}, expected 3")
         return 1
     return None
 
@@ -87,7 +88,7 @@ def init_dirs_and_config() -> None:
         state = load_state()
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(state["Config"], f, indent=2, separators=(",", ": "), sort_keys=True, ensure_ascii=False)
-        print(f"wrote default config to {config_path}")
+        logging.info(f"wrote default config to {config_path}")
     db_path = os.path.join(DATA_DIR, "picosnitch.db")
     if not os.path.exists(db_path):
         con = sqlite3.connect(db_path)
@@ -109,7 +110,7 @@ def main():
     with open(pid_file, "r") as f:
         pid = int(f.read().strip())
     if pid != os.getpid():
-        print(f"PID mismatch: pidfile has {pid}, current process is {os.getpid()}", file=sys.stderr)
+        logging.error(f"PID mismatch: pidfile has {pid}, current process is {os.getpid()}")
         sys.exit(1)
     sys.exit(run_main_loop(state))
 
@@ -197,9 +198,9 @@ def start_picosnitch():
     # nix platform checks
     if sys.executable.startswith("/nix/"):
         if cmd in ("start", "stop", "restart"):
-            print("WARNING: built in daemon mode is not supported on Nix, use picosnitch start-no-daemon or systemctl instead", file=sys.stderr)
+            logging.warning("built in daemon mode is not supported on Nix, use picosnitch start-no-daemon or systemctl instead")
         if cmd == "systemd":
-            print("Command not supported on Nix, add `services.picosnitch.enable = true;` to your Nix configuration", file=sys.stderr)
+            logging.error("Command not supported on Nix, add `services.picosnitch.enable = true;` to your Nix configuration")
             return 2
     # command dispatch
     if cmd == "help":
@@ -220,7 +221,7 @@ def start_picosnitch():
         if err := check_root(cmd):
             return err
         init_dirs_and_config()
-        print("picosnitch initialized")
+        logging.info("picosnitch initialized")
         return 0
     elif cmd == "systemd":
         if err := check_root(cmd):
@@ -228,19 +229,19 @@ def start_picosnitch():
         with open("/usr/lib/systemd/system/picosnitch.service", "w") as f:
             f.write(systemd_service)
         subprocess.run(["systemctl", "daemon-reload"])
-        print("Wrote /usr/lib/systemd/system/picosnitch.service\nYou can now run picosnitch using systemctl")
+        logging.info("Wrote /usr/lib/systemd/system/picosnitch.service\nYou can now run picosnitch using systemctl")
         return 0
     elif cmd == "stop":
         if err := check_root(cmd):
             return err
         if os.path.exists("/usr/lib/systemd/system/picosnitch.service") or os.path.exists("/etc/systemd/system/picosnitch.service"):
-            print("Found picosnitch.service but you are not using systemctl")
+            logging.info("Found picosnitch.service but you are not using systemctl")
             if sys.stdin.isatty():
                 confirm = input(f"Did you intend to run `systemctl {cmd} picosnitch` (y/N)? ")
                 if confirm.lower().startswith("y"):
                     subprocess.run(["systemctl", cmd, "picosnitch"])
                     return 0
-        print("stopping picosnitch daemon")
+        logging.info("stopping picosnitch daemon")
         Daemon(pid_file).stop()
         return 0
     elif cmd in ("start", "restart", "start-no-daemon"):
@@ -254,7 +255,7 @@ def start_picosnitch():
         # offer systemctl for start/restart
         if cmd in ("start", "restart"):
             if os.path.exists("/usr/lib/systemd/system/picosnitch.service") or os.path.exists("/etc/systemd/system/picosnitch.service"):
-                print("Found picosnitch.service but you are not using systemctl")
+                logging.info("Found picosnitch.service but you are not using systemctl")
                 if sys.stdin.isatty():
                     confirm = input(f"Did you intend to run `systemctl {cmd} picosnitch` (y/N)? ")
                     if confirm.lower().startswith("y"):
@@ -267,7 +268,7 @@ def start_picosnitch():
             table_name = sql_kwargs.pop("table_name", "connections")
             sql = importlib.import_module(sql_client)
             if sql_client not in ["mariadb", "psycopg", "psycopg2", "pymysql"]:
-                print(f'Warning, using {sql_client} for "DB sql server" "client" may not be supported, ensure it implements PEP 249', file=sys.stderr)
+                logging.warning(f'using {sql_client} for "DB sql server" "client" may not be supported, ensure it implements PEP 249')
             try:
                 con = sql.connect(**sql_kwargs)
                 cur = con.cursor()
@@ -276,18 +277,18 @@ def start_picosnitch():
                 con.commit()
                 con.close()
             except Exception as e:
-                print("Warning: %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno), file=sys.stderr)
+                logging.warning(f"{type(e).__name__}{e.args} on line {sys.exc_info()[2].tb_lineno}")
         apply_data_permissions(CONFIG_DIR, DATA_DIR, LOG_DIR, CACHE_DIR)
         # dispatch
         if cmd == "start":
-            print("starting picosnitch daemon")
+            logging.info("starting picosnitch daemon")
             PicoDaemon(pid_file).start()
         elif cmd == "restart":
-            print("restarting picosnitch daemon")
+            logging.info("restarting picosnitch daemon")
             PicoDaemon(pid_file).restart()
         elif cmd == "start-no-daemon":
             if os.path.exists(pid_file):
-                print(f"pid file already exists: {pid_file}", file=sys.stderr)
+                logging.error(f"pid file already exists: {pid_file}")
                 return 1
 
             def delpid():
@@ -300,10 +301,10 @@ def start_picosnitch():
             os.makedirs(RUN_DIR, exist_ok=True)
             with open(pid_file, "w") as f:
                 f.write(str(os.getpid()) + "\n")
-            print("starting picosnitch in simple mode")
-            print(f"config: {CONFIG_DIR}")
-            print(f"data: {DATA_DIR}")
-            print(f"logs: {LOG_DIR}")
+            logging.info("starting picosnitch in simple mode")
+            logging.info(f"config: {CONFIG_DIR}")
+            logging.info(f"data: {DATA_DIR}")
+            logging.info(f"logs: {LOG_DIR}")
             sys.exit(main())
         return 0
     elif cmd == "dash":
@@ -316,10 +317,10 @@ def start_picosnitch():
 
             _ = dash.__version__ and pandas.__version__ and plotly.__version__
         except ImportError as e:
-            print(f"Missing required package for web dashboard: {e.name}", file=sys.stderr)
+            logging.error(f"Missing required package for web dashboard: {e.name}")
             return 1
-        print(f"serving web gui on http://{os.getenv('HOST', 'localhost')}:{os.getenv('PORT', '5100')}")
-        print("if this fails, try running `picosnitch start-dash` to see any errors")
+        logging.info(f"serving web gui on http://{os.getenv('HOST', 'localhost')}:{os.getenv('PORT', '5100')}")
+        logging.info("if this fails, try running `picosnitch start-dash` to see any errors")
         return web_dashboard()
     elif cmd == "start-dash":
         if err := check_database():
