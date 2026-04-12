@@ -75,13 +75,29 @@ def init_dirs_and_config() -> None:
     if not db_path.exists():
         con = sqlite3.connect(db_path)
         cur = con.cursor()
-        cur.execute(""" CREATE TABLE connections
-                        (contime integer, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text) """)
+        cur.execute(""" CREATE TABLE executables (
+                        id INTEGER PRIMARY KEY,
+                        exe TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        cmdline TEXT NOT NULL,
+                        sha256 TEXT NOT NULL,
+                        UNIQUE(exe, name, cmdline, sha256)) """)
+        cur.execute(""" CREATE TABLE connections (
+                        contime INTEGER NOT NULL,
+                        send INTEGER NOT NULL,
+                        recv INTEGER NOT NULL,
+                        exe_id INTEGER NOT NULL REFERENCES executables(id),
+                        pexe_id INTEGER NOT NULL REFERENCES executables(id),
+                        uid INTEGER NOT NULL,
+                        lport INTEGER NOT NULL,
+                        rport INTEGER NOT NULL,
+                        laddr TEXT NOT NULL DEFAULT '',
+                        raddr TEXT NOT NULL DEFAULT '',
+                        domain TEXT NOT NULL DEFAULT '') """)
         cur.execute(""" CREATE INDEX idx_contime ON connections(contime) """)
-        cur.execute(""" CREATE INDEX idx_exe ON connections(exe) """)
-        cur.execute(""" CREATE INDEX idx_name ON connections(name) """)
+        cur.execute(""" CREATE INDEX idx_exe_id ON connections(exe_id) """)
+        cur.execute(""" CREATE INDEX idx_pexe_id ON connections(pexe_id) """)
         cur.execute(""" PRAGMA journal_mode=WAL """)
-        cur.execute(""" PRAGMA synchronous=NORMAL """)
         cur.execute(""" PRAGMA user_version = 4 """)
         con.commit()
         con.close()
@@ -266,8 +282,25 @@ def start_picosnitch() -> int:
             try:
                 con = sql.connect(**sql_kwargs)
                 cur = con.cursor()
-                cur.execute(f""" CREATE TABLE IF NOT EXISTS {table_name}
-                                 (contime integer, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text) """)
+                cur.execute(f""" CREATE TABLE IF NOT EXISTS {table_name}_executables (
+                                 id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                                 exe TEXT NOT NULL,
+                                 name TEXT NOT NULL,
+                                 cmdline TEXT NOT NULL,
+                                 sha256 TEXT NOT NULL,
+                                 UNIQUE(exe(255), name(255), cmdline(255), sha256(64))) """)
+                cur.execute(f""" CREATE TABLE IF NOT EXISTS {table_name} (
+                                 contime INTEGER NOT NULL,
+                                 send INTEGER NOT NULL,
+                                 recv INTEGER NOT NULL,
+                                 exe_id INTEGER NOT NULL,
+                                 pexe_id INTEGER NOT NULL,
+                                 uid INTEGER NOT NULL,
+                                 lport INTEGER NOT NULL,
+                                 rport INTEGER NOT NULL,
+                                 laddr TEXT NOT NULL DEFAULT '',
+                                 raddr TEXT NOT NULL DEFAULT '',
+                                 domain TEXT NOT NULL DEFAULT '') """)
                 con.commit()
                 con.close()
             except Exception as e:

@@ -27,6 +27,22 @@ def web_dashboard() -> int:
     config = load_config()
     file_path = DATA_DIR / "picosnitch.db"
     all_dims = ["exe", "name", "cmdline", "sha256", "uid", "lport", "rport", "laddr", "raddr", "domain", "pexe", "pname", "pcmdline", "psha256"]
+    dim_sql = {
+        "exe": "e.exe",
+        "name": "e.name",
+        "cmdline": "e.cmdline",
+        "sha256": "e.sha256",
+        "uid": "c.uid",
+        "lport": "c.lport",
+        "rport": "c.rport",
+        "laddr": "c.laddr",
+        "raddr": "c.raddr",
+        "domain": "c.domain",
+        "pexe": "p.exe",
+        "pname": "p.name",
+        "pcmdline": "p.cmdline",
+        "psha256": "p.sha256",
+    }
     dim_labels = {
         "exe": "Executable",
         "name": "Process Name",
@@ -43,6 +59,7 @@ def web_dashboard() -> int:
         "pcmdline": "Parent Command",
         "psha256": "Parent SHA256",
     }
+    from_clause = "connections c JOIN executables e ON c.exe_id = e.id JOIN executables p ON c.pexe_id = p.id"
     time_period = [
         "all",
         "1 minute",
@@ -403,13 +420,14 @@ def web_dashboard() -> int:
             time_query = ""
         else:
             if where and whereis:
-                time_query = f" AND contime > {time_start_ts} AND contime < {time_end_ts}"
+                time_query = f" AND c.contime > {time_start_ts} AND c.contime < {time_end_ts}"
             else:
-                time_query = f" WHERE contime > {time_start_ts} AND contime < {time_end_ts}"
+                time_query = f" WHERE c.contime > {time_start_ts} AND c.contime < {time_end_ts}"
         if where and whereis:
-            query = f'SELECT {dim}, contime, send, recv FROM connections WHERE {where} IS "{whereis}"{time_query}'
+            where_sql = dim_sql[where]
+            query = f'SELECT {dim_sql[dim]} AS {dim}, c.contime, c.send, c.recv FROM {from_clause} WHERE {where_sql} IS "{whereis}"{time_query}'
         else:
-            query = f"SELECT {dim}, contime, send, recv FROM connections{time_query}"
+            query = f"SELECT {dim_sql[dim]} AS {dim}, c.contime, c.send, c.recv FROM {from_clause}{time_query}"
         # run query and populate whereis options
         con = sqlite3.connect(file_path)
         df = psql.read_sql(query, con)
@@ -417,9 +435,10 @@ def web_dashboard() -> int:
         df["contime"] = pd.to_datetime(df["contime"], unit="s")
         whereis_options = []
         if where:
+            where_sql = dim_sql[where]
             if time_query.startswith(" AND"):
                 time_query = time_query.replace(" AND", " WHERE", 1)
-            query = f"SELECT DISTINCT {where} FROM connections{time_query}"
+            query = f"SELECT DISTINCT {where_sql} FROM {from_clause}{time_query}"
             cur = con.cursor()
             cur.execute(query)
             whereis_values = cur.fetchall()

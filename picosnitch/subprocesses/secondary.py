@@ -129,16 +129,12 @@ def build_log_entries(
             laddr = ipaddress.ip_address(proc["laddr"])
             if any(laddr in network for network in ignored_networks):
                 continue
-        # create sql entry
+        # create sql entry (exe info as tuples for normalization, connection-specific fields)
+        exe_key = (proc["exe"], proc["name"], proc["cmdline"], sha256)
+        pexe_key = (proc["pexe"], proc["pname"], proc["pcmdline"], psha256)
         event = (
-            proc["exe"],
-            proc["name"],
-            proc["cmdline"],
-            sha256,
-            proc["pexe"],
-            proc["pname"],
-            proc["pcmdline"],
-            psha256,
+            exe_key,
+            pexe_key,
             proc["uid"],
             proc["lport"],
             proc["rport"],
@@ -171,11 +167,14 @@ def run_secondary(
     # maintain a separate copy of the state dictionary here and coordinate with the primary subprocess (sha256 and vt_results)
     sync_vt_results(state, p_virustotal.q_in, q_primary_in, True)
     # init sql
-    # (contime integer, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text)
-    # (datetime_now, send, recv, *(proc["exe"], proc["name"], proc["cmdline"], sha256, proc["pexe"], proc["pname"], proc["pcmdline"], psha256, proc["uid"], proc["lport"], proc["rport"], proc["laddr"], proc["raddr"], proc["domain"]))
-    sqlite_query = """ INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) """
+    # connections: (contime integer, send integer, recv integer, exe_id integer, pexe_id integer, uid integer, lport integer, rport integer, laddr text, raddr text, domain text)
+    # executables: (id integer primary key, exe text, name text, cmdline text, sha256 text)
+    sqlite_insert_exe = "INSERT OR IGNORE INTO executables(exe, name, cmdline, sha256) VALUES (?, ?, ?, ?)"
+    sqlite_select_exe = "SELECT id FROM executables WHERE exe = ? AND name = ? AND cmdline = ? AND sha256 = ?"
+    sqlite_insert_conn = "INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     file_path = DATA_DIR / "picosnitch.db"
     text_path = LOG_DIR / "conn.log"
+    exe_id_cache: dict[tuple, int] = {}
     if config.database.enabled:
         con = sqlite3.connect(file_path)
         cur = con.cursor()
@@ -192,12 +191,24 @@ def run_secondary(
         sql_client = sql_kwargs.pop("client", "no client error")
         table_name = sql_kwargs.pop("table_name", "connections")
         sql = importlib.import_module(sql_client)
-        sql_query = sqlite_query.replace("?", "%s").replace("connections", table_name)
+        sql_insert_exe = sqlite_insert_exe.replace("?", "%s").replace("OR IGNORE ", "IGNORE ").replace("executables", f"{table_name}_executables")
+        sql_select_exe = sqlite_select_exe.replace("?", "%s").replace("executables", f"{table_name}_executables")
+        sql_insert_conn = sqlite_insert_conn.replace("?", "%s").replace("connections", table_name)
     log_destinations = int(bool(config.database.enabled)) + int(bool(sql_kwargs)) + int(bool(config.database.text_log))
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
     # get network address and mask for ignored IP subnets
     ignored_networks = [ipaddress.ip_network(ip_subnet) for ip_subnet in config.log.ignore_ips]
+
+    # resolve exe tuples to IDs with caching
+    def resolve_exe_id(con: sqlite3.Connection, exe_key: tuple) -> int:
+        if exe_key in exe_id_cache:
+            return exe_id_cache[exe_key]
+        con.execute(sqlite_insert_exe, exe_key)
+        row = con.execute(sqlite_select_exe, exe_key).fetchone()
+        exe_id_cache[exe_key] = row[0]
+        return row[0]
+
     # main loop
     transaction = []
     new_processes = []
@@ -255,7 +266,12 @@ def run_secondary(
                     if config.database.enabled:
                         con = sqlite3.connect(file_path)
                         with con:
-                            con.executemany(sqlite_query, transaction)
+                            conn_rows = []
+                            for contime, send, recv, exe_key, pexe_key, uid, lport, rport, laddr, raddr, domain in transaction:
+                                exe_id = resolve_exe_id(con, exe_key)
+                                pexe_id = resolve_exe_id(con, pexe_key)
+                                conn_rows.append((contime, send, recv, exe_id, pexe_id, uid, lport, rport, laddr, raddr, domain))
+                            con.executemany(sqlite_insert_conn, conn_rows)
                         con.close()
                         transaction_success = True
                 except Exception as e:
@@ -264,7 +280,16 @@ def run_secondary(
                     if sql_kwargs:
                         con = sql.connect(**sql_kwargs)
                         with con.cursor() as cur:
-                            cur.executemany(sql_query, transaction)
+                            conn_rows = []
+                            for contime, send, recv, exe_key, pexe_key, uid, lport, rport, laddr, raddr, domain in transaction:
+                                cur.execute(sql_insert_exe, exe_key)
+                                cur.execute(sql_select_exe, exe_key)
+                                exe_id = cur.fetchone()[0]
+                                cur.execute(sql_insert_exe, pexe_key)
+                                cur.execute(sql_select_exe, pexe_key)
+                                pexe_id = cur.fetchone()[0]
+                                conn_rows.append((contime, send, recv, exe_id, pexe_id, uid, lport, rport, laddr, raddr, domain))
+                            cur.executemany(sql_insert_conn, conn_rows)
                         con.commit()
                         con.close()
                         transaction_success = True
@@ -273,9 +298,10 @@ def run_secondary(
                 try:
                     if config.database.text_log:
                         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
-                            for entry in transaction:
-                                clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in entry]
-                                clean_entry[0] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(entry[0]))
+                            for contime, send, recv, exe_key, pexe_key, uid, lport, rport, laddr, raddr, domain in transaction:
+                                flat = (contime, send, recv, *exe_key, *pexe_key, uid, lport, rport, laddr, raddr, domain)
+                                clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in flat]
+                                clean_entry[0] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(contime))
                                 text_file.write(",".join(clean_entry) + "\n")
                         transaction_success = True
                 except Exception as e:

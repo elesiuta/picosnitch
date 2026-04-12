@@ -165,7 +165,7 @@ def query_db(query: str) -> list:
 
 def get_connections_for_process(process_name: str) -> list:
     """Get all connections for a process name."""
-    return query_db(f"SELECT name, exe, raddr, rport, send, recv, domain FROM connections WHERE name LIKE '%{process_name}%'")
+    return query_db(f"SELECT e.name, e.exe, c.raddr, c.rport, c.send, c.recv, c.domain FROM connections c JOIN executables e ON c.exe_id = e.id WHERE e.name LIKE '%{process_name}%'")
 
 
 @pytest.fixture(scope="module")
@@ -224,7 +224,7 @@ class TestShortLivedProcesses:
 
         time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
 
-        results = query_db("SELECT sha256 FROM connections WHERE name LIKE '%curl%' AND sha256 NOT LIKE '!%' LIMIT 1")
+        results = query_db("SELECT e.sha256 FROM connections c JOIN executables e ON c.exe_id = e.id WHERE e.name LIKE '%curl%' AND e.sha256 NOT LIKE '!%' LIMIT 1")
         assert len(results) > 0, "Should have a valid SHA256 for curl"
         sha256 = results[0][0]
         assert sha256 == expected_hash, f"SHA256 mismatch: got {sha256}, expected {expected_hash}"
@@ -296,6 +296,9 @@ class TestDatabaseIntegrity:
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='connections'")
         tables = cur.fetchall()
         assert len(tables) == 1, "connections table should exist"
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='executables'")
+        tables = cur.fetchall()
+        assert len(tables) == 1, "executables table should exist"
         con.close()
 
     def test_no_device_mismatch_errors(self, picosnitch_session):

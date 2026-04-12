@@ -161,6 +161,11 @@ digraph G {
             "picosnitch__subprocesses__secondary__build_log_entries" [label="build_log_entries", style="filled", fillcolor="#6581ffb2", fontcolor="#000000", group="7"];
             "picosnitch__subprocesses__secondary__resolve_hash" [label="resolve_hash", style="filled", fillcolor="#6581ffb2", fontcolor="#000000", group="7"];
             "picosnitch__subprocesses__secondary__run_secondary" [label="run_secondary", style="filled", fillcolor="#6581ffb2", fontcolor="#000000", group="7"];
+            subgraph "cluster_picosnitch__subprocesses__secondary__run_secondary" {
+
+                graph [style="filled,rounded", fillcolor="#80808018", label="picosnitch.subprocesses.secondary.run_secondary"];
+                "picosnitch__subprocesses__secondary__run_secondary__resolve_exe_id" [label="resolve_exe_id", style="filled", fillcolor="#3258ffb2", fontcolor="#000000", group="7"];
+            }
         }
         subgraph "cluster_picosnitch__subprocesses__virustotal" {
 
@@ -460,6 +465,8 @@ digraph G {
         "picosnitch__subprocesses__secondary__run_secondary" -> "picosnitch__process_manager__ProcessManager" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary__run_secondary" -> "picosnitch__process_manager__ProcessManager__is_alive" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary__run_secondary" -> "picosnitch__subprocesses__secondary__build_log_entries" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__secondary__run_secondary" -> "picosnitch__subprocesses__secondary__run_secondary__resolve_exe_id" [style="dashed",  color="#ffffff00"];
+        "picosnitch__subprocesses__secondary__run_secondary" -> "picosnitch__subprocesses__secondary__run_secondary__resolve_exe_id" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary__run_secondary" -> "picosnitch__utils__get_fanotify_events" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary__run_secondary" -> "picosnitch__utils__sync_vt_results" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__virustotal" -> "picosnitch__subprocesses__virustotal__run_virustotal" [style="dashed",  color="#ffffff00"];

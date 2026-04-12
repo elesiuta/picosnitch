@@ -163,7 +163,7 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
             except Exception:
                 return f"{chr(0x2753)}{chr(0x200B)} {ip}"  # question emoji + ZWSP so line length is counted correctly
 
-    # screens from queries (exe text, name text, cmdline text, sha256 text, contime text, domain text, ip text, port integer, uid integer)
+    # screens from queries, columns from normalized schema with executables table joined as e (process) and p (parent)
     tab_i = 0
     tab_names = [
         "Executables",
@@ -199,7 +199,8 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
         "Domain",
         "Entry Time",
     ]
-    col_sql = ["exe", "name", "cmdline", "sha256", "pexe", "pname", "pcmdline", "psha256", "uid", "lport", "rport", "laddr", "raddr", "domain", "contime"]
+    col_sql = ["e.exe", "e.name", "e.cmdline", "e.sha256", "p.exe", "p.name", "p.cmdline", "p.sha256", "c.uid", "c.lport", "c.rport", "c.laddr", "c.raddr", "c.domain", "c.contime"]
+    from_clause = "connections c JOIN executables e ON c.exe_id = e.id JOIN executables p ON c.pexe_id = p.id"
     tab_stack = []
     byte_units = 3
 
@@ -252,14 +253,14 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
                 time_query = ""
             else:
                 if tab_stack:
-                    time_query = f" AND contime > {time_start_ts} AND contime < {time_end_ts}"
+                    time_query = f" AND c.contime > {time_start_ts} AND c.contime < {time_end_ts}"
                 else:
-                    time_query = f" WHERE contime > {time_start_ts} AND contime < {time_end_ts}"
+                    time_query = f" WHERE c.contime > {time_start_ts} AND c.contime < {time_end_ts}"
             if tab_stack:
                 filter_query = " AND ".join(f'{col_sql[i]} IS {exclude}"{value}"' for i, exclude, value in zip(tab_stack, filter_exclude, filter_values))
-                current_query = f"SELECT {col_sql[tab_i]}, SUM(send), SUM(recv) FROM connections WHERE {filter_query}{time_query} GROUP BY {col_sql[tab_i]}"
+                current_query = f"SELECT {col_sql[tab_i]}, SUM(c.send), SUM(c.recv) FROM {from_clause} WHERE {filter_query}{time_query} GROUP BY {col_sql[tab_i]}"
             else:
-                current_query = f"SELECT {col_sql[tab_i]}, SUM(send), SUM(recv) FROM connections{time_query} GROUP BY {col_sql[tab_i]}"
+                current_query = f"SELECT {col_sql[tab_i]}, SUM(c.send), SUM(c.recv) FROM {from_clause}{time_query} GROUP BY {col_sql[tab_i]}"
             update_query = False
         if execute_query:
             current_screen = []
@@ -353,18 +354,18 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
                 stdscr.attrset(curses.color_pair(0))
             if first_line <= line - offset < curses.LINES - 1:
                 # special cases (cmdline null chars, uid, ip, contime, sha256 and vt results)
-                if col_sql[tab_i] == "contime":
+                if col_sql[tab_i] == "c.contime":
                     name = datetime.datetime.fromtimestamp(name).strftime("%Y-%m-%d %H:%M:%S")
                 elif isinstance(name, str):
                     name = name.replace("\0", "")
-                elif col_sql[tab_i] == "uid":
+                elif col_sql[tab_i] == "c.uid":
                     try:
                         name = f"{pwd.getpwuid(name).pw_name} ({name})"
                     except Exception:
                         name = f"??? ({name})"
-                if col_sql[tab_i] == "raddr":
+                if col_sql[tab_i] == "c.raddr":
                     name = get_geoip(name)
-                if col_sql[tab_i].endswith("sha256"):
+                if col_sql[tab_i].endswith(".sha256"):
                     name = f"{name}{vt_status[name]}"
                 value = f"{round_bytes(send, byte_units):>14.14} {round_bytes(recv, byte_units):>14.14}"
                 stdscr.addstr(line - offset, 0, f"{name!s:<{curses.COLS - 29}.{curses.COLS - 29}}{value}")
