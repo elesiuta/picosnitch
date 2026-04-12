@@ -27,8 +27,10 @@ import typing
 
 import psutil
 
+from . import __version__
+
 # picosnitch version and supported platform
-VERSION: typing.Final[str] = "1.0.3"
+VERSION: typing.Final[str] = __version__
 if sys.version_info < (3, 12):
     logging.error("Python version >= 3.12 is required")
     sys.exit(1)

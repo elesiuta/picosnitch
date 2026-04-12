@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "picosnitch"
-version = "1.0.3"
+dynamic = ["version"]
 requires-python = ">=3.12"
 description = "Monitor network traffic per executable using BPF"
 urls = { "Homepage" = "https://github.com/elesiuta/picosnitch" }
@@ -33,6 +33,9 @@ full = [
 
 [project.scripts]
 picosnitch = "picosnitch.cli:start_picosnitch"
+
+[tool.hatch.version]
+path = "picosnitch/__init__.py"
 
 [tool.hatch.build.targets.sdist]
 include = [
