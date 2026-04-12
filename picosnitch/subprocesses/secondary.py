@@ -82,9 +82,8 @@ def build_log_entries(
     ignored_networks: list,
 ) -> list[tuple]:
     """iterate over the list of process/connection data to generate a list of entries for the sql database"""
-    datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
-    traffic_counter = collections.defaultdict(int)
-    transaction = set()
+    datetime_now = int(time.time())
+    traffic_counter: dict[tuple, list[int]] = {}
     for proc_pickle in new_processes:
         proc: BpfEvent = pickle.loads(proc_pickle)
         if not isinstance(proc, dict):
@@ -147,10 +146,12 @@ def build_log_entries(
             proc["raddr"],
             proc["domain"],
         )
-        traffic_counter["send " + str(event)] += proc["send"]
-        traffic_counter["recv " + str(event)] += proc["recv"]
-        transaction.add(event)
-    return [(datetime_now, traffic_counter["send " + str(event)], traffic_counter["recv " + str(event)], *event) for event in transaction]
+        if event in traffic_counter:
+            traffic_counter[event][0] += proc["send"]
+            traffic_counter[event][1] += proc["recv"]
+        else:
+            traffic_counter[event] = [proc["send"], proc["recv"]]
+    return [(datetime_now, send, recv, *event) for event, (send, recv) in traffic_counter.items()]
 
 
 def run_secondary(
@@ -170,8 +171,8 @@ def run_secondary(
     # maintain a separate copy of the state dictionary here and coordinate with the primary subprocess (sha256 and vt_results)
     sync_vt_results(state, p_virustotal.q_in, q_primary_in, True)
     # init sql
-    # (contime text, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text)
-    # (datetime_now, traffic_counter["send " + str(event)], traffic_counter["recv " + str(event)], *(proc["exe"], proc["name"], proc["cmdline"], sha256, proc["pexe"], proc["pname"], proc["pcmdline"], psha256, proc["uid"], proc["lport"], proc["rport"], proc["laddr"], proc["raddr"], proc["domain"]))
+    # (contime integer, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text)
+    # (datetime_now, send, recv, *(proc["exe"], proc["name"], proc["cmdline"], sha256, proc["pexe"], proc["pname"], proc["pcmdline"], psha256, proc["uid"], proc["lport"], proc["rport"], proc["laddr"], proc["raddr"], proc["domain"]))
     sqlite_query = """ INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) """
     file_path = DATA_DIR / "picosnitch.db"
     text_path = LOG_DIR / "conn.log"
@@ -180,10 +181,11 @@ def run_secondary(
         cur = con.cursor()
         cur.execute(""" PRAGMA user_version """)
         db_version = cur.fetchone()[0]
-        if db_version != 3:
+        if db_version != 4:
             logging.error(f"Incorrect database version of picosnitch.db for picosnitch v{VERSION}")
             sys.exit(1)
-        cur.execute(""" DELETE FROM connections WHERE contime < datetime("now", "localtime", "-%d days") """ % int(config.database.retention_days))
+        retention_cutoff = int(time.time()) - int(config.database.retention_days) * 86400
+        cur.execute("DELETE FROM connections WHERE contime < ?", (retention_cutoff,))
         con.commit()
         con.close()
     if sql_kwargs := dict(config.database.remote):
@@ -273,6 +275,7 @@ def run_secondary(
                         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
                             for entry in transaction:
                                 clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in entry]
+                                clean_entry[0] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(entry[0]))
                                 text_file.write(",".join(clean_entry) + "\n")
                         transaction_success = True
                 except Exception as e:

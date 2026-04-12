@@ -394,18 +394,18 @@ def web_dashboard() -> int:
             return fig_send, no_update, no_update, store_send, store_recv
         # generate the query string using the selected options (time_i is the index of the time period, time_j is the number of time period steps to go back)
         if time_j == 0:
-            time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%Y-%m-%d %H:%M:%S")
-            time_history_end = "now"
+            time_start_ts = int((datetime.datetime.now() - time_deltas[time_i]).timestamp())
+            time_end_ts = int(datetime.datetime.now().timestamp())
         elif time_i != 0:
-            time_history_start = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j - 1)).strftime("%Y-%m-%d %H:%M:%S")
-            time_history_end = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j - 2)).strftime("%Y-%m-%d %H:%M:%S")
+            time_start_ts = int(time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j - 1)).timestamp())
+            time_end_ts = int(time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j - 2)).timestamp())
         if time_i == 0:
             time_query = ""
         else:
             if where and whereis:
-                time_query = f' AND contime > datetime("{time_history_start}") AND contime < datetime("{time_history_end}")'
+                time_query = f" AND contime > {time_start_ts} AND contime < {time_end_ts}"
             else:
-                time_query = f' WHERE contime > datetime("{time_history_start}") AND contime < datetime("{time_history_end}")'
+                time_query = f" WHERE contime > {time_start_ts} AND contime < {time_end_ts}"
         if where and whereis:
             query = f'SELECT {dim}, contime, send, recv FROM connections WHERE {where} IS "{whereis}"{time_query}'
         else:
@@ -413,6 +413,8 @@ def web_dashboard() -> int:
         # run query and populate whereis options
         con = sqlite3.connect(file_path)
         df = psql.read_sql(query, con)
+        # convert integer timestamps to datetime for plotting
+        df["contime"] = pd.to_datetime(df["contime"], unit="s")
         whereis_options = []
         if where:
             if time_query.startswith(" AND"):
@@ -450,11 +452,9 @@ def web_dashboard() -> int:
         # resample the data if it is too large for performance, and smooth if requested
         if resampling:
             if len(df_send) > resampling:
-                df_send.index = pd.to_datetime(df_send.index)
                 n = len(df_send) // resampling
                 df_send = df_send.resample(f"{n}T").mean().fillna(0)
             if len(df_recv) > resampling:
-                df_recv.index = pd.to_datetime(df_recv.index)
                 n = len(df_recv) // resampling
                 df_recv = df_recv.resample(f"{n}T").mean().fillna(0)
         if smoothing:

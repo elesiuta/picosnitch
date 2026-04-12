@@ -58,8 +58,8 @@ def check_database() -> int:
     cur.execute(""" PRAGMA user_version """)
     user_version = cur.fetchone()[0]
     con.close()
-    if user_version != 3:
-        logging.error(f"Unsupported database version {user_version}, expected 3")
+    if user_version != 4:
+        logging.error(f"Unsupported database version {user_version}, expected 4")
         return 1
     return 0
 
@@ -76,8 +76,13 @@ def init_dirs_and_config() -> None:
         con = sqlite3.connect(db_path)
         cur = con.cursor()
         cur.execute(""" CREATE TABLE connections
-                        (contime text, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text) """)
-        cur.execute(""" PRAGMA user_version = 3 """)
+                        (contime integer, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text) """)
+        cur.execute(""" CREATE INDEX idx_contime ON connections(contime) """)
+        cur.execute(""" CREATE INDEX idx_exe ON connections(exe) """)
+        cur.execute(""" CREATE INDEX idx_name ON connections(name) """)
+        cur.execute(""" PRAGMA journal_mode=WAL """)
+        cur.execute(""" PRAGMA synchronous=NORMAL """)
+        cur.execute(""" PRAGMA user_version = 4 """)
         con.commit()
         con.close()
     apply_data_permissions(CONFIG_DIR, DATA_DIR, LOG_DIR, CACHE_DIR)
@@ -262,7 +267,7 @@ def start_picosnitch() -> int:
                 con = sql.connect(**sql_kwargs)
                 cur = con.cursor()
                 cur.execute(f""" CREATE TABLE IF NOT EXISTS {table_name}
-                                 (contime text, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text) """)
+                                 (contime integer, send integer, recv integer, exe text, name text, cmdline text, sha256 text, pexe text, pname text, pcmdline text, psha256 text, uid integer, lport integer, rport integer, laddr text, raddr text, domain text) """)
                 con.commit()
                 con.close()
             except Exception as e:

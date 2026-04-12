@@ -291,7 +291,7 @@ class TestDatabaseIntegrity:
         cur = con.cursor()
         cur.execute("PRAGMA user_version")
         version = cur.fetchone()[0]
-        assert version == 3, f"Database version should be 3, got {version}"
+        assert version == 4, f"Database version should be 4, got {version}"
 
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='connections'")
         tables = cur.fetchall()

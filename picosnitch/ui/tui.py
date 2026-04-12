@@ -232,22 +232,29 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
         # generate screen
         if update_query:
             if time_j == 0:
-                time_history_start = (datetime.datetime.now() - time_deltas[time_i]).strftime("%Y-%m-%d %H:%M:%S")
+                dt_start = datetime.datetime.now() - time_deltas[time_i]
+                time_history_start = dt_start.strftime("%Y-%m-%d %H:%M:%S")
                 time_history_end = "now"
                 time_history = time_round_functions["second"](datetime.datetime.now())
+                time_start_ts = int(dt_start.timestamp())
+                time_end_ts = int(datetime.datetime.now().timestamp())
             elif time_i != 0:
                 if update_time:
-                    time_history_start = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j - 1)).strftime("%Y-%m-%d %H:%M:%S")
-                    time_history_end = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j - 2)).strftime("%Y-%m-%d %H:%M:%S")
+                    dt_start = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j - 1))
+                    dt_end = time_round_func(time_i, datetime.datetime.now() - time_deltas[time_i] * (time_j - 2))
+                    time_history_start = dt_start.strftime("%Y-%m-%d %H:%M:%S")
+                    time_history_end = dt_end.strftime("%Y-%m-%d %H:%M:%S")
+                    time_start_ts = int(dt_start.timestamp())
+                    time_end_ts = int(dt_end.timestamp())
                     time_history = f"{time_history_start} -> {time_history_end}"
                     update_time = False
             if time_i == 0:
                 time_query = ""
             else:
                 if tab_stack:
-                    time_query = f' AND contime > datetime("{time_history_start}") AND contime < datetime("{time_history_end}")'
+                    time_query = f" AND contime > {time_start_ts} AND contime < {time_end_ts}"
                 else:
-                    time_query = f' WHERE contime > datetime("{time_history_start}") AND contime < datetime("{time_history_end}")'
+                    time_query = f" WHERE contime > {time_start_ts} AND contime < {time_end_ts}"
             if tab_stack:
                 filter_query = " AND ".join(f'{col_sql[i]} IS {exclude}"{value}"' for i, exclude, value in zip(tab_stack, filter_exclude, filter_values))
                 current_query = f"SELECT {col_sql[tab_i]}, SUM(send), SUM(recv) FROM connections WHERE {filter_query}{time_query} GROUP BY {col_sql[tab_i]}"
@@ -345,8 +352,10 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
             else:
                 stdscr.attrset(curses.color_pair(0))
             if first_line <= line - offset < curses.LINES - 1:
-                # special cases (cmdline null chars, uid, ip, sha256 and vt results)
-                if isinstance(name, str):
+                # special cases (cmdline null chars, uid, ip, contime, sha256 and vt results)
+                if col_sql[tab_i] == "contime":
+                    name = datetime.datetime.fromtimestamp(name).strftime("%Y-%m-%d %H:%M:%S")
+                elif isinstance(name, str):
                     name = name.replace("\0", "")
                 elif col_sql[tab_i] == "uid":
                     try:
@@ -489,7 +498,7 @@ def tui_init() -> int:
     cur = con.cursor()
     cur.execute(""" PRAGMA user_version """)
     db_version = cur.fetchone()[0]
-    if db_version != 3:
+    if db_version != 4:
         logging.error(f"Incorrect database version of picosnitch.db for picosnitch v{VERSION}")
         sys.exit(1)
     con.close()
