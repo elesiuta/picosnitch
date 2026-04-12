@@ -29,7 +29,8 @@ import textwrap
 from .constants import CACHE_DIR, CONFIG_DIR, DATA_DIR, LOG_DIR, RUN_DIR, VERSION
 from .daemon import Daemon
 from .main_loop import run_main_loop
-from .ui import tui_init, web_dashboard
+from .ui.tui import tui_init
+from .ui.webui import web_dashboard
 from .utils import apply_data_permissions, load_state
 
 
