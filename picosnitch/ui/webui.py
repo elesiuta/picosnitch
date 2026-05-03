@@ -423,14 +423,15 @@ def web_dashboard() -> int:
                 time_query = f" AND c.contime > {time_start_ts} AND c.contime < {time_end_ts}"
             else:
                 time_query = f" WHERE c.contime > {time_start_ts} AND c.contime < {time_end_ts}"
-        if where and whereis:
-            where_sql = dim_sql[where]
-            query = f'SELECT {dim_sql[dim]} AS {dim}, c.contime, c.send, c.recv FROM {from_clause} WHERE {where_sql} IS "{whereis}"{time_query}'
-        else:
-            query = f"SELECT {dim_sql[dim]} AS {dim}, c.contime, c.send, c.recv FROM {from_clause}{time_query}"
         # run query and populate whereis options
         con = sqlite3.connect(file_path)
-        df = psql.read_sql(query, con)
+        if where and whereis:
+            where_sql = dim_sql[where]
+            query = f"SELECT {dim_sql[dim]} AS {dim}, c.contime, c.send, c.recv FROM {from_clause} WHERE {where_sql} IS ?{time_query}"
+            df = psql.read_sql(query, con, params=(whereis,))
+        else:
+            query = f"SELECT {dim_sql[dim]} AS {dim}, c.contime, c.send, c.recv FROM {from_clause}{time_query}"
+            df = psql.read_sql(query, con)
         # convert integer timestamps to datetime for plotting
         df["contime"] = pd.to_datetime(df["contime"], unit="s")
         whereis_options = []
@@ -519,5 +520,5 @@ def web_dashboard() -> int:
             os.kill(os.getpid(), signal.SIGTERM)
         return 0
 
-    app.run(host=os.getenv("HOST", "localhost"), port=os.getenv("PORT", "5100"), debug=bool(eval(os.getenv("DASH_DEBUG", "False"))))
+    app.run(host=os.getenv("HOST", "localhost"), port=os.getenv("PORT", "5100"), debug=os.getenv("DASH_DEBUG", "").lower() in ("1", "true", "yes"))
     return 0

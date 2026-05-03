@@ -9,6 +9,7 @@ import logging
 import multiprocessing
 import multiprocessing.connection
 import pickle
+import re
 import shlex
 import sqlite3
 import sys
@@ -191,10 +192,17 @@ def run_secondary(
         sql_client = sql_kwargs.pop("client", "no client error")
         conn_table = sql_kwargs.pop("connections_table", "connections")
         exe_table = sql_kwargs.pop("executables_table", "executables")
-        sql = importlib.import_module(sql_client)
-        sql_insert_exe = sqlite_insert_exe.replace("?", "%s").replace("OR IGNORE ", "IGNORE ").replace("executables", exe_table)
-        sql_select_exe = sqlite_select_exe.replace("?", "%s").replace("executables", exe_table)
-        sql_insert_conn = sqlite_insert_conn.replace("?", "%s").replace("connections", conn_table)
+        if sql_client not in ["mariadb", "psycopg", "psycopg2", "pymysql"]:
+            q_error.put(f'unsupported database.remote "client": {sql_client}')
+            sql_kwargs = {}
+        elif not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", conn_table) or not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", exe_table):
+            q_error.put(f"invalid remote table name: {conn_table!r} or {exe_table!r}")
+            sql_kwargs = {}
+        else:
+            sql = importlib.import_module(sql_client)
+            sql_insert_exe = sqlite_insert_exe.replace("?", "%s").replace("OR IGNORE ", "IGNORE ").replace("executables", exe_table)
+            sql_select_exe = sqlite_select_exe.replace("?", "%s").replace("executables", exe_table)
+            sql_insert_conn = sqlite_insert_conn.replace("?", "%s").replace("connections", conn_table)
     log_destinations = int(bool(config.database.enabled)) + int(bool(sql_kwargs)) + int(bool(config.database.text_log))
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)

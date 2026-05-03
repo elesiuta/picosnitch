@@ -5,6 +5,7 @@ import atexit
 import importlib
 import logging
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -262,9 +263,13 @@ def start_picosnitch() -> int:
             sql_client = sql_kwargs.pop("client", "no client error")
             conn_table = sql_kwargs.pop("connections_table", "connections")
             exe_table = sql_kwargs.pop("executables_table", "executables")
-            sql = importlib.import_module(sql_client)
             if sql_client not in ["mariadb", "psycopg", "psycopg2", "pymysql"]:
-                logging.warning(f'using {sql_client} for database.remote "client" may not be supported, ensure it implements PEP 249')
+                logging.error(f'unsupported database.remote "client": {sql_client}')
+                return 1
+            if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", conn_table) or not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", exe_table):
+                logging.error(f"invalid remote table name: {conn_table!r} or {exe_table!r}")
+                return 1
+            sql = importlib.import_module(sql_client)
             try:
                 con = sql.connect(**sql_kwargs)
                 cur = con.cursor()

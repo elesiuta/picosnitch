@@ -66,12 +66,12 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
     q_query_results = queue.Queue()
     kill_thread_query = threading.Event()
 
-    def fetch_query_results(current_query: str, q_query_results: queue.Queue, kill_thread_query: threading.Event):
+    def fetch_query_results(current_query: str, query_params: tuple, q_query_results: queue.Queue, kill_thread_query: threading.Event):
         con = sqlite3.connect(file_path, timeout=1)
         cur = con.cursor()
         while True and not kill_thread_query.is_set():
             try:
-                cur.execute(current_query)
+                cur.execute(current_query, query_params)
                 break
             except sqlite3.OperationalError:
                 time.sleep(0.5)
@@ -219,7 +219,7 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
     update_query = True
     execute_query = True
     running_query = False
-    current_query, current_screen = "", [""]
+    current_query, current_query_params, current_screen = "", (), [""]
     vt_status = collections.defaultdict(str)
     while True:
         # adjust cursor
@@ -257,10 +257,12 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
                 else:
                     time_query = f" WHERE c.contime > {time_start_ts} AND c.contime < {time_end_ts}"
             if tab_stack:
-                filter_query = " AND ".join(f'{col_sql[i]} IS {exclude}"{value}"' for i, exclude, value in zip(tab_stack, filter_exclude, filter_values))
+                filter_query = " AND ".join(f"{col_sql[i]} IS {exclude}?" for i, exclude in zip(tab_stack, filter_exclude))
                 current_query = f"SELECT {col_sql[tab_i]}, SUM(c.send), SUM(c.recv) FROM {from_clause} WHERE {filter_query}{time_query} GROUP BY {col_sql[tab_i]}"
+                current_query_params = tuple(filter_values)
             else:
                 current_query = f"SELECT {col_sql[tab_i]}, SUM(c.send), SUM(c.recv) FROM {from_clause}{time_query} GROUP BY {col_sql[tab_i]}"
+                current_query_params = ()
             update_query = False
         if execute_query:
             current_screen = []
@@ -271,7 +273,7 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
             # start new thread, reinitialize queue and kill flag
             q_query_results = queue.Queue()
             kill_thread_query = threading.Event()
-            thread_query = threading.Thread(target=fetch_query_results, args=(current_query, q_query_results, kill_thread_query), daemon=True)
+            thread_query = threading.Thread(target=fetch_query_results, args=(current_query, current_query_params, q_query_results, kill_thread_query), daemon=True)
             thread_query.start()
             # check daemon pid for status bar
             try:
