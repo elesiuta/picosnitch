@@ -81,8 +81,13 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     for cache_idx in range(FD_CACHE):
         fd_dict[f"tmp{cache_idx}"] = (0,)
     self_pid = os.getpid()
-    # cache of resolved inode -> exe path, for when /proc/PID/exe is gone
-    ino_path_cache = {}
+    # cache of resolved (dev, ino, comm) -> exe path, used as a fallback for
+    # when /proc/PID/exe is no longer readable (short-lived processes).
+    # Keyed by comm in addition to (dev, ino) because multi-call binaries
+    # (e.g. uutils-coreutils) hardlink many symlinks (head, sleep, cat, ...)
+    # to a single inode; the kernel distinguishes them per-process via
+    # /proc/PID/exe but the inode alone is ambiguous.
+    ino_path_cache: dict[str, str] = {}
 
     # helper to find executable by comm name and inode when /proc/PID/exe is unavailable
     def _find_exe_by_inode(comm: str, st_dev: int, st_ino: int) -> str:
@@ -113,10 +118,23 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     def get_fd(st_dev: int, st_ino: int, pid: int, port: int, comm: str = "") -> tuple[int, int, int, str, str]:
         st_dev = st_dev & ST_DEV_MASK
         sig = f"{st_dev} {st_ino}"
+        # Resolve the exe path for THIS process via /proc/PID/exe whenever
+        # possible. The kernel records the specific symlink each process was
+        # exec'd from, even when many symlinks share an inode (multi-call
+        # binaries like uutils-coreutils). The fd cache is keyed only by
+        # (dev, ino), so without this per-PID lookup a cached entry could
+        # return the wrong exe path (e.g. report `head` as `sleep`).
+        proc_exe = ""
+        try:
+            proc_exe = os.readlink(f"/proc/{pid}/exe")
+        except Exception:
+            pass
+        # per-(dev, ino, comm) fallback key for when /proc is gone
+        comm_sig = f"{sig} {comm}"
         try:
             # check if it is in the cache and move it to the most recent position
             fd_dict.move_to_end(sig)
-            fd, fd_path, exe = fd_dict[sig]
+            fd, fd_path, cached_exe = fd_dict[sig]
             if not fd:
                 # sig is in cache but fd is 0, try again to open it
                 # add a dummy value to the oldest postition to be popped off on retry so cache size is maintained
@@ -124,6 +142,16 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                 fd_dict[f"tmp{sig}"] = (0,)
                 fd_dict.move_to_end(f"tmp{sig}", last=False)
                 raise Exception("previous attempt failed, probably due to process terminating too quickly, try again")
+            # cache hit: prefer the per-PID exe, then per-(ino, comm) cache,
+            # then resolve by comm name on disk, finally the fd_dict's
+            # last-seen exe as a final fallback
+            exe = proc_exe or ino_path_cache.get(comm_sig, "")
+            if not exe and comm:
+                exe = _find_exe_by_inode(comm, st_dev, st_ino)
+            if not exe:
+                exe = cached_exe
+            if exe:
+                ino_path_cache[comm_sig] = exe
         except Exception:
             # open a new file descriptor and pop off the oldest one
             # watch it with fanotify, and also cache the apparent executable path with it
@@ -133,14 +161,12 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                 fd_path = f"/proc/{self_pid}/fd/{fd}"
             except Exception:
                 fd, fd_path = 0, ""
-            try:
-                exe = os.readlink(f"/proc/{pid}/exe")
-            except Exception:
-                exe = ""
-            # fallback: if /proc/PID/exe is gone, resolve exe from inode cache or by comm name
+            exe = proc_exe
+            # fallback: if /proc/PID/exe is gone, resolve exe from per-(ino, comm)
+            # cache, then by comm name search on disk
             if not exe:
-                if sig in ino_path_cache:
-                    exe = ino_path_cache[sig]
+                if comm_sig in ino_path_cache:
+                    exe = ino_path_cache[comm_sig]
                 elif comm:
                     exe = _find_exe_by_inode(comm, st_dev, st_ino)
             if not fd and exe:
@@ -155,9 +181,9 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                         fd, fd_path = 0, ""
                 except Exception:
                     fd, fd_path = 0, ""
-            # cache resolved exe path by inode for future lookups
+            # cache resolved exe path by (ino, comm) for future lookups
             if exe:
-                ino_path_cache[sig] = exe
+                ino_path_cache[comm_sig] = exe
             if fd and (st_dev, st_ino) != get_fstat(fd):
                 if EVERY_EXE or port != -1:
                     q_error.put(f"Exe inode changed for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino}) before FD could be opened, using port: {port}")
