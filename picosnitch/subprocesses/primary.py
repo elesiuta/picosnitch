@@ -13,7 +13,7 @@ import threading
 import time
 
 from ..types import BpfEvent, State
-from ..utils import save_state
+from ..utils import flush_logs, save_state
 
 
 def _toast(q_notify: multiprocessing.Queue[str], msg: str, level: int = logging.INFO) -> None:
@@ -74,7 +74,9 @@ def run_primary(
     processes_to_send = []
 
     # init signal handlers
-    def save_state_and_exit(state: State, q_error: multiprocessing.Queue, event_pipes: tuple) -> None:
+    shutdown_event = threading.Event()
+
+    def _drain_errors(state: State, q_error: multiprocessing.Queue, q_notify: multiprocessing.Queue) -> None:
         while not q_error.empty():
             error = q_error.get()
             state["Error Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
@@ -82,14 +84,20 @@ def run_primary(
             error = error.replace("FD Read Error and PID Read Error and FUSE Read Error for", "Read Error for")
             if len(error) > 50:
                 error = error[:47] + "..."
+            # don't need to toast fallback success messages
+            if error.startswith("Fallback to FUSE hash successful on ") or error.startswith("Fallback to PID hash successful on "):
+                continue
             _toast(q_notify, error, level=logging.WARNING)
+
+    def save_state_and_exit(state: State, q_error: multiprocessing.Queue, event_pipes: tuple) -> None:
+        _drain_errors(state, q_error, q_notify)
         save_state(state)
         for event_pipe in event_pipes:
             event_pipe.close()
         sys.exit(0)
 
-    signal.signal(signal.SIGTERM, lambda *args: save_state_and_exit(state, q_error, event_pipes))
-    signal.signal(signal.SIGINT, lambda *args: save_state_and_exit(state, q_error, event_pipes))
+    signal.signal(signal.SIGTERM, lambda *args: shutdown_event.set())
+    signal.signal(signal.SIGINT, lambda *args: shutdown_event.set())
 
     # init thread to receive new connection data over pipe
     def event_pipe_thread(event_pipes: tuple, pipe_data: list, listen: threading.Event, ready: threading.Event) -> None:
@@ -121,23 +129,13 @@ def run_primary(
     thread.start()
     listen.set()
     # main loop
-    while True:
+    while not shutdown_event.is_set():
         if not parent_process.is_alive():
             q_error.put("picosnitch has stopped")
             save_state_and_exit(state, q_error, event_pipes)
         try:
             # check for errors
-            while not q_error.empty():
-                error = q_error.get()
-                state["Error Log"].append(time.strftime("%Y-%m-%d %H:%M:%S") + " " + error)
-                # shorten some common error messages before displaying them and after writing them to error.log
-                error = error.replace("FD Read Error and PID Read Error and FUSE Read Error for", "Read Error for")
-                if len(error) > 50:
-                    error = error[:47] + "..."
-                # don't need to toast fallback success messages
-                if error.startswith("Fallback to FUSE hash successful on ") or error.startswith("Fallback to PID hash successful on "):
-                    continue
-                _toast(q_notify, error, level=logging.WARNING)
+            _drain_errors(state, q_error, q_notify)
             # get list of new processes and connections since last update
             listen.clear()
             if not ready.wait(timeout=300):
@@ -180,14 +178,18 @@ def run_primary(
                         _toast(q_notify, f"Suspicious VT results: {msg['exe']}")
                     else:
                         state["Exe Log"].append(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg['sha256']:<16.16} {msg['exe']} (clean)")
-            # write the state dictionary to state.json, error.log, and exe.log (limit writes to reduce disk wear)
-            if state["Error Log"] or state["Exe Log"] or time.time() - last_write > 30:
+            # flush logs every iteration (cheap appends), write state.json only when changed or every 30s
+            flush_logs(state)
+            if time.time() - last_write > 30:
                 new_record = pickle.dumps([state["Executables"], state["Names"], state["Parent Executables"], state["Parent Names"], state["SHA256"]])
                 if new_record != state_record:
                     state_record = new_record
                     write_record = True
-                save_state(state, write_record=write_record)
+                if write_record:
+                    save_state(state, write_record=True)
+                    write_record = False
                 last_write = time.time()
-                write_record = False
         except Exception as e:
             q_error.put("primary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+    # clean exit after shutdown_event was set (by signal handler)
+    save_state_and_exit(state, q_error, event_pipes)

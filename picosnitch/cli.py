@@ -157,7 +157,7 @@ def start_picosnitch() -> int:
     * if you don't use systemd, you can use `sudo picosnitch start|stop|restart`
     * if the daemon isn't working, try `sudo picosnitch start-no-daemon`
     * if dash isn't working, try `picosnitch start-dash` to see any errors
-    * available environment variables for dash: HOST, PORT, DASH_DEBUG
+    * available environment variables for dash: HOST, PORT
     """)
     systemd_service = textwrap.dedent(f"""    [Unit]
     Description=picosnitch

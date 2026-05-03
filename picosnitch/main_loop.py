@@ -10,6 +10,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 from .config import Config
@@ -101,18 +102,14 @@ def run_main_loop(config: Config, state: State) -> int:
     )
     # set signals
     subprocesses = [p_monitor, p_fuse, p_virustotal, p_primary, p_secondary, p_notifications]
+    shutdown_event = threading.Event()
 
-    def clean_exit() -> None:
-        for p in subprocesses:
-            p.terminate()
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, lambda signum, frame: clean_exit())
-    signal.signal(signal.SIGTERM, lambda signum, frame: clean_exit())
+    signal.signal(signal.SIGINT, lambda signum, frame: shutdown_event.set())
+    signal.signal(signal.SIGTERM, lambda signum, frame: shutdown_event.set())
     # watch subprocesses
     suspend_check_last = time.time()
     try:
-        while True:
+        while not shutdown_event.is_set():
             time.sleep(5)
             if not all(p.is_alive() for p in subprocesses):
                 dead = " ".join([p.name for p in subprocesses if not p.is_alive()])
@@ -135,6 +132,11 @@ def run_main_loop(config: Config, state: State) -> int:
     except Exception as e:
         tb = sys.exc_info()[2]
         q_error.put("picosnitch subprocess exception: %s%s on line %s" % (type(e).__name__, str(e.args), tb.tb_lineno if tb else "?"))
+    # clean exit on signal (no restart)
+    if shutdown_event.is_set():
+        for p in subprocesses:
+            p.terminate()
+        sys.exit(0)
     if sys.argv[1] == "start-no-daemon":
         return 1
     # attempt to restart picosnitch (terminate by running `picosnitch stop`)

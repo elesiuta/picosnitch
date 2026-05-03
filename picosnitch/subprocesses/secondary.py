@@ -203,6 +203,8 @@ def run_secondary(
             sql_insert_exe = sqlite_insert_exe.replace("?", "%s").replace("OR IGNORE ", "IGNORE ").replace("executables", exe_table)
             sql_select_exe = sqlite_select_exe.replace("?", "%s").replace("executables", exe_table)
             sql_insert_conn = sqlite_insert_conn.replace("?", "%s").replace("connections", conn_table)
+            if not any(k in sql_kwargs for k in ("ssl", "ssl_context", "sslmode", "ssl_mode")):
+                q_error.put("warning: remote database connection has no SSL/TLS parameters configured")
     log_destinations = int(bool(config.database.enabled)) + int(bool(sql_kwargs)) + int(bool(config.database.text_log))
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)

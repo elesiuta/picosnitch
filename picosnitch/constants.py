@@ -16,13 +16,18 @@ from . import __version__
 # picosnitch version
 VERSION: typing.Final[str] = __version__
 
-# FHS standard paths (PICOSNITCH_ROOT is used as a prefix for testing)
-_root: str = os.getenv("PICOSNITCH_ROOT", "")
+# FHS standard paths (PICOSNITCH_TEST enables /tmp/picosnitch prefix for testing)
+_root: str = "/tmp/picosnitch" if os.getenv("PICOSNITCH_TEST") else ""
 CONFIG_DIR: typing.Final[Path] = Path(f"{_root}/etc/picosnitch")
 DATA_DIR: typing.Final[Path] = Path(f"{_root}/var/lib/picosnitch")
 LOG_DIR: typing.Final[Path] = Path(f"{_root}/var/log/picosnitch")
 RUN_DIR: typing.Final[Path] = Path(f"{_root}/run/picosnitch")
-CACHE_DIR: typing.Final[Path] = Path(f"{_root}/var/cache/picosnitch")
+if _root or os.getuid() == 0:
+    _cache_dir = Path(f"{_root}/var/cache/picosnitch")
+else:
+    _xdg_cache = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
+    _cache_dir = Path(f"{_xdg_cache}/picosnitch")
+CACHE_DIR: typing.Final[Path] = _cache_dir
 
 # set RLIMIT_NOFILE if configured
 try:

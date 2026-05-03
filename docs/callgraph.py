@@ -50,5 +50,5 @@ with open("callgraph.dot", "w") as f:
     f.writelines(new_dot)
 
 # create svg with graphviz
-os.system("dot -Tsvg callgraph.dot > callgraph.svg")
+# os.system("dot -Tsvg callgraph.dot > callgraph.svg")
 print("Done")

@@ -16,6 +16,7 @@ import pickle
 import pwd
 import socket
 import sys
+import tempfile
 import termios
 from pathlib import Path
 
@@ -101,35 +102,68 @@ def load_state() -> State:
     return data
 
 
-def save_state(state: State, write_record: bool = True) -> None:
-    """write the state dictionary to state.json, exe.log, and error.log"""
-    state_path = DATA_DIR / "state.json"
+# translation table to strip control characters from log entries (keeps printable + space)
+_CONTROL_CHAR_TABLE = str.maketrans("", "", "".join(chr(c) for c in range(32) if c not in (9,)) + chr(127))  # keep tab
+
+
+def sanitize_log_line(line: str) -> str:
+    """Remove control characters from a log line to prevent log injection."""
+    return line.translate(_CONTROL_CHAR_TABLE)
+
+
+def flush_logs(state: State) -> None:
+    """append pending error.log and exe.log entries, then clear the lists"""
     exe_log_path = LOG_DIR / "exe.log"
     error_log_path = LOG_DIR / "error.log"
     try:
         if state["Error Log"]:
             with open(error_log_path, "a", encoding="utf-8", errors="surrogateescape") as f:
-                f.write("\n".join(state["Error Log"]) + "\n")
-        state["Error Log"] = []
+                f.write("\n".join(sanitize_log_line(line) for line in state["Error Log"]) + "\n")
+            state["Error Log"] = []
     except Exception as e:
         logging.error(f"picosnitch write error (error.log): {type(e).__name__}{e.args}")
     try:
         if state["Exe Log"]:
             with open(exe_log_path, "a", encoding="utf-8", errors="surrogateescape") as f:
-                f.write("\n".join(state["Exe Log"]) + "\n")
-        state["Exe Log"] = []
+                f.write("\n".join(sanitize_log_line(line) for line in state["Exe Log"]) + "\n")
+            state["Exe Log"] = []
     except Exception as e:
         logging.error(f"picosnitch write error (exe.log): {type(e).__name__}{e.args}")
+
+
+def save_state(state: State, write_record: bool = True) -> None:
+    """flush logs then atomically write state.json via tempfile + os.replace"""
+    flush_logs(state)
     try:
         if write_record:
+            state_path = DATA_DIR / "state.json"
             state_data = {k: state[k] for k in ("Executables", "Names", "Parent Executables", "Parent Names", "SHA256")}
-            with open(state_path, "w", encoding="utf-8", errors="surrogateescape") as f:
-                json.dump(state_data, f, indent=2, separators=(",", ": "), sort_keys=True, ensure_ascii=False)
+            # preserve the existing file mode across atomic replacement (tempfile defaults to 0o600)
+            try:
+                existing_mode = state_path.stat().st_mode & 0o777
+            except FileNotFoundError:
+                existing_mode = None
+            fd = tempfile.NamedTemporaryFile(dir=DATA_DIR, mode="w", prefix=".state.", suffix=".tmp", delete=False, encoding="utf-8", errors="surrogateescape")
+            try:
+                json.dump(state_data, fd, indent=2, separators=(",", ": "), sort_keys=True, ensure_ascii=False)
+                fd.flush()
+                os.fsync(fd.fileno())
+                fd.close()
+                if existing_mode is not None:
+                    os.chmod(fd.name, existing_mode)
+                os.replace(fd.name, state_path)
+            except BaseException:
+                fd.close()
+                try:
+                    os.unlink(fd.name)
+                except OSError:
+                    pass
+                raise
     except Exception as e:
         logging.error(f"picosnitch write error (state.json): {type(e).__name__}{e.args}")
 
 
-@functools.lru_cache(maxsize=None)
+@functools.lru_cache(maxsize=131072)
 def reverse_dns_lookup(ip: str) -> str:
     """do a reverse dns lookup, return original ip if fails"""
     try:

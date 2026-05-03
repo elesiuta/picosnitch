@@ -86,11 +86,6 @@ digraph G {
 
             graph [style="filled,rounded", fillcolor="#80808018", label="picosnitch.main_loop"];
             "picosnitch__main_loop__run_main_loop" [label="run_main_loop", style="filled", fillcolor="#ffd099b2", fontcolor="#000000", group="1"];
-            subgraph "cluster_picosnitch__main_loop__run_main_loop" {
-
-                graph [style="filled,rounded", fillcolor="#80808018", label="picosnitch.main_loop.run_main_loop"];
-                "picosnitch__main_loop__run_main_loop__clean_exit" [label="clean_exit", style="filled", fillcolor="#ffb965b2", fontcolor="#000000", group="1"];
-            }
         }
         subgraph "cluster_picosnitch__process_manager" {
 
@@ -151,6 +146,7 @@ digraph G {
             subgraph "cluster_picosnitch__subprocesses__primary__run_primary" {
 
                 graph [style="filled,rounded", fillcolor="#80808018", label="picosnitch.subprocesses.primary.run_primary"];
+                "picosnitch__subprocesses__primary__run_primary___drain_errors" [label="_drain_errors", style="filled", fillcolor="#32c7ffb2", fontcolor="#000000", group="6"];
                 "picosnitch__subprocesses__primary__run_primary__event_pipe_thread" [label="event_pipe_thread", style="filled", fillcolor="#32c7ffb2", fontcolor="#000000", group="6"];
                 "picosnitch__subprocesses__primary__run_primary__save_state_and_exit" [label="save_state_and_exit", style="filled", fillcolor="#32c7ffb2", fontcolor="#000000", group="6"];
             }
@@ -182,6 +178,7 @@ digraph G {
             graph [style="filled,rounded", fillcolor="#80808018", label="picosnitch.utils"];
             "picosnitch__utils__apply_data_permissions" [label="apply_data_permissions", style="filled", fillcolor="#f599ffb2", fontcolor="#000000", group="9"];
             "picosnitch__utils__drop_root_permanent" [label="drop_root_permanent", style="filled", fillcolor="#f599ffb2", fontcolor="#000000", group="9"];
+            "picosnitch__utils__flush_logs" [label="flush_logs", style="filled", fillcolor="#f599ffb2", fontcolor="#000000", group="9"];
             "picosnitch__utils__get_fanotify_events" [label="get_fanotify_events", style="filled", fillcolor="#f599ffb2", fontcolor="#000000", group="9"];
             "picosnitch__utils__get_fstat" [label="get_fstat", style="filled", fillcolor="#f599ffb2", fontcolor="#000000", group="9"];
             "picosnitch__utils__get_sha256_fd" [label="get_sha256_fd", style="filled", fillcolor="#f599ffb2", fontcolor="#000000", group="9"];
@@ -191,6 +188,7 @@ digraph G {
             "picosnitch__utils__resolve_group" [label="resolve_group", style="filled", fillcolor="#f599ffb2", fontcolor="#000000", group="9"];
             "picosnitch__utils__resolve_owner" [label="resolve_owner", style="filled", fillcolor="#f599ffb2", fontcolor="#000000", group="9"];
             "picosnitch__utils__reverse_dns_lookup" [label="reverse_dns_lookup", style="filled", fillcolor="#f599ffb2", fontcolor="#000000", group="9"];
+            "picosnitch__utils__sanitize_log_line" [label="sanitize_log_line", style="filled", fillcolor="#f599ffb2", fontcolor="#000000", group="9"];
             "picosnitch__utils__save_state" [label="save_state", style="filled", fillcolor="#f599ffb2", fontcolor="#000000", group="9"];
             "picosnitch__utils__sync_vt_results" [label="sync_vt_results", style="filled", fillcolor="#f599ffb2", fontcolor="#000000", group="9"];
         }
@@ -333,8 +331,6 @@ digraph G {
         "picosnitch__main_loop" -> "picosnitch__subprocesses__primary__run_primary" [style="solid",  color="#000000"];
         "picosnitch__main_loop" -> "picosnitch__subprocesses__secondary__run_secondary" [style="solid",  color="#000000"];
         "picosnitch__main_loop" -> "picosnitch__subprocesses__virustotal__run_virustotal" [style="solid",  color="#000000"];
-        "picosnitch__main_loop__run_main_loop" -> "picosnitch__main_loop__run_main_loop__clean_exit" [style="dashed",  color="#ffffff00"];
-        "picosnitch__main_loop__run_main_loop" -> "picosnitch__main_loop__run_main_loop__clean_exit" [style="solid",  color="#000000"];
         "picosnitch__main_loop__run_main_loop" -> "picosnitch__process_manager__ProcessManager" [style="solid",  color="#000000"];
         "picosnitch__main_loop__run_main_loop" -> "picosnitch__process_manager__ProcessManager____init__" [style="solid",  color="#000000"];
         "picosnitch__main_loop__run_main_loop" -> "picosnitch__process_manager__ProcessManager__is_alive" [style="solid",  color="#000000"];
@@ -348,8 +344,6 @@ digraph G {
         "picosnitch__main_loop__run_main_loop" -> "picosnitch__subprocesses__primary__run_primary" [style="solid",  color="#000000"];
         "picosnitch__main_loop__run_main_loop" -> "picosnitch__subprocesses__secondary__run_secondary" [style="solid",  color="#000000"];
         "picosnitch__main_loop__run_main_loop" -> "picosnitch__subprocesses__virustotal__run_virustotal" [style="solid",  color="#000000"];
-        "picosnitch__main_loop__run_main_loop__clean_exit" -> "picosnitch__process_manager__ProcessManager" [style="solid",  color="#000000"];
-        "picosnitch__main_loop__run_main_loop__clean_exit" -> "picosnitch__process_manager__ProcessManager__terminate" [style="solid",  color="#000000"];
         "picosnitch__process_manager" -> "picosnitch__process_manager__ProcessManager" [style="dashed",  color="#ffffff00"];
         "picosnitch__process_manager__ProcessManager" -> "picosnitch__process_manager__ProcessManager____init__" [style="dashed",  color="#ffffff00"];
         "picosnitch__process_manager__ProcessManager" -> "picosnitch__process_manager__ProcessManager__is_alive" [style="dashed",  color="#ffffff00"];
@@ -434,16 +428,21 @@ digraph G {
         "picosnitch__subprocesses__primary" -> "picosnitch__subprocesses__primary___toast" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__primary" -> "picosnitch__subprocesses__primary__handle_new_processes" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__primary" -> "picosnitch__subprocesses__primary__run_primary" [style="dashed",  color="#ffffff00"];
+        "picosnitch__subprocesses__primary" -> "picosnitch__utils__flush_logs" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__primary" -> "picosnitch__utils__save_state" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__primary__handle_new_processes" -> "picosnitch__subprocesses__primary___toast" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__subprocesses__primary___toast" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__subprocesses__primary__handle_new_processes" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__subprocesses__primary__run_primary___drain_errors" [style="dashed",  color="#ffffff00"];
+        "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__subprocesses__primary__run_primary___drain_errors" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__subprocesses__primary__run_primary__event_pipe_thread" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__subprocesses__primary__run_primary__event_pipe_thread" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__subprocesses__primary__run_primary__save_state_and_exit" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__subprocesses__primary__run_primary__save_state_and_exit" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__utils__flush_logs" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__utils__save_state" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__primary__run_primary__save_state_and_exit" -> "picosnitch__subprocesses__primary___toast" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__primary__run_primary___drain_errors" -> "picosnitch__subprocesses__primary___toast" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__primary__run_primary__save_state_and_exit" -> "picosnitch__subprocesses__primary__run_primary___drain_errors" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__primary__run_primary__save_state_and_exit" -> "picosnitch__utils__save_state" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary" -> "picosnitch__process_manager__ProcessManager" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary" -> "picosnitch__subprocesses__secondary__build_log_entries" [style="dashed",  color="#ffffff00"];
@@ -479,6 +478,7 @@ digraph G {
         "picosnitch__subprocesses__virustotal__run_virustotal" -> "picosnitch__utils__resolve_owner" [style="solid",  color="#000000"];
         "picosnitch__utils" -> "picosnitch__utils__apply_data_permissions" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__drop_root_permanent" [style="dashed",  color="#ffffff00"];
+        "picosnitch__utils" -> "picosnitch__utils__flush_logs" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__get_fanotify_events" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__get_fstat" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__get_sha256_fd" [style="dashed",  color="#ffffff00"];
@@ -488,11 +488,14 @@ digraph G {
         "picosnitch__utils" -> "picosnitch__utils__resolve_group" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__resolve_owner" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__reverse_dns_lookup" [style="dashed",  color="#ffffff00"];
+        "picosnitch__utils" -> "picosnitch__utils__sanitize_log_line" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__save_state" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__sync_vt_results" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils__apply_data_permissions" -> "picosnitch__utils__resolve_group" [style="solid",  color="#000000"];
         "picosnitch__utils__apply_data_permissions" -> "picosnitch__utils__resolve_owner" [style="solid",  color="#000000"];
+        "picosnitch__utils__flush_logs" -> "picosnitch__utils__sanitize_log_line" [style="solid",  color="#000000"];
         "picosnitch__utils__get_fanotify_events" -> "picosnitch__utils__get_fstat" [style="solid",  color="#000000"];
         "picosnitch__utils__get_sha256_fd" -> "picosnitch__utils__get_fstat" [style="solid",  color="#000000"];
         "picosnitch__utils__get_sha256_pid" -> "picosnitch__utils__get_fstat" [style="solid",  color="#000000"];
+        "picosnitch__utils__save_state" -> "picosnitch__utils__flush_logs" [style="solid",  color="#000000"];
     }

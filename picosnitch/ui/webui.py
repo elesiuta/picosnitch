@@ -3,11 +3,10 @@
 
 import collections
 import datetime
-import ipaddress
+import logging
 import math
 import os
 import pwd
-import signal
 import sqlite3
 
 from ..config import load_config
@@ -147,7 +146,6 @@ def web_dashboard() -> int:
                     interval=10000,
                     disabled=True,
                 ),
-                html.Div(html.Button("Stop Dash", id="exit", className="btn btn-primary btn-sm mt-1"), style={"float": "right"}),
                 html.Div(
                     [
                         dcc.Dropdown(
@@ -514,11 +512,16 @@ def web_dashboard() -> int:
                 _ = store_recv["visible"].pop(column)
         return fig_send, fig_recv, whereis_options, store_send, store_recv
 
-    @app.callback(Output("exit", "n_clicks"), Input("exit", "n_clicks"))
-    def exit(clicks):
-        if clicks:
-            os.kill(os.getpid(), signal.SIGTERM)
-        return 0
+    host = os.getenv("HOST", "localhost")
+    port = os.getenv("PORT", "5100")
+    try:
+        import ipaddress
 
-    app.run(host=os.getenv("HOST", "localhost"), port=os.getenv("PORT", "5100"), debug=os.getenv("DASH_DEBUG", "").lower() in ("1", "true", "yes"))
+        addr = ipaddress.ip_address(host)
+        if not addr.is_loopback:
+            logging.warning(f"web dashboard binding to non-loopback address {host} - dashboard has no authentication")
+    except ValueError:
+        if host not in ("localhost",):
+            logging.warning(f"web dashboard binding to {host} - dashboard has no authentication")
+    app.run(host=host, port=port, debug=False)
     return 0

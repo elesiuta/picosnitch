@@ -137,8 +137,17 @@ def load_config(config_dir: Path = CONFIG_DIR) -> Config:
             section_obj = getattr(config, section_name)
             for field in dataclasses.fields(section_obj):
                 if field.name in section_data:
-                    setattr(section_obj, field.name, section_data[field.name])
-    if not config.desktop.user and os.environ.get("SUDO_UID"):
+                    value = section_data[field.name]
+                    expected_type = field.type
+                    # skip type check for parameterized generics (e.g. list[int])
+                    if hasattr(expected_type, "__origin__"):
+                        pass
+                    elif not isinstance(value, expected_type) or (isinstance(value, bool) and expected_type is not bool):
+                        type_name = getattr(expected_type, "__name__", str(expected_type))
+                        logging.warning(f"config.{section_name}.{field.name}: expected {type_name}, got {type(value).__name__}, skipping")
+                        continue
+                    setattr(section_obj, field.name, value)
+    if not config.desktop.user and os.environ.get("SUDO_UID", "").isdigit():
         config.desktop.user = os.environ["SUDO_UID"]
     return config
 

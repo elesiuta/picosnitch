@@ -30,9 +30,9 @@ from picosnitch.constants import DB_VERSION
 PICOSNITCH_DIR = Path(__file__).parent.parent
 PYTHON_EXE = sys.executable
 
-# Use a root prefix so tests don't touch the real picosnitch directories
-TEST_ROOT = "/tmp/picosnitch-test"
-os.environ["PICOSNITCH_ROOT"] = TEST_ROOT
+# Use a test prefix so tests don't touch the real picosnitch directories
+TEST_ROOT = "/tmp/picosnitch"
+os.environ["PICOSNITCH_TEST"] = "1"
 
 # FHS standard paths (under test root)
 CONFIG_DIR = Path(f"{TEST_ROOT}/etc/picosnitch")
@@ -150,7 +150,7 @@ def stop_picosnitch(proc: subprocess.Popen):
     time.sleep(DB_WRITE_LIMIT + 2)
 
 
-def query_db(query: str) -> list:
+def query_db(query: str, params: tuple = ()) -> list:
     """Execute a query on the picosnitch database."""
     db_path = DATA_DIR / "picosnitch.db"
     if not db_path.exists():
@@ -158,7 +158,7 @@ def query_db(query: str) -> list:
     con = sqlite3.connect(str(db_path))
     cur = con.cursor()
     try:
-        cur.execute(query)
+        cur.execute(query, params)
         results = cur.fetchall()
     finally:
         con.close()
@@ -167,7 +167,7 @@ def query_db(query: str) -> list:
 
 def get_connections_for_process(process_name: str) -> list:
     """Get all connections for a process name."""
-    return query_db(f"SELECT e.name, e.exe, c.raddr, c.rport, c.send, c.recv, c.domain FROM connections c JOIN executables e ON c.exe_id = e.id WHERE e.name LIKE '%{process_name}%'")
+    return query_db("SELECT e.name, e.exe, c.raddr, c.rport, c.send, c.recv, c.domain FROM connections c JOIN executables e ON c.exe_id = e.id WHERE e.name LIKE ?", (f"%{process_name}%",))
 
 
 @pytest.fixture(scope="module")
