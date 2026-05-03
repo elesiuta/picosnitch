@@ -252,6 +252,14 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     except Exception as e:
         q_error.put(f"Failed to attach network monitoring programs: {e}")
         raise
+    # On modern kernels, write()/writev() on a socket fd bypass sock_sendmsg
+    # (sock_write_iter -> __sock_sendmsg). Attach an extra probe so writes via
+    # the write path are still recorded. This is best-effort: fall back to
+    # warning if the kernel does not expose sock_write_iter.
+    try:
+        b.bpf_obj.attach_trace("sock_write_iter_ret")
+    except Exception as e:
+        q_error.put(f"BPF.attach_trace() failed for sock_write_iter: {e}, send bytes via write()/writev() on socket fds will not be recorded")
 
     # callbacks for bpf events, read event and put into a pipe for run_primary
     def queue_lost(event, *args):

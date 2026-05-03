@@ -403,4 +403,25 @@ int BPF_PROG(sock_recvmsg_ret, struct socket *sock, struct msghdr *msg, int flag
     return trace_sendrecv(ctx, sock, ret, 0);
 }
 
+// On modern kernels, write()/writev() on a socket fd takes the path
+// vfs_write -> sock_write_iter -> __sock_sendmsg, bypassing sock_sendmsg.
+// Attach to sock_write_iter so we still record bytes sent via the write path
+// (e.g. bash's `echo >&3` to /dev/tcp, or `cat file > /dev/tcp/...`).
+// __sock_sendmsg itself is `static inline` and not directly traceable.
+// sendmsg/sendto syscalls go via sock_sendmsg (not sock_write_iter), so the
+// two probes are disjoint and do not double-count.
+SEC("fexit/sock_write_iter")
+int BPF_PROG(sock_write_iter_ret, struct kiocb *iocb, struct iov_iter *from, long ret)
+{
+    if (ret <= 0 || !iocb)
+        return 0;
+    struct file *file = BPF_CORE_READ(iocb, ki_filp);
+    if (!file)
+        return 0;
+    struct socket *sock = (struct socket *)BPF_CORE_READ(file, private_data);
+    if (!sock)
+        return 0;
+    return trace_sendrecv(ctx, sock, (int)ret, 1);
+}
+
 char LICENSE[] SEC("license") = "GPL";
