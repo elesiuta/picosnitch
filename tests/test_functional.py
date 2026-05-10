@@ -82,7 +82,13 @@ def stop_existing_picosnitch():
 
 
 def start_picosnitch(extra_config_toml: str = "") -> subprocess.Popen:
-    """Start picosnitch daemon in start-no-daemon mode and return the process."""
+    """Start picosnitch daemon in start-no-daemon mode and return the process.
+
+    Waits for the daemon to be fully ready (events socket present) and then
+    issues a warmup HTTP request that is polled-for in the database so we
+    know the BPF monitor is actually producing events before the test
+    starts exercising it. Without this, the first test in a run frequently
+    races the BPF attachment and sees no events."""
     config_toml = f"""\
 [database]
 enabled = true
@@ -124,7 +130,40 @@ request_limit_seconds = 15
 
     proc = subprocess.Popen([PYTHON_EXE, "-m", "picosnitch", "start-no-daemon"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
+    # wait for the events socket to appear -- means primary subprocess is listening
+    events_sock = RUN_DIR / "events.sock"
+    deadline = time.time() + STARTUP_WAIT + 10
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            stdout = proc.stdout.read().decode()
+            stderr = proc.stderr.read().decode()
+            raise RuntimeError(f"picosnitch exited early: stdout={stdout}, stderr={stderr}")
+        if events_sock.exists():
+            break
+        time.sleep(0.2)
+
+    # additional settle time for BPF program load
     time.sleep(STARTUP_WAIT)
+
+    # warmup: hit a known endpoint and poll for it to appear in the DB so we
+    # know the BPF monitor is producing events end-to-end. Retry the warmup
+    # up to a few times because the first event after BPF attach can be
+    # missed on slower systems.
+    warmup_deadline = time.time() + 60
+    warmup_seen = False
+    while time.time() < warmup_deadline and not warmup_seen:
+        subprocess.run(["curl", "-s", "-o", "/dev/null", "https://example.com"], timeout=15)
+        # give the writer time to flush
+        for _ in range(int((DB_WRITE_LIMIT + 4) * 2)):
+            time.sleep(0.5)
+            if proc.poll() is not None:
+                stdout = proc.stdout.read().decode()
+                stderr = proc.stderr.read().decode()
+                raise RuntimeError(f"picosnitch exited during warmup: stdout={stdout}, stderr={stderr}")
+            rows = get_connections_for_process("curl")
+            if rows:
+                warmup_seen = True
+                break
 
     if proc.poll() is not None:
         stdout = proc.stdout.read().decode()
