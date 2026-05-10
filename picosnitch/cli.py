@@ -80,9 +80,12 @@ def init_dirs_and_config() -> None:
         cur.execute(f"""CREATE TABLE connections (
             {SCHEMA_CONNECTIONS},
             FOREIGN KEY (exe_id) REFERENCES executables(id),
-            FOREIGN KEY (pexe_id) REFERENCES executables(id))""")
+            FOREIGN KEY (pexe_id) REFERENCES executables(id),
+            FOREIGN KEY (gpexe_id) REFERENCES executables(id))""")
         cur.execute("CREATE INDEX idx_contime ON connections(contime)")
         cur.execute("CREATE INDEX idx_exe_id_contime ON connections(exe_id, contime)")
+        cur.execute("CREATE INDEX idx_pexe_id_contime ON connections(pexe_id, contime)")
+        cur.execute("CREATE INDEX idx_gpexe_id_contime ON connections(gpexe_id, contime)")
         cur.execute("PRAGMA journal_mode=WAL")
         cur.execute(f"PRAGMA user_version = {DB_VERSION}")
         con.commit()

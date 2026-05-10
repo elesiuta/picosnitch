@@ -219,13 +219,17 @@ class ExecEvent(ctypes.Structure):
     _fields_ = [
         ("comm", ctypes.c_char * 16),
         ("pcomm", ctypes.c_char * 16),
+        ("gpcomm", ctypes.c_char * 16),
         ("ino", ctypes.c_uint64),
         ("pino", ctypes.c_uint64),
+        ("gpino", ctypes.c_uint64),
         ("pid", ctypes.c_uint32),
         ("ppid", ctypes.c_uint32),
+        ("gppid", ctypes.c_uint32),
         ("uid", ctypes.c_uint32),
         ("dev", ctypes.c_uint32),
         ("pdev", ctypes.c_uint32),
+        ("gpdev", ctypes.c_uint32),
     ]
 
 
@@ -236,13 +240,17 @@ class SendRecvEvent(ctypes.Structure):
     _fields_ = [
         ("comm", ctypes.c_char * 16),
         ("pcomm", ctypes.c_char * 16),
+        ("gpcomm", ctypes.c_char * 16),
         ("ino", ctypes.c_uint64),
         ("pino", ctypes.c_uint64),
+        ("gpino", ctypes.c_uint64),
         ("pid", ctypes.c_uint32),
         ("ppid", ctypes.c_uint32),
+        ("gppid", ctypes.c_uint32),
         ("uid", ctypes.c_uint32),
         ("dev", ctypes.c_uint32),
         ("pdev", ctypes.c_uint32),
+        ("gpdev", ctypes.c_uint32),
         ("bytes", ctypes.c_uint32),
         ("daddr", ctypes.c_uint32),
         ("saddr", ctypes.c_uint32),
@@ -258,15 +266,19 @@ class SendRecv6Event(ctypes.Structure):
     _fields_ = [
         ("comm", ctypes.c_char * 16),
         ("pcomm", ctypes.c_char * 16),
+        ("gpcomm", ctypes.c_char * 16),
         ("daddr", ctypes.c_char * 16),  # 128-bit IPv6 address as bytes
         ("saddr", ctypes.c_char * 16),  # 128-bit IPv6 address as bytes
         ("ino", ctypes.c_uint64),
         ("pino", ctypes.c_uint64),
+        ("gpino", ctypes.c_uint64),
         ("pid", ctypes.c_uint32),
         ("ppid", ctypes.c_uint32),
+        ("gppid", ctypes.c_uint32),
         ("uid", ctypes.c_uint32),
         ("dev", ctypes.c_uint32),
         ("pdev", ctypes.c_uint32),
+        ("gpdev", ctypes.c_uint32),
         ("bytes", ctypes.c_uint32),
         ("dport", ctypes.c_uint16),
         ("lport", ctypes.c_uint16),

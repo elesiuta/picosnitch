@@ -218,6 +218,22 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             pcmd = get_cmdline(proc["ppid"])
             st_dev, st_ino, pid, fd, exe = get_fd(stat.st_dev, stat.st_ino, proc["pid"], proc["rport"], proc["name"])
             pst_dev, pst_ino, ppid, pfd, pexe = get_fd(pstat.st_dev, pstat.st_ino, proc["ppid"], -1, proc["pname"])
+            # grandparent: read ppid of ppid via /proc, best-effort
+            gppid = 0
+            gpname = ""
+            gpst_dev, gpst_ino, gpfd, gpexe = 0, 0, "", ""
+            gpcmd = ""
+            try:
+                with open(f"/proc/{proc['ppid']}/stat", "r") as f:
+                    stat_fields = f.read().rsplit(")", 1)[-1].split()
+                gppid = int(stat_fields[1])
+                if gppid > 0:
+                    gpname = psutil.Process(gppid).name()
+                    gstat = os.stat(f"/proc/{gppid}/exe")
+                    gpcmd = get_cmdline(gppid)
+                    gpst_dev, gpst_ino, _, gpfd, gpexe = get_fd(gstat.st_dev, gstat.st_ino, gppid, -1, gpname)
+            except Exception:
+                pass
             if EVERY_EXE or proc["rport"] != -1:
                 event_pipe_0.send_bytes(
                     pickle.dumps(
@@ -236,6 +252,13 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                             "pino": pst_ino,
                             "pexe": pexe,
                             "pcmdline": pcmd,
+                            "gppid": gppid,
+                            "gpname": gpname,
+                            "gpfd": gpfd,
+                            "gpdev": gpst_dev,
+                            "gpino": gpst_ino,
+                            "gpexe": gpexe,
+                            "gpcmdline": gpcmd,
                             "uid": proc["uid"],
                             "send": 0,
                             "recv": 0,
@@ -295,8 +318,10 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         event = b["sendmsg_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
         pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
+        gpst_dev, gpst_ino, gppid, gpfd, gpexe = get_fd(event.gpdev, event.gpino, event.gppid, -1, event.gpcomm.decode())
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
+        gpcmd = get_cmdline(event.gppid)
         laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
         raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
         event_pipe_0.send_bytes(
@@ -316,6 +341,13 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                     "pino": pst_ino,
                     "pexe": pexe,
                     "pcmdline": pcmd,
+                    "gppid": gppid,
+                    "gpname": event.gpcomm.decode(),
+                    "gpfd": gpfd,
+                    "gpdev": gpst_dev,
+                    "gpino": gpst_ino,
+                    "gpexe": gpexe,
+                    "gpcmdline": gpcmd,
                     "uid": event.uid,
                     "send": event.bytes,
                     "recv": 0,
@@ -332,8 +364,10 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         event = b["sendmsg6_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
         pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
+        gpst_dev, gpst_ino, gppid, gpfd, gpexe = get_fd(event.gpdev, event.gpino, event.gppid, -1, event.gpcomm.decode())
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
+        gpcmd = get_cmdline(event.gppid)
         laddr = socket.inet_ntop(socket.AF_INET6, bytes(event.saddr)[:16])
         raddr = socket.inet_ntop(socket.AF_INET6, bytes(event.daddr)[:16])
         event_pipe_1.send_bytes(
@@ -353,6 +387,13 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                     "pino": pst_ino,
                     "pexe": pexe,
                     "pcmdline": pcmd,
+                    "gppid": gppid,
+                    "gpname": event.gpcomm.decode(),
+                    "gpfd": gpfd,
+                    "gpdev": gpst_dev,
+                    "gpino": gpst_ino,
+                    "gpexe": gpexe,
+                    "gpcmdline": gpcmd,
                     "uid": event.uid,
                     "send": event.bytes,
                     "recv": 0,
@@ -369,8 +410,10 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         event = b["recvmsg_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
         pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
+        gpst_dev, gpst_ino, gppid, gpfd, gpexe = get_fd(event.gpdev, event.gpino, event.gppid, -1, event.gpcomm.decode())
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
+        gpcmd = get_cmdline(event.gppid)
         laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
         raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
         event_pipe_2.send_bytes(
@@ -390,6 +433,13 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                     "pino": pst_ino,
                     "pexe": pexe,
                     "pcmdline": pcmd,
+                    "gppid": gppid,
+                    "gpname": event.gpcomm.decode(),
+                    "gpfd": gpfd,
+                    "gpdev": gpst_dev,
+                    "gpino": gpst_ino,
+                    "gpexe": gpexe,
+                    "gpcmdline": gpcmd,
                     "uid": event.uid,
                     "send": 0,
                     "recv": event.bytes,
@@ -406,8 +456,10 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         event = b["recvmsg6_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
         pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
+        gpst_dev, gpst_ino, gppid, gpfd, gpexe = get_fd(event.gpdev, event.gpino, event.gppid, -1, event.gpcomm.decode())
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
+        gpcmd = get_cmdline(event.gppid)
         laddr = socket.inet_ntop(socket.AF_INET6, bytes(event.saddr)[:16])
         raddr = socket.inet_ntop(socket.AF_INET6, bytes(event.daddr)[:16])
         event_pipe_3.send_bytes(
@@ -427,6 +479,13 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                     "pino": pst_ino,
                     "pexe": pexe,
                     "pcmdline": pcmd,
+                    "gppid": gppid,
+                    "gpname": event.gpcomm.decode(),
+                    "gpfd": gpfd,
+                    "gpdev": gpst_dev,
+                    "gpino": gpst_ino,
+                    "gpexe": gpexe,
+                    "gpcmdline": gpcmd,
                     "uid": event.uid,
                     "send": 0,
                     "recv": event.bytes,
@@ -443,8 +502,10 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         event = b["exec_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, -1, event.comm.decode())
         pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
+        gpst_dev, gpst_ino, gppid, gpfd, gpexe = get_fd(event.gpdev, event.gpino, event.gppid, -1, event.gpcomm.decode())
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
+        gpcmd = get_cmdline(event.gppid)
         if EVERY_EXE:
             event_pipe_4.send_bytes(
                 pickle.dumps(
@@ -463,6 +524,13 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                         "pino": pst_ino,
                         "pexe": pexe,
                         "pcmdline": pcmd,
+                        "gppid": gppid,
+                        "gpname": event.gpcomm.decode(),
+                        "gpfd": gpfd,
+                        "gpdev": gpst_dev,
+                        "gpino": gpst_ino,
+                        "gpexe": gpexe,
+                        "gpcmdline": gpcmd,
                         "uid": event.uid,
                         "send": 0,
                         "recv": 0,

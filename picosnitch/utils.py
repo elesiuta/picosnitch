@@ -87,13 +87,15 @@ def load_state() -> State:
         "Names": {},
         "Parent Executables": {},
         "Parent Names": {},
+        "Grandparent Executables": {},
+        "Grandparent Names": {},
         "SHA256": {},
     }
     state_path = DATA_DIR / "state.json"
     if state_path.exists():
         with open(state_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
             state_record = json.load(json_file)
-        for key in ["Executables", "Names", "Parent Executables", "Parent Names", "SHA256"]:
+        for key in ["Executables", "Names", "Parent Executables", "Parent Names", "Grandparent Executables", "Grandparent Names", "SHA256"]:
             if key in state_record:
                 data[key] = state_record[key]
             if not isinstance(data[key], dict):
@@ -137,7 +139,7 @@ def save_state(state: State, write_record: bool = True) -> None:
     try:
         if write_record:
             state_path = DATA_DIR / "state.json"
-            state_data = {k: state[k] for k in ("Executables", "Names", "Parent Executables", "Parent Names", "SHA256")}
+            state_data = {k: state[k] for k in ("Executables", "Names", "Parent Executables", "Parent Names", "Grandparent Executables", "Grandparent Names", "SHA256")}
             # preserve the existing file mode across atomic replacement (tempfile defaults to 0o600)
             try:
                 existing_mode = state_path.stat().st_mode & 0o777

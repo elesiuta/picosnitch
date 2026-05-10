@@ -79,6 +79,7 @@ SCHEMA_CONNECTIONS: typing.Final[str] = """
     recv INTEGER NOT NULL,
     exe_id INTEGER NOT NULL,
     pexe_id INTEGER NOT NULL,
+    gpexe_id INTEGER NOT NULL,
     uid INTEGER NOT NULL,
     lport INTEGER NOT NULL,
     rport INTEGER NOT NULL,

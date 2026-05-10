@@ -29,8 +29,12 @@ def handle_new_processes(state: State, new_processes: list[bytes], q_notify: mul
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
     for proc_pickle in new_processes:
         proc: BpfEvent = pickle.loads(proc_pickle)
-        proc_name, proc_exe, state_names, state_executables, parent = proc["name"], proc["exe"], state["Names"], state["Executables"], ""
-        for _ in range(2):
+        levels = (
+            (proc["name"], proc["exe"], state["Names"], state["Executables"], ""),
+            (proc["pname"], proc["pexe"], state["Parent Names"], state["Parent Executables"], " (parent)"),
+            (proc["gpname"], proc["gpexe"], state["Grandparent Names"], state["Grandparent Executables"], " (grandparent)"),
+        )
+        for proc_name, proc_exe, state_names, state_executables, parent in levels:
             notification = []
             if proc_name in state_names:
                 if proc_exe not in state_names[proc_name]:
@@ -49,7 +53,6 @@ def handle_new_processes(state: State, new_processes: list[bytes], q_notify: mul
             if notification:
                 state["Exe Log"].append(f"{datetime_now} {proc_name:<16.16} {proc_exe} (new {', '.join(notification)}){parent}")
                 _toast(q_notify, f"picosnitch: {proc_name} {proc_exe}")
-            proc_name, proc_exe, state_names, state_executables, parent = proc["pname"], proc["pexe"], state["Parent Names"], state["Parent Executables"], " (parent)"
 
 
 def run_primary(
@@ -68,7 +71,9 @@ def run_primary(
         pass
     # init variables for loop
     parent_process = multiprocessing.parent_process()
-    state_record = pickle.dumps([state["Executables"], state["Names"], state["Parent Executables"], state["Parent Names"], state["SHA256"]])
+    state_record = pickle.dumps(
+        [state["Executables"], state["Names"], state["Parent Executables"], state["Parent Names"], state["Grandparent Executables"], state["Grandparent Names"], state["SHA256"]]
+    )
     last_write = 0
     write_record = False
     processes_to_send = []
@@ -181,7 +186,9 @@ def run_primary(
             # flush logs every iteration (cheap appends), write state.json only when changed or every 30s
             flush_logs(state)
             if time.time() - last_write > 30:
-                new_record = pickle.dumps([state["Executables"], state["Names"], state["Parent Executables"], state["Parent Names"], state["SHA256"]])
+                new_record = pickle.dumps(
+                    [state["Executables"], state["Names"], state["Parent Executables"], state["Parent Names"], state["Grandparent Executables"], state["Grandparent Names"], state["SHA256"]]
+                )
                 if new_record != state_record:
                     state_record = new_record
                     write_record = True

@@ -38,25 +38,33 @@ struct dns_event_t {
 struct exec_event_t {
     char comm[TASK_COMM_LEN];
     char pcomm[TASK_COMM_LEN];
+    char gpcomm[TASK_COMM_LEN];
     __u64 ino;
     __u64 pino;
+    __u64 gpino;
     __u32 pid;
     __u32 ppid;
+    __u32 gppid;
     __u32 uid;
     __u32 dev;
     __u32 pdev;
+    __u32 gpdev;
 } __attribute__((packed));
 
 struct sendrecv_event_t {
     char comm[TASK_COMM_LEN];
     char pcomm[TASK_COMM_LEN];
+    char gpcomm[TASK_COMM_LEN];
     __u64 ino;
     __u64 pino;
+    __u64 gpino;
     __u32 pid;
     __u32 ppid;
+    __u32 gppid;
     __u32 uid;
     __u32 dev;
     __u32 pdev;
+    __u32 gpdev;
     __u32 bytes;
     __u32 daddr;
     __u32 saddr;
@@ -67,15 +75,19 @@ struct sendrecv_event_t {
 struct sendrecv6_event_t {
     char comm[TASK_COMM_LEN];
     char pcomm[TASK_COMM_LEN];
+    char gpcomm[TASK_COMM_LEN];
     unsigned __int128 daddr;
     unsigned __int128 saddr;
     __u64 ino;
     __u64 pino;
+    __u64 gpino;
     __u32 pid;
     __u32 ppid;
+    __u32 gppid;
     __u32 uid;
     __u32 dev;
     __u32 pdev;
+    __u32 gpdev;
     __u32 bytes;
     __u16 dport;
     __u16 lport;
@@ -261,6 +273,31 @@ int BPF_KRETPROBE(exec_entry, long ret)
         }
     }
 
+    // Grandparent info (default to 0 if unavailable)
+    struct task_struct *grandparent = BPF_CORE_READ(parent, parent);
+    if (grandparent) {
+        data.gppid = BPF_CORE_READ(grandparent, tgid);
+        bpf_probe_read_kernel_str(&data.gpcomm, sizeof(data.gpcomm), BPF_CORE_READ(grandparent, comm));
+        mm = BPF_CORE_READ(grandparent, mm);
+        if (mm) {
+            exe_file = BPF_CORE_READ(mm, exe_file);
+            if (exe_file) {
+                exe_path = BPF_CORE_READ(exe_file, f_path);
+                exe_dentry = BPF_CORE_READ(&exe_path, dentry);
+                if (exe_dentry) {
+                    exe_inode = BPF_CORE_READ(exe_dentry, d_inode);
+                    if (exe_inode) {
+                        data.gpino = BPF_CORE_READ(exe_inode, i_ino);
+                        exe_sb = BPF_CORE_READ(exe_inode, i_sb);
+                        if (exe_sb) {
+                            data.gpdev = kernel_to_glibc_dev(BPF_CORE_READ(exe_sb, s_dev));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     bpf_get_current_comm(&data.comm, sizeof(data.comm));
     bpf_probe_read_kernel_str(&data.pcomm, sizeof(data.pcomm), BPF_CORE_READ(parent, comm));
 
@@ -330,6 +367,35 @@ static __always_inline int trace_sendrecv(void *ctx, struct socket *sock, int re
         }
     }
 
+    // Get grandparent info (default to 0 if unavailable)
+    __u32 gppid = 0;
+    __u64 gpino = 0;
+    __u32 gpdev = 0;
+    char gpcomm[TASK_COMM_LEN] = {};
+    struct task_struct *grandparent = BPF_CORE_READ(parent, parent);
+    if (grandparent) {
+        gppid = BPF_CORE_READ(grandparent, tgid);
+        bpf_probe_read_kernel_str(&gpcomm, sizeof(gpcomm), BPF_CORE_READ(grandparent, comm));
+        mm = BPF_CORE_READ(grandparent, mm);
+        if (mm) {
+            exe_file = BPF_CORE_READ(mm, exe_file);
+            if (exe_file) {
+                exe_path = BPF_CORE_READ(exe_file, f_path);
+                exe_dentry = BPF_CORE_READ(&exe_path, dentry);
+                if (exe_dentry) {
+                    exe_inode = BPF_CORE_READ(exe_dentry, d_inode);
+                    if (exe_inode) {
+                        gpino = BPF_CORE_READ(exe_inode, i_ino);
+                        exe_sb = BPF_CORE_READ(exe_inode, i_sb);
+                        if (exe_sb) {
+                            gpdev = kernel_to_glibc_dev(BPF_CORE_READ(exe_sb, s_dev));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     struct sock *sk = BPF_CORE_READ(sock, sk);
     if (!sk)
         return 0;
@@ -340,15 +406,19 @@ static __always_inline int trace_sendrecv(void *ctx, struct socket *sock, int re
         struct sendrecv_event_t data = {};
         data.pid = pid;
         data.ppid = ppid;
+        data.gppid = gppid;
         data.uid = uid;
         data.dev = dev;
         data.pdev = pdev;
+        data.gpdev = gpdev;
         data.ino = ino;
         data.pino = pino;
+        data.gpino = gpino;
         data.bytes = retval;
 
         bpf_get_current_comm(&data.comm, sizeof(data.comm));
         bpf_probe_read_kernel_str(&data.pcomm, sizeof(data.pcomm), BPF_CORE_READ(parent, comm));
+        __builtin_memcpy(&data.gpcomm, &gpcomm, sizeof(data.gpcomm));
         data.daddr = BPF_CORE_READ(sk, __sk_common.skc_daddr);
         data.saddr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
         data.dport = BPF_CORE_READ(sk, __sk_common.skc_dport);
@@ -364,15 +434,19 @@ static __always_inline int trace_sendrecv(void *ctx, struct socket *sock, int re
         struct sendrecv6_event_t data = {};
         data.pid = pid;
         data.ppid = ppid;
+        data.gppid = gppid;
         data.uid = uid;
         data.dev = dev;
         data.pdev = pdev;
+        data.gpdev = gpdev;
         data.ino = ino;
         data.pino = pino;
+        data.gpino = gpino;
         data.bytes = retval;
 
         bpf_get_current_comm(&data.comm, sizeof(data.comm));
         bpf_probe_read_kernel_str(&data.pcomm, sizeof(data.pcomm), BPF_CORE_READ(parent, comm));
+        __builtin_memcpy(&data.gpcomm, &gpcomm, sizeof(data.gpcomm));
         // Read IPv6 addresses using CO-RE with temporary variables to avoid packed alignment issues
         struct in6_addr temp_daddr = BPF_CORE_READ(sk, __sk_common.skc_v6_daddr);
         struct in6_addr temp_saddr = BPF_CORE_READ(sk, __sk_common.skc_v6_rcv_saddr);

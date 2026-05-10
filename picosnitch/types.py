@@ -22,6 +22,13 @@ class BpfEvent(typing.TypedDict):
     pino: int
     pexe: str
     pcmdline: str
+    gppid: int
+    gpname: str
+    gpfd: int
+    gpdev: int
+    gpino: int
+    gpexe: str
+    gpcmdline: str
     uid: int
     send: int
     recv: int
@@ -67,6 +74,8 @@ State = typing.TypedDict(
         "Names": dict[str, list[str]],
         "Parent Executables": dict[str, list[str]],
         "Parent Names": dict[str, list[str]],
+        "Grandparent Executables": dict[str, list[str]],
+        "Grandparent Names": dict[str, list[str]],
         "SHA256": dict[str, dict[str, str]],
     },
 )

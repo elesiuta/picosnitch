@@ -314,6 +314,54 @@ class TestDatabaseIntegrity:
             assert content.count("Exe inode changed") == 0, "Should not have inode changed errors"
 
 
+class TestGrandparentTracking:
+    """Tests for grandparent process tracking."""
+
+    def test_gpexe_id_column_exists(self, picosnitch_session):
+        """Test that connections table has gpexe_id column."""
+        subprocess.run(["curl", "-s", "http://example.com", "-o", "/dev/null"], capture_output=True, timeout=30)
+        time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
+
+        db_path = DATA_DIR / "picosnitch.db"
+        con = sqlite3.connect(str(db_path))
+        cur = con.cursor()
+        cur.execute("PRAGMA table_info(connections)")
+        cols = [row[1] for row in cur.fetchall()]
+        con.close()
+        assert "gpexe_id" in cols, f"connections table should have gpexe_id column, got {cols}"
+
+    def test_shell_curl_grandparent(self, picosnitch_session):
+        """Test that grandparent is captured when a shell script invokes curl."""
+        curl_exe = find_executable("curl")
+        if not curl_exe:
+            pytest.skip("curl not available")
+        bash_exe = find_executable("bash")
+        if not bash_exe:
+            pytest.skip("bash not available")
+
+        # Bash optimizes single-command shells (`bash -c "cmd"` and `( cmd )`)
+        # by exec'ing in place to avoid an extra process. Force forks by giving
+        # each shell level multiple statements. Chain:
+        # pytest → bash(outer) → bash(subshell-1) → bash(subshell-2) → curl
+        # so curl's parent = subshell-2, grandparent = subshell-1.
+        start_time = int(time.time())
+        subprocess.run(
+            [bash_exe, "-c", "true; ( true; ( true; curl -s http://example.com -o /dev/null ) )"],
+            capture_output=True,
+            timeout=30,
+        )
+        time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
+
+        # Filter to connections after start_time so prior tests' curls don't pollute results.
+        results = query_db(
+            "SELECT g.exe, g.name FROM connections c JOIN executables e ON c.exe_id = e.id JOIN executables g ON c.gpexe_id = g.id WHERE e.name LIKE '%curl%' AND c.contime >= ?",
+            (start_time,),
+        )
+        assert len(results) > 0, "Should have at least one curl connection with grandparent"
+        gpexes = [row[0] for row in results]
+        assert any("sh" in gpexe or "bash" in gpexe for gpexe in gpexes), f"Grandparent should be a shell, got: {gpexes}"
+
+
 if __name__ == "__main__":
     if os.geteuid() != 0:
         print("WARNING: These tests require root privileges.")

@@ -90,17 +90,21 @@ def build_log_entries(
         if not isinstance(proc, dict):
             q_error.put("sync error between secondary and primary, received '%s' in middle of transfer" % str(proc))
             continue
-        # get the sha256 of the process executable and its parent
+        # get the sha256 of the process executable, parent, and grandparent
         sha256 = resolve_hash(state, fan_mod_cnt, proc, p_fuse, q_vt, q_out, q_error)
         pproc: ProcessHashInfo = {"pid": proc["ppid"], "name": proc["pname"], "exe": proc["pexe"], "fd": proc["pfd"], "dev": proc["pdev"], "ino": proc["pino"]}
         psha256 = resolve_hash(state, fan_mod_cnt, pproc, p_fuse, q_vt, q_out, q_error)
+        gpproc: ProcessHashInfo = {"pid": proc["gppid"], "name": proc["gpname"], "exe": proc["gpexe"], "fd": proc["gpfd"], "dev": proc["gpdev"], "ino": proc["gpino"]}
+        gpsha256 = resolve_hash(state, fan_mod_cnt, gpproc, p_fuse, q_vt, q_out, q_error)
         # join or omit commands from logs
         if config.log.commands:
             proc["cmdline"] = shlex.join(proc["cmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").strip("\0\t\n ").split("\0"))
             proc["pcmdline"] = shlex.join(proc["pcmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").strip("\0\t\n ").split("\0"))
+            proc["gpcmdline"] = shlex.join(proc["gpcmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").strip("\0\t\n ").split("\0"))
         else:
             proc["cmdline"] = ""
             proc["pcmdline"] = ""
+            proc["gpcmdline"] = ""
         # reverse dns lookup or omit with IP from logs
         if config.log.addresses:
             if not proc["domain"]:
@@ -133,9 +137,11 @@ def build_log_entries(
         # create sql entry (exe info as tuples for normalization, connection-specific fields)
         exe_key = (proc["exe"], proc["name"], proc["cmdline"], sha256)
         pexe_key = (proc["pexe"], proc["pname"], proc["pcmdline"], psha256)
+        gpexe_key = (proc["gpexe"], proc["gpname"], proc["gpcmdline"], gpsha256)
         event = (
             exe_key,
             pexe_key,
+            gpexe_key,
             proc["uid"],
             proc["lport"],
             proc["rport"],
@@ -172,7 +178,7 @@ def run_secondary(
     # executables: (id integer primary key, exe text, name text, cmdline text, sha256 text)
     sqlite_insert_exe = "INSERT OR IGNORE INTO executables(exe, name, cmdline, sha256) VALUES (?, ?, ?, ?)"
     sqlite_select_exe = "SELECT id FROM executables WHERE exe = ? AND name = ? AND cmdline = ? AND sha256 = ?"
-    sqlite_insert_conn = "INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    sqlite_insert_conn = "INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     file_path = DATA_DIR / "picosnitch.db"
     text_path = LOG_DIR / "conn.log"
     exe_id_cache: dict[tuple, int] = {}
@@ -278,10 +284,11 @@ def run_secondary(
                         con = sqlite3.connect(file_path)
                         with con:
                             conn_rows = []
-                            for contime, send, recv, exe_key, pexe_key, uid, lport, rport, laddr, raddr, domain in transaction:
+                            for contime, send, recv, exe_key, pexe_key, gpexe_key, uid, lport, rport, laddr, raddr, domain in transaction:
                                 exe_id = resolve_exe_id(con, exe_key)
                                 pexe_id = resolve_exe_id(con, pexe_key)
-                                conn_rows.append((contime, send, recv, exe_id, pexe_id, uid, lport, rport, laddr, raddr, domain))
+                                gpexe_id = resolve_exe_id(con, gpexe_key)
+                                conn_rows.append((contime, send, recv, exe_id, pexe_id, gpexe_id, uid, lport, rport, laddr, raddr, domain))
                             con.executemany(sqlite_insert_conn, conn_rows)
                         con.close()
                         transaction_success = True
@@ -292,14 +299,17 @@ def run_secondary(
                         con = sql.connect(**sql_kwargs)
                         with con.cursor() as cur:
                             conn_rows = []
-                            for contime, send, recv, exe_key, pexe_key, uid, lport, rport, laddr, raddr, domain in transaction:
+                            for contime, send, recv, exe_key, pexe_key, gpexe_key, uid, lport, rport, laddr, raddr, domain in transaction:
                                 cur.execute(sql_insert_exe, exe_key)
                                 cur.execute(sql_select_exe, exe_key)
                                 exe_id = cur.fetchone()[0]
                                 cur.execute(sql_insert_exe, pexe_key)
                                 cur.execute(sql_select_exe, pexe_key)
                                 pexe_id = cur.fetchone()[0]
-                                conn_rows.append((contime, send, recv, exe_id, pexe_id, uid, lport, rport, laddr, raddr, domain))
+                                cur.execute(sql_insert_exe, gpexe_key)
+                                cur.execute(sql_select_exe, gpexe_key)
+                                gpexe_id = cur.fetchone()[0]
+                                conn_rows.append((contime, send, recv, exe_id, pexe_id, gpexe_id, uid, lport, rport, laddr, raddr, domain))
                             cur.executemany(sql_insert_conn, conn_rows)
                         con.commit()
                         con.close()
@@ -309,8 +319,8 @@ def run_secondary(
                 try:
                     if config.database.text_log:
                         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
-                            for contime, send, recv, exe_key, pexe_key, uid, lport, rport, laddr, raddr, domain in transaction:
-                                flat = (contime, send, recv, *exe_key, *pexe_key, uid, lport, rport, laddr, raddr, domain)
+                            for contime, send, recv, exe_key, pexe_key, gpexe_key, uid, lport, rport, laddr, raddr, domain in transaction:
+                                flat = (contime, send, recv, *exe_key, *pexe_key, *gpexe_key, uid, lport, rport, laddr, raddr, domain)
                                 clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in flat]
                                 clean_entry[0] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(contime))
                                 text_file.write(",".join(clean_entry) + "\n")
