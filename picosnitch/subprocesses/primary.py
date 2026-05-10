@@ -12,6 +12,8 @@ import sys
 import threading
 import time
 
+from ..config import Config
+from ..live_feed import LiveFeedPublisher
 from ..types import BpfEvent, State
 from ..utils import flush_logs, save_state
 
@@ -56,6 +58,7 @@ def handle_new_processes(state: State, new_processes: list[bytes], q_notify: mul
 
 
 def run_primary(
+    config: Config,
     state: State,
     event_pipes: tuple,
     secondary_pipe: multiprocessing.connection.Connection,
@@ -71,6 +74,8 @@ def run_primary(
         pass
     # init variables for loop
     parent_process = multiprocessing.parent_process()
+    live_feed = LiveFeedPublisher(group=config.data.group)
+    live_feed.start()
     state_record = pickle.dumps(
         [state["Executables"], state["Names"], state["Parent Executables"], state["Parent Names"], state["Grandparent Executables"], state["Grandparent Names"], state["SHA256"]]
     )
@@ -97,6 +102,7 @@ def run_primary(
     def save_state_and_exit(state: State, q_error: multiprocessing.Queue, event_pipes: tuple) -> None:
         _drain_errors(state, q_error, q_notify)
         save_state(state)
+        live_feed.stop()
         for event_pipe in event_pipes:
             event_pipe.close()
         sys.exit(0)
@@ -152,6 +158,11 @@ def run_primary(
             listen.set()
             # process the list and update state, send new process/connection data to secondary subprocess if ready
             handle_new_processes(state, new_processes, q_notify)
+            for proc_pickle in new_processes:
+                try:
+                    live_feed.publish(pickle.loads(proc_pickle))
+                except Exception:
+                    pass
             processes_to_send += new_processes
             while not q_in.empty():
                 msg: dict = pickle.loads(q_in.get())

@@ -16,6 +16,7 @@ from .config import load_config, write_default_config
 from .constants import CACHE_DIR, CONFIG_DIR, DATA_DIR, DB_VERSION, LOG_DIR, RUN_DIR, SCHEMA_CONNECTIONS, SCHEMA_EXECUTABLES, VERSION
 from .daemon import Daemon
 from .main_loop import run_main_loop
+from .ui.top import top_init
 from .ui.tui import tui_init
 from .ui.webui import web_dashboard
 from .utils import apply_data_permissions, load_state
@@ -138,10 +139,11 @@ def start_picosnitch() -> int:
     cache: {CACHE_DIR}
 
     usage:
-        picosnitch dash|view|status|version|help
-                    |    |    |      |       |--> this text
-                    |    |    |      |--> version info
-                    |    |    |--> show pid
+        picosnitch dash|tui|top|status|version|help
+                    |    |   |   |      |       |--> this text
+                    |    |   |   |      |--> version info
+                    |    |   |   |--> show pid
+                    |    |   |--> live event monitor
                     |    |--> curses tui
                     |--> start web gui (http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")})
 
@@ -337,6 +339,8 @@ def start_picosnitch() -> int:
         if err := check_database():
             return err
         return tui_init()
+    elif cmd == "top":
+        return top_init()
     else:
         print(readme)
         return 2

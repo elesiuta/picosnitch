@@ -25,6 +25,7 @@ dot: str = pyan.create_callgraph(
         "config.py",
         "constants.py",
         "daemon.py",
+        "top.py",
         "tui.py",
         "types.py",
         "webui.py",

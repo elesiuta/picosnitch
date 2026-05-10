@@ -79,6 +79,7 @@ def run_main_loop(config: Config, state: State) -> int:
         name="snitchprimary",
         target=run_primary,
         init_args=(
+            config,
             state,
             event_recv_pipes,
             secondary_send_pipe,
