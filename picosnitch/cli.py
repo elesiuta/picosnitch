@@ -70,6 +70,10 @@ def check_database() -> int:
         logging.error(f"Unsupported database version {user_version}, expected {DB_VERSION}")
         return 1
     return 0
+    if user_version != DB_VERSION:
+        logging.error(f"Unsupported database version {user_version}, expected {DB_VERSION}")
+        return 1
+    return 0
 
 
 def init_dirs_and_config() -> None:
@@ -145,13 +149,13 @@ def start_picosnitch() -> int:
     cache: {CACHE_DIR}
 
     usage:
-        picosnitch dash|tui|top|status|version|help
+        picosnitch webui|tui|top|status|version|help
                     |    |   |   |      |       |--> this text
                     |    |   |   |      |--> version info
                     |    |   |   |--> show pid
                     |    |   |--> live event monitor
                     |    |--> curses tui
-                    |--> start web gui (http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")})
+                    |--> web gui (http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")})
 
         sudo picosnitch init|start|stop|restart|start-no-daemon|systemd
                          |    |     |    |       |               |--> create service
@@ -167,8 +171,7 @@ def start_picosnitch() -> int:
     * if systemctl isn't working, recreate the service with `sudo picosnitch systemd`
     * if you don't use systemd, you can use `sudo picosnitch start|stop|restart`
     * if the daemon isn't working, try `sudo picosnitch start-no-daemon`
-    * if dash isn't working, try `picosnitch start-dash` to see any errors
-    * available environment variables for dash: HOST, PORT
+    * available environment variables for webui: HOST, PORT
     """)
     systemd_service = textwrap.dedent(f"""    [Unit]
     Description=picosnitch
@@ -322,24 +325,10 @@ def start_picosnitch() -> int:
             logging.info(f"logs: {LOG_DIR}")
             sys.exit(main())
         return 0
-    elif cmd == "dash":
+    elif cmd == "webui":
         if err := check_database():
             return err
-        try:
-            import dash
-            import pandas
-            import plotly
-
-            _ = dash.__version__ and pandas.__version__ and plotly.__version__
-        except ImportError as e:
-            logging.error(f"Missing required package for web dashboard: {e.name}")
-            return 1
         logging.info(f"serving web gui on http://{os.getenv('HOST', 'localhost')}:{os.getenv('PORT', '5100')}")
-        logging.info("if this fails, try running `picosnitch start-dash` to see any errors")
-        return web_dashboard()
-    elif cmd == "start-dash":
-        if err := check_database():
-            return err
         return web_dashboard()
     elif cmd == "tui":
         if err := check_database():

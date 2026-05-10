@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>picosnitch</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>picosnitch <span id="version" class="muted"></span></h1>
+  <div id="status" class="muted"></div>
+</header>
+<nav id="tabs">
+  <button class="tab active" data-tab="explore">Explore</button>
+  <button class="tab" data-tab="live">Live</button>
+</nav>
+<main>
+  <section id="tab-explore" class="tab-panel active">
+    <div class="controls">
+      <label>Group by
+        <select id="dim"></select>
+      </label>
+      <label>Range
+        <select id="range"></select>
+      </label>
+      <label>Where
+        <select id="where"><option value="">(none)</option></select>
+      </label>
+      <label>Is
+        <select id="whereis"><option value="">(any)</option></select>
+      </label>
+      <label>Top N
+        <input id="limit" type="number" min="1" max="200" value="20">
+      </label>
+      <label>Auto-refresh
+        <select id="autorefresh">
+          <option value="0">off</option>
+          <option value="5">5s</option>
+          <option value="15" selected>15s</option>
+          <option value="30">30s</option>
+          <option value="60">60s</option>
+          <option value="300">5m</option>
+        </select>
+      </label>
+      <button id="refresh">Refresh</button>
+    </div>
+    <div id="charts">
+      <h2>Bytes sent</h2>
+      <div id="chart-send"></div>
+      <h2>Bytes received</h2>
+      <div id="chart-recv"></div>
+      <h2>Totals</h2>
+      <table id="totals">
+        <thead><tr><th id="totals-head">Value</th><th>Sent</th><th>Received</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-live" class="tab-panel">
+    <div class="controls">
+      <button id="live-toggle">Start live feed</button>
+      <span id="live-status" class="muted">stopped</span>
+      <span class="muted">events: <span id="live-count">0</span></span>
+    </div>
+    <div id="live-error" class="notice" style="display:none"></div>
+    <table id="live-table">
+      <thead><tr><th>Time</th><th>Name</th><th>Parent</th><th>Grandparent</th><th>Remote</th><th>Sent</th><th>Recv</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+<footer class="muted" id="footer"></footer>
+<script src="/static/app.js"></script>
+</body>
+</html>

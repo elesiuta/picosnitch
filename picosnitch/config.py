@@ -20,12 +20,6 @@ class DatabaseConfig:
 
 
 @dataclasses.dataclass
-class DashConfig:
-    scroll_zoom: bool = True
-    theme: str = ""
-
-
-@dataclasses.dataclass
 class DataConfig:
     owner: str = "root"
     group: str = "root"
@@ -68,7 +62,6 @@ class VirusTotalConfig:
 @dataclasses.dataclass
 class Config:
     database: DatabaseConfig = dataclasses.field(default_factory=DatabaseConfig)
-    dash: DashConfig = dataclasses.field(default_factory=DashConfig)
     data: DataConfig = dataclasses.field(default_factory=DataConfig)
     log: LogConfig = dataclasses.field(default_factory=LogConfig)
     desktop: DesktopConfig = dataclasses.field(default_factory=DesktopConfig)

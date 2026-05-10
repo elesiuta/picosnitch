@@ -90,10 +90,6 @@ retention_days = 1
 write_limit_seconds = {DB_WRITE_LIMIT}
 text_log = false
 
-[dash]
-scroll_zoom = true
-theme = ""
-
 [data]
 owner = "root"
 group = "root"

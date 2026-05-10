@@ -28,9 +28,6 @@
 - `sudo add-apt-repository ppa:elesiuta/picosnitch`
 - `sudo apt update`
 - `sudo apt install picosnitch`
-- optionally install [dash](https://pypi.org/project/dash/) with [pip](https://pip.pypa.io/) or [pipx](https://pypa.github.io/pipx/)
-  - `sudo apt install pipx`
-  - `pipx install dash`
 - you may require a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#ubuntu---binary) ([unofficial PPA](https://launchpad.net/~hadret/+archive/ubuntu/bpfcc)) since the version in the [Ubuntu repos](https://repology.org/project/bcc-bpf/versions) sometimes lags behind its [supported kernel](https://github.com/iovisor/bcc/releases)
 </details>
 
@@ -38,9 +35,6 @@
 <details><summary>Details</summary>
 
 - visit the [OBS picosnitch page](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) and follow the instructions for your distribution
-- optionally install [dash](https://pypi.org/project/dash/) with [pip](https://pip.pypa.io/) or [pipx](https://pypa.github.io/pipx/)
-  - `sudo apt install pipx`
-  - `pipx install dash`
 - if you're having issues on bullseye, you may need a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#debian---binary)
 </details>
 
@@ -57,9 +51,6 @@
 
 - `sudo dnf copr enable elesiuta/picosnitch`
 - `sudo dnf install picosnitch`
-- optionally install [dash](https://pypi.org/project/dash/) with [pip](https://pip.pypa.io/) or [pipx](https://pypa.github.io/pipx/)
-  - `sudo dnf install pipx`
-  - `pipx install dash`
 </details>
 
 ### [Nixpkgs](https://search.nixos.org/packages?show=picosnitch) for Nix <img src="https://cdn.simpleicons.org/nixos" width="16" height="16">
@@ -84,8 +75,6 @@
 - create a service file for systemd to run picosnitch (recommended)
   - `picosnitch systemd`
 - optional dependencies (will install from [PyPI](https://pypi.org/) with `[full]` if not already installed)
-  - for dash: [dash](https://pypi.org/project/dash/), [pandas](https://pypi.org/project/pandas/), and [plotly](https://pypi.org/project/plotly/)
-  - for dash themes: [dash-bootstrap-components](https://pypi.org/project/dash-bootstrap-components/) and [dash-bootstrap-templates](https://pypi.org/project/dash-bootstrap-templates/)
   - for GeoIP lookups: [geoip2](https://pypi.org/project/geoip2/)
   - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro and should be installed from their repo)
   - for sql server: one of [psycopg](https://pypi.org/project/psycopg/), [pymysql](https://pypi.org/project/PyMySQL/), [mariadb](https://pypi.org/project/mariadb/), or [psycopg2](https://pypi.org/project/psycopg2/) (latter two not included with `[full]`)
@@ -111,7 +100,7 @@
   - start/stop/restart with `systemctl start|stop|restart picosnitch`
   - or if you don't use systemd `picosnitch start|stop|restart`
 - Web user interface for browsing past connections
-  - start with `picosnitch dash`
+  - start with `picosnitch webui`
   - visit [http://localhost:5100](http://localhost:5100) (you change this by setting the environment variables `HOST` and `PORT`)
 - Terminal user interface for browsing past connections
   - start with `picosnitch view`
@@ -172,7 +161,7 @@
   - this is used for determining whether to create a notification
   - it contains known process name(s) by executable, executable(s) by process name, and sha256 hash(es) with VirusTotal results by executable
 - Enable `DB sql log` (default) to write the full connection log to `~/.config/picosnitch/snitch.db`
-  - this is used for `picosnitch dash`, `picosnitch view`, or something like [DB Browser](https://sqlitebrowser.org/)
+  - this is used for `picosnitch webui`, `picosnitch tui`, or something like [DB Browser](https://sqlitebrowser.org/)
   - note, connection times are based on when the group is processed, so they are accurate to within `DB write limit (seconds)` at best, and could be delayed if the previous group is slow to hash
   - notifications are handled by a separate subprocess, so they are not subject to the same delays as the connection log
 - Use `DB sql server` to write the full connection log to a MariaDB, MySQL, or PostgreSQL server

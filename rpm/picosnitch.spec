@@ -9,9 +9,7 @@ BuildRequires:  python3
 BuildRequires:  python3-devel
 BuildRequires:  python3-setuptools
 Requires:       python3
-Requires:       python3-pandas
 Requires:       python3-geoip2
-Suggests:       python3-plotly
 Suggests:       pipx
 
 %if 0%{?fedora}%{?mageia}
@@ -23,7 +21,6 @@ Requires:       python3-dbus
 BuildRequires:  python3-wheel
 BuildRequires:  python3-curses
 Requires:       python3-curses
-Requires:       python3-dash
 Requires:       python3-dbus-python
 Requires:       bcc-tools
 %else
