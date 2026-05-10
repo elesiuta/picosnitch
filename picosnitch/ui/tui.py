@@ -9,6 +9,7 @@ import json
 import logging
 import pwd
 import queue
+import socket
 import sqlite3
 import sys
 import textwrap
@@ -17,6 +18,7 @@ import time
 
 from ..config import load_config
 from ..constants import CACHE_DIR, DATA_DIR, DB_VERSION, RUN_DIR, VERSION
+from ..live_feed import EVENTS_SOCKET_PATH, LiveFeedSubscriber
 
 
 def init_geoip():
@@ -59,6 +61,166 @@ def init_geoip():
         return None
 
 
+def _format_bytes_short(n: int) -> str:
+    for unit in ("B", "K", "M", "G"):
+        if n < 1024:
+            return f"{n:>5d}{unit}"
+        n //= 1024
+    return f"{n:>5d}T"
+
+
+def _live_tab_unavailable(stdscr: "curses.window", lines: list[str]) -> str:
+    """Show an error message in the live tab and wait for navigation."""
+    stdscr.clear()
+    max_y, max_x = stdscr.getmaxyx()
+    for i, line in enumerate(lines):
+        if 2 + i >= max_y:
+            break
+        try:
+            stdscr.addnstr(2 + i, 2, line, max_x - 3)
+        except curses.error:
+            pass
+    try:
+        stdscr.addnstr(2 + len(lines) + 1, 2, "Press LEFT/RIGHT to switch tab, q to quit.", max_x - 3)
+    except curses.error:
+        pass
+    stdscr.refresh()
+    stdscr.nodelay(False)
+    while True:
+        ch = stdscr.getch()
+        if ch == curses.KEY_LEFT:
+            return "left"
+        if ch == curses.KEY_RIGHT:
+            return "right"
+        if ch in (ord("q"), 27):
+            return "quit"
+
+
+def _live_tab_loop(stdscr: "curses.window") -> str:
+    """Render the live event feed inside the TUI.
+
+    Returns one of: "left", "right", "quit" so the caller can decide
+    where to navigate after the user leaves this tab.
+    """
+    if not EVENTS_SOCKET_PATH.exists():
+        return _live_tab_unavailable(
+            stdscr,
+            [
+                f"Live feed unavailable -- {EVENTS_SOCKET_PATH} does not exist.",
+                "Start the daemon (sudo picosnitch start) or run `picosnitch top` for a standalone live monitor.",
+            ],
+        )
+
+    sub = LiveFeedSubscriber(timeout=0.0)
+    try:
+        sub.connect()
+    except PermissionError as e:
+        return _live_tab_unavailable(
+            stdscr,
+            [
+                f"Live feed unavailable -- permission denied: {e}",
+                "The live event socket is owned by the picosnitch daemon and only readable by root",
+                "(or members of the configured picosnitch group). Re-run the TUI with sudo, or use",
+                "`sudo picosnitch top` for a standalone live monitor.",
+            ],
+        )
+    except OSError as e:
+        return _live_tab_unavailable(
+            stdscr,
+            [
+                f"Could not connect to live feed: {type(e).__name__}: {e}",
+            ],
+        )
+
+    recent: collections.deque[dict] = collections.deque(maxlen=10000)
+    paused = False
+    scroll_offset = 0
+    total_events = 0
+    try:
+        stdscr.nodelay(True)
+        while True:
+            sub.settimeout(0.0)
+            try:
+                for _ in range(500):
+                    try:
+                        event = next(sub)
+                    except (BlockingIOError, socket.timeout):
+                        break
+                    except StopIteration:
+                        return "quit"
+                    if not isinstance(event, dict) or not event:
+                        continue
+                    event["_t"] = time.time()
+                    total_events += 1
+                    if not paused:
+                        recent.appendleft(event)
+            except Exception:
+                pass
+
+            stdscr.erase()
+            max_y, max_x = stdscr.getmaxyx()
+            help_bar = " ←/→: tabs  ↑↓ PgUp/PgDn Home/End: scroll  p: pause  r: clear  q: quit "
+            stdscr.attrset(curses.color_pair(3) | curses.A_BOLD)
+            stdscr.addstr(0, 0, help_bar.ljust(max_x - 1)[: max_x - 1])
+            status = f" Live feed -- events: {total_events}  shown: {len(recent)}  {'PAUSED' if paused else 'streaming'} "
+            stdscr.addstr(1, 0, status.ljust(max_x - 1)[: max_x - 1])
+            hdr = f" {'TIME':<8} {'NAME':<16} {'PNAME':<14} {'GPNAME':<14} {'REMOTE':<28} {'SEND':>7} {'RECV':>7}"
+            stdscr.addstr(2, 0, hdr.ljust(max_x - 1)[: max_x - 1], curses.A_UNDERLINE)
+            stdscr.attrset(0)
+
+            rec_rows = max(1, max_y - 4)
+            recent_list = list(recent)
+            max_offset = max(0, len(recent_list) - rec_rows)
+            if scroll_offset > max_offset:
+                scroll_offset = max_offset
+            for i, event in enumerate(recent_list[scroll_offset : scroll_offset + rec_rows]):
+                ts = event.get("_t", 0)
+                t = time.strftime("%H:%M:%S", time.localtime(ts)) if ts else time.strftime("%H:%M:%S")
+                raddr = event.get("raddr", "") or ""
+                rport = event.get("rport", -1)
+                remote = (event.get("domain") or raddr) + (f":{rport}" if rport and rport > 0 else "")
+                line = (
+                    f" {t:<8} "
+                    f"{(event.get('name') or '')[:16]:<16} "
+                    f"{(event.get('pname') or '')[:14]:<14} "
+                    f"{(event.get('gpname') or '')[:14]:<14} "
+                    f"{remote[:28]:<28} "
+                    f"{_format_bytes_short(int(event.get('send', 0) or 0)):>7} "
+                    f"{_format_bytes_short(int(event.get('recv', 0) or 0)):>7}"
+                )
+                stdscr.addstr(3 + i, 0, line[: max_x - 1])
+            stdscr.refresh()
+
+            stdscr.timeout(200)
+            ch = stdscr.getch()
+            if ch == ord("q") or ch == 27:
+                return "quit"
+            elif ch == curses.KEY_LEFT:
+                return "left"
+            elif ch == curses.KEY_RIGHT:
+                return "right"
+            elif ch == ord("p"):
+                paused = not paused
+            elif ch == ord("r"):
+                recent.clear()
+                total_events = 0
+                scroll_offset = 0
+            elif ch == curses.KEY_UP:
+                scroll_offset = min(max_offset, scroll_offset + 1)
+            elif ch == curses.KEY_DOWN:
+                scroll_offset = max(0, scroll_offset - 1)
+            elif ch == curses.KEY_PPAGE:
+                scroll_offset = min(max_offset, scroll_offset + max(1, rec_rows - 1))
+            elif ch == curses.KEY_NPAGE:
+                scroll_offset = max(0, scroll_offset - max(1, rec_rows - 1))
+            elif ch == curses.KEY_HOME:
+                scroll_offset = 0
+            elif ch == curses.KEY_END:
+                scroll_offset = max_offset
+    finally:
+        sub.close()
+
+
 def tui_loop(stdscr: curses.window, splash: str) -> int:
     """for curses wrapper"""
     # thread for querying database
@@ -67,19 +229,22 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
     kill_thread_query = threading.Event()
 
     def fetch_query_results(current_query: str, query_params: tuple, q_query_results: queue.Queue, kill_thread_query: threading.Event):
+        # connect once per fetch; sqlite3 connections are not thread-safe to share
         con = sqlite3.connect(file_path, timeout=1)
-        cur = con.cursor()
-        while True and not kill_thread_query.is_set():
-            try:
-                cur.execute(current_query, query_params)
-                break
-            except sqlite3.OperationalError:
-                time.sleep(0.5)
-        results = cur.fetchmany(25)
-        while results and not kill_thread_query.is_set():
-            q_query_results.put(results)
+        try:
+            cur = con.cursor()
+            while True and not kill_thread_query.is_set():
+                try:
+                    cur.execute(current_query, query_params)
+                    break
+                except sqlite3.OperationalError:
+                    time.sleep(0.5)
             results = cur.fetchmany(25)
-        con.close()
+            while results and not kill_thread_query.is_set():
+                q_query_results.put(results)
+                results = cur.fetchmany(25)
+        finally:
+            con.close()
 
     thread_query = threading.Thread()
     thread_query.start()
@@ -174,6 +339,10 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
         "Parent Names",
         "Parent Commands",
         "Parent SHA256",
+        "Grandparent Executables",
+        "Grandparent Names",
+        "Grandparent Commands",
+        "Grandparent SHA256",
         "Users",
         "Local Ports",
         "Remote Ports",
@@ -181,6 +350,7 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
         "Remote Addresses",
         "Domains",
         "Entry Time",
+        "Live",
     ]
     col_names = [
         "Executable",
@@ -191,6 +361,10 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
         "Parent Name",
         "Parent Command",
         "Parent SHA256",
+        "Grandparent Executable",
+        "Grandparent Name",
+        "Grandparent Command",
+        "Grandparent SHA256",
         "User",
         "Local Port",
         "Remote Port",
@@ -198,9 +372,31 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
         "Remote Address",
         "Domain",
         "Entry Time",
+        "Live",
     ]
-    col_sql = ["e.exe", "e.name", "e.cmdline", "e.sha256", "p.exe", "p.name", "p.cmdline", "p.sha256", "c.uid", "c.lport", "c.rport", "c.laddr", "c.raddr", "c.domain", "c.contime"]
-    from_clause = "connections c JOIN executables e ON c.exe_id = e.id JOIN executables p ON c.pexe_id = p.id"
+    col_sql = [
+        "e.exe",
+        "e.name",
+        "e.cmdline",
+        "e.sha256",
+        "p.exe",
+        "p.name",
+        "p.cmdline",
+        "p.sha256",
+        "g.exe",
+        "g.name",
+        "g.cmdline",
+        "g.sha256",
+        "c.uid",
+        "c.lport",
+        "c.rport",
+        "c.laddr",
+        "c.raddr",
+        "c.domain",
+        "c.contime",
+        "__live__",
+    ]
+    from_clause = "connections c JOIN executables e ON c.exe_id = e.id JOIN executables p ON c.pexe_id = p.id JOIN executables g ON c.gpexe_id = g.id"
     tab_stack = []
     byte_units = 3
 
@@ -220,10 +416,26 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
     execute_query = True
     running_query = False
     current_query, current_query_params, current_screen = "", (), [""]
+    last_executed_query: tuple = (None, None)
     vt_status = collections.defaultdict(str)
     while True:
         # adjust cursor
         tab_i %= len(col_sql)
+        # Live tab takes over with its own input loop
+        if tab_names[tab_i] == "Live":
+            action = _live_tab_loop(stdscr)
+            if action == "quit":
+                return 0
+            if action == "left":
+                tab_i = (tab_i - 1) % len(col_sql)
+            elif action == "right":
+                tab_i = (tab_i + 1) % len(col_sql)
+            update_query = True
+            execute_query = True
+            cursor = first_line
+            line = first_line
+            stdscr.clear()
+            continue
         time_i %= len(time_period)
         if time_j < 0 or time_i == 0:
             time_j = 0
@@ -265,16 +477,21 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
                 current_query_params = ()
             update_query = False
         if execute_query:
-            current_screen = []
-            # kill old thread with flag, may still be executing current query so don't wait for join, just let gc handle it
-            kill_thread_query.set()
-            while not q_query_results.empty():
-                _ = q_query_results.get_nowait()
-            # start new thread, reinitialize queue and kill flag
-            q_query_results = queue.Queue()
-            kill_thread_query = threading.Event()
-            thread_query = threading.Thread(target=fetch_query_results, args=(current_query, current_query_params, q_query_results, kill_thread_query), daemon=True)
-            thread_query.start()
+            # skip thread restart if query+params haven't changed (e.g. resize, units toggle)
+            if (current_query, current_query_params) == last_executed_query and current_screen and current_screen != [""]:
+                execute_query = False
+            else:
+                current_screen = []
+                # kill old thread with flag, may still be executing current query so don't wait for join, just let gc handle it
+                kill_thread_query.set()
+                while not q_query_results.empty():
+                    _ = q_query_results.get_nowait()
+                # start new thread, reinitialize queue and kill flag
+                q_query_results = queue.Queue()
+                kill_thread_query = threading.Event()
+                thread_query = threading.Thread(target=fetch_query_results, args=(current_query, current_query_params, q_query_results, kill_thread_query), daemon=True)
+                thread_query.start()
+                last_executed_query = (current_query, current_query_params)
             # check daemon pid for status bar
             try:
                 with open(RUN_DIR / "picosnitch.pid", "r") as f:

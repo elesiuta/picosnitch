@@ -335,7 +335,7 @@ def start_picosnitch() -> int:
         if err := check_database():
             return err
         return web_dashboard()
-    elif cmd == "view":
+    elif cmd == "tui":
         if err := check_database():
             return err
         return tui_init()
