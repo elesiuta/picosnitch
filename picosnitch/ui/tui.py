@@ -19,6 +19,7 @@ import time
 from ..config import load_config
 from ..constants import CACHE_DIR, DATA_DIR, DB_VERSION, RUN_DIR, VERSION
 from ..live_feed import EVENTS_SOCKET_PATH, LiveFeedSubscriber
+from ..utils import connect_db_readonly
 
 
 def init_geoip():
@@ -230,7 +231,7 @@ def tui_loop(stdscr: curses.window, splash: str) -> int:
 
     def fetch_query_results(current_query: str, query_params: tuple, q_query_results: queue.Queue, kill_thread_query: threading.Event):
         # connect once per fetch; sqlite3 connections are not thread-safe to share
-        con = sqlite3.connect(file_path, timeout=1)
+        con = connect_db_readonly(file_path, timeout=1)
         try:
             cur = con.cursor()
             while True and not kill_thread_query.is_set():
@@ -713,7 +714,7 @@ def tui_init() -> int:
     """)
     # init sql connection
     file_path = DATA_DIR / "picosnitch.db"
-    con = sqlite3.connect(file_path, timeout=15)
+    con = connect_db_readonly(file_path, timeout=15)
     # check for table
     cur = con.cursor()
     cur.execute(""" PRAGMA user_version """)

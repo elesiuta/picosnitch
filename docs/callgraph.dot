@@ -214,6 +214,7 @@ digraph G {
 
             graph [style="filled,rounded", fillcolor="#80808018", label="picosnitch.utils"];
             "picosnitch__utils__apply_data_permissions" [label="apply_data_permissions", style="filled", fillcolor="#ff99feb2", fontcolor="#000000", group="10"];
+            "picosnitch__utils__connect_db_readonly" [label="connect_db_readonly", style="filled", fillcolor="#ff99feb2", fontcolor="#000000", group="10"];
             "picosnitch__utils__drop_root_permanent" [label="drop_root_permanent", style="filled", fillcolor="#ff99feb2", fontcolor="#000000", group="10"];
             "picosnitch__utils__flush_logs" [label="flush_logs", style="filled", fillcolor="#ff99feb2", fontcolor="#000000", group="10"];
             "picosnitch__utils__get_fanotify_events" [label="get_fanotify_events", style="filled", fillcolor="#ff99feb2", fontcolor="#000000", group="10"];
@@ -605,6 +606,7 @@ digraph G {
         "picosnitch__subprocesses__virustotal__run_virustotal" -> "picosnitch__utils__resolve_owner" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__virustotal__run_virustotal__get_analysis" -> "picosnitch__subprocesses__virustotal___http_get_json" [style="solid",  color="#000000"];
         "picosnitch__utils" -> "picosnitch__utils__apply_data_permissions" [style="dashed",  color="#ffffff00"];
+        "picosnitch__utils" -> "picosnitch__utils__connect_db_readonly" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__drop_root_permanent" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__flush_logs" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__get_fanotify_events" [style="dashed",  color="#ffffff00"];

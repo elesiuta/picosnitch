@@ -15,6 +15,7 @@ import os
 import pickle
 import pwd
 import socket
+import sqlite3
 import sys
 import tempfile
 import termios
@@ -57,6 +58,33 @@ def resolve_group(group: str) -> int:
         return int(group)
     except ValueError:
         return grp.getgrnam(group).gr_gid
+
+
+def connect_db_readonly(db_path: Path | str, timeout: float = 5.0) -> sqlite3.Connection:
+    """Open a sqlite3 connection for read-only access.
+
+    Tries in order: read-write, then `mode=ro`, then `mode=ro&immutable=1`.
+    The immutable fallback is needed when the caller cannot write to the
+    -shm / -wal sidecar files of a WAL-mode database (e.g. a non-root
+    user opening the picosnitch database written by the root daemon).
+    Raises sqlite3.OperationalError if every attempt fails."""
+    last_err: Exception | None = None
+    for uri in (
+        str(db_path),
+        f"file:{db_path}?mode=ro",
+        f"file:{db_path}?mode=ro&immutable=1",
+    ):
+        try:
+            con = sqlite3.connect(uri, uri=uri.startswith("file:"), timeout=timeout)
+            # Force the connection to actually touch the file so we
+            # surface "attempt to write a readonly database" here
+            # instead of at the first user query.
+            con.execute("PRAGMA user_version").fetchone()
+            return con
+        except sqlite3.OperationalError as e:
+            last_err = e
+            continue
+    raise sqlite3.OperationalError(f"could not open {db_path} for reading: {last_err}")
 
 
 def apply_data_permissions(config_dir: Path, data_dir: Path, log_dir: Path, cache_dir: Path) -> None:

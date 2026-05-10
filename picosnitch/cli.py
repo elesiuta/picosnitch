@@ -19,7 +19,7 @@ from .main_loop import run_main_loop
 from .ui.top import top_init
 from .ui.tui import tui_init
 from .ui.webui import web_dashboard
-from .utils import apply_data_permissions, load_state
+from .utils import apply_data_permissions, connect_db_readonly, load_state
 
 
 def check_root(cmd: str) -> int:
@@ -55,11 +55,17 @@ def check_database() -> int:
         logging.error(f"Database not found: {db_path}")
         logging.error(f"Run: sudo {Path(sys.argv[0]).resolve()} init")
         return 1
-    con = sqlite3.connect(db_path)
-    cur = con.cursor()
-    cur.execute(""" PRAGMA user_version """)
-    user_version = cur.fetchone()[0]
-    con.close()
+    try:
+        con = connect_db_readonly(db_path)
+    except sqlite3.OperationalError as e:
+        logging.error(f"Could not open database {db_path}: {e}")
+        return 1
+    try:
+        cur = con.cursor()
+        cur.execute("PRAGMA user_version")
+        user_version = cur.fetchone()[0]
+    finally:
+        con.close()
     if user_version != DB_VERSION:
         logging.error(f"Unsupported database version {user_version}, expected {DB_VERSION}")
         return 1
