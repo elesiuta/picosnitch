@@ -4,8 +4,31 @@
 import collections.abc
 import multiprocessing
 import multiprocessing.connection
+import os
 
-import psutil
+
+def _read_proc_stat_state(pid: int) -> str:
+    """Read the single-character state field (3rd field) from /proc/{pid}/stat.
+
+    The stat format is: pid (comm) state ppid ... where comm may itself
+    contain spaces and parentheses. Splitting on the last `)` works around
+    that since state is always the next token.
+    """
+    try:
+        with open(f"/proc/{pid}/stat", "r") as f:
+            return f.read().rsplit(")", 1)[1].split()[0]
+    except OSError:
+        return ""
+
+
+def _read_proc_rss_bytes(pid: int) -> int:
+    """Resident set size in bytes from /proc/{pid}/statm field 2 (pages)."""
+    try:
+        with open(f"/proc/{pid}/statm", "r") as f:
+            rss_pages = int(f.read().split()[1])
+        return rss_pages * os.sysconf("SC_PAGE_SIZE")
+    except (OSError, IndexError, ValueError):
+        return 0
 
 
 class ProcessManager:
@@ -19,7 +42,6 @@ class ProcessManager:
     def start(self) -> None:
         self.p = multiprocessing.Process(name=self.name, target=self.target, daemon=True, args=(*self.init_args, self.q_in, self.q_out))
         self.p.start()
-        self.pp = psutil.Process(self.p.pid)
 
     def terminate(self) -> None:
         if self.p.is_alive():
@@ -34,7 +56,7 @@ class ProcessManager:
         return self.p.is_alive()
 
     def is_zombie(self) -> bool:
-        return self.pp.is_running() and self.pp.status() == psutil.STATUS_ZOMBIE
+        return self.p.is_alive() and _read_proc_stat_state(self.p.pid) == "Z"
 
     def memory(self) -> int:
-        return self.pp.memory_info().rss
+        return _read_proc_rss_bytes(self.p.pid)

@@ -8,10 +8,7 @@ Source:         https://github.com/elesiuta/picosnitch/releases/download/v%{vers
 BuildRequires:  python3
 BuildRequires:  python3-devel
 BuildRequires:  python3-setuptools
-BuildRequires:  python3-psutil
 Requires:       python3
-Requires:       python3-psutil
-Requires:       python3-requests
 Requires:       python3-pandas
 Requires:       python3-geoip2
 Suggests:       python3-plotly

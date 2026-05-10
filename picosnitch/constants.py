@@ -9,8 +9,6 @@ import tomllib
 import typing
 from pathlib import Path
 
-import psutil
-
 from . import __version__
 
 # picosnitch version
@@ -49,12 +47,15 @@ FD_CACHE: typing.Final[int] = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 12
 PID_CACHE: typing.Final[int] = max(8192, 2 * FD_CACHE)
 st_dev_mask = 0xFFFFFFFF
 try:
-    for part in psutil.disk_partitions():
-        if part.fstype == "btrfs":
-            st_dev_mask = 0
-            if not (CONFIG_DIR / "config.toml").exists():
-                logging.warning("running picosnitch on systems with btrfs is not fully supported due to dev number strangeness and non-unique inodes (this is still fine for most use cases)")
-            break
+    # parse /proc/mounts to detect btrfs filesystems (replaces psutil.disk_partitions)
+    with open("/proc/mounts", "r") as _mounts_file:
+        for _line in _mounts_file:
+            _parts = _line.split()
+            if len(_parts) >= 3 and _parts[2] == "btrfs":
+                st_dev_mask = 0
+                if not (CONFIG_DIR / "config.toml").exists():
+                    logging.warning("running picosnitch on systems with btrfs is not fully supported due to dev number strangeness and non-unique inodes (this is still fine for most use cases)")
+                break
     file_path = CONFIG_DIR / "config.toml"
     with open(file_path, "rb") as toml_file:
         set_mask = tomllib.load(toml_file).get("monitoring", {}).get("st_dev_mask")

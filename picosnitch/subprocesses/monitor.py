@@ -18,39 +18,179 @@ import sys
 import time
 import typing
 
-import psutil
-
 from ..bpf_wrapper import BPF, check_bpf_requirements, find_bpf_object
 from ..config import Config
 from ..constants import FD_CACHE, PID_CACHE, ST_DEV_MASK
 from ..utils import get_fstat
 
 
+def _read_proc_comm(pid: int) -> str:
+    try:
+        with open(f"/proc/{pid}/comm", "r") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def _read_proc_status_uid(pid: int) -> int:
+    """Return the effective UID for `pid` from /proc/[pid]/status.
+
+    Format: 'Uid:\\treal\\teffective\\tsaved\\tfs'.  We use the effective
+    UID (field 2) because BPF's bpf_get_current_uid_gid() also returns
+    the effective UID -- keeping the two paths consistent."""
+    try:
+        with open(f"/proc/{pid}/status", "r") as f:
+            for line in f:
+                if line.startswith("Uid:"):
+                    return int(line.split()[2])
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0
+
+
+def _parse_proc_net_addr(hex_addr: str) -> str:
+    """Parse 'AABBCCDD:PPPP' or IPv6 hex form into a string IP address."""
+    addr_part, _, _port_part = hex_addr.partition(":")
+    try:
+        if len(addr_part) == 8:
+            packed = bytes.fromhex(addr_part)
+            return socket.inet_ntop(socket.AF_INET, packed[::-1])
+        if len(addr_part) == 32:
+            # /proc/net stores IPv6 as 4 little-endian u32 words
+            words = [bytes.fromhex(addr_part[i : i + 8])[::-1] for i in range(0, 32, 8)]
+            return socket.inet_ntop(socket.AF_INET6, b"".join(words))
+    except (ValueError, OSError):
+        pass
+    return ""
+
+
+def _parse_proc_net_port(hex_addr: str) -> int:
+    _, _, port_part = hex_addr.partition(":")
+    try:
+        return int(port_part, 16)
+    except ValueError:
+        return -1
+
+
+def _scan_proc_net_sockets() -> dict[int, tuple[str, int, str, int]]:
+    """Return {inode: (laddr, lport, raddr, rport)} from /proc/net/{tcp,tcp6,udp,udp6}."""
+    inode_to_endpoint: dict[int, tuple[str, int, str, int]] = {}
+    for proto in ("tcp", "tcp6", "udp", "udp6"):
+        try:
+            with open(f"/proc/net/{proto}", "r") as f:
+                next(f, None)  # skip header
+                for line in f:
+                    parts = line.split()
+                    if len(parts) < 10:
+                        continue
+                    try:
+                        inode = int(parts[9])
+                    except ValueError:
+                        continue
+                    if inode == 0:
+                        continue
+                    laddr = _parse_proc_net_addr(parts[1])
+                    lport = _parse_proc_net_port(parts[1])
+                    raddr = _parse_proc_net_addr(parts[2])
+                    rport = _parse_proc_net_port(parts[2])
+                    # only keep connections that actually have a remote peer
+                    if not raddr or rport <= 0 or raddr in ("0.0.0.0", "::"):
+                        continue
+                    inode_to_endpoint[inode] = (laddr, lport, raddr, rport)
+        except OSError:
+            continue
+    return inode_to_endpoint
+
+
+def _scan_pid_socket_inodes(pid: int) -> list[int]:
+    """Return socket inode numbers owned by `pid` by reading /proc/{pid}/fd/*."""
+    inodes: list[int] = []
+    try:
+        entries = os.listdir(f"/proc/{pid}/fd")
+    except OSError:
+        return inodes
+    for entry in entries:
+        try:
+            target = os.readlink(f"/proc/{pid}/fd/{entry}")
+        except OSError:
+            continue
+        if target.startswith("socket:["):
+            try:
+                inodes.append(int(target[8:-1]))
+            except ValueError:
+                continue
+    return inodes
+
+
+def _read_proc_ppid(pid: int) -> int:
+    """Parse ppid (4th field) from /proc/{pid}/stat, splitting on the last
+    `)` to handle commands containing spaces or parens."""
+    try:
+        with open(f"/proc/{pid}/stat", "r") as f:
+            return int(f.read().rsplit(")", 1)[1].split()[1])
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
 def initial_poll() -> list:
-    """poll initial processes and connections using psutil"""
+    """Poll initial processes from /proc and seed any pre-existing TCP/UDP
+    connections from /proc/net/{tcp,tcp6,udp,udp6} so the daemon catches
+    sockets that were already open before BPF attached.
+
+    BPF picks up every new send/recv after attach, so this only matters
+    for long-running connections that pre-date the daemon."""
     initial_processes = []
-    for pid in psutil.pids():
+    try:
+        pids = [int(name) for name in os.listdir("/proc") if name.isdigit()]
+    except OSError:
+        return initial_processes
+    inode_to_endpoint = _scan_proc_net_sockets()
+    for pid in pids:
         try:
-            proc = psutil.Process(pid).as_dict(attrs=["name", "exe", "pid", "ppid", "uids"], ad_value="")
-            proc["uid"] = proc["uids"][0]
-            proc["pname"] = psutil.Process(proc["ppid"]).name()
-            proc["raddr"] = ""
-            proc["rport"] = -1
-            proc["laddr"] = ""
-            proc["lport"] = -1
-            initial_processes.append(proc)
-        except Exception:
-            pass
-    for conn in psutil.net_connections(kind="all"):
-        try:
-            proc = psutil.Process(conn.pid).as_dict(attrs=["name", "exe", "pid", "ppid", "uids"], ad_value="")
-            proc["uid"] = proc["uids"][0]
-            proc["pname"] = psutil.Process(proc["ppid"]).name()
-            proc["raddr"] = conn.raddr.ip
-            proc["rport"] = conn.raddr.port
-            proc["laddr"] = conn.laddr.ip
-            proc["lport"] = conn.laddr.port
-            initial_processes.append(proc)
+            name = _read_proc_comm(pid)
+            try:
+                exe = os.readlink(f"/proc/{pid}/exe")
+            except OSError:
+                exe = ""
+            ppid = _read_proc_ppid(pid)
+            uid = _read_proc_status_uid(pid)
+            pname = _read_proc_comm(ppid) if ppid else ""
+            base = {
+                "name": name,
+                "exe": exe,
+                "pid": pid,
+                "ppid": ppid,
+                "uid": uid,
+                "pname": pname,
+            }
+            # find connections that this pid owns by matching socket inodes
+            seeded_any = False
+            if inode_to_endpoint:
+                for inode in _scan_pid_socket_inodes(pid):
+                    endpoint = inode_to_endpoint.get(inode)
+                    if endpoint is None:
+                        continue
+                    laddr, lport, raddr, rport = endpoint
+                    initial_processes.append(
+                        {
+                            **base,
+                            "raddr": raddr,
+                            "rport": rport,
+                            "laddr": laddr,
+                            "lport": lport,
+                        }
+                    )
+                    seeded_any = True
+            if not seeded_any:
+                initial_processes.append(
+                    {
+                        **base,
+                        "raddr": "",
+                        "rport": -1,
+                        "laddr": "",
+                        "lport": -1,
+                    }
+                )
         except Exception:
             pass
     return initial_processes
@@ -228,7 +368,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                     stat_fields = f.read().rsplit(")", 1)[-1].split()
                 gppid = int(stat_fields[1])
                 if gppid > 0:
-                    gpname = psutil.Process(gppid).name()
+                    gpname = _read_proc_comm(gppid)
                     gstat = os.stat(f"/proc/{gppid}/exe")
                     gpcmd = get_cmdline(gppid)
                     gpst_dev, gpst_ino, _, gpfd, gpexe = get_fd(gstat.st_dev, gstat.st_ino, gppid, -1, gpname)

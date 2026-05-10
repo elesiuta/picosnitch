@@ -16,9 +16,7 @@ classifiers = [
     "Topic :: System :: Networking :: Monitoring",
     "Topic :: System :: Monitoring",
 ]
-dependencies = [
-    "psutil",
-]
+dependencies = []
 
 [project.optional-dependencies]
 dash = ["dash", "pandas", "plotly"]
@@ -26,9 +24,8 @@ geoip = ["geoip2"]
 notifications = ["dbus-python"]
 sql = ["psycopg[binary]", "pymysql"]
 themes = ["dash-bootstrap-components", "dash-bootstrap-templates"]
-virustotal = ["requests"]
 full = [
-    "picosnitch[dash,geoip,notifications,sql,themes,virustotal]"
+    "picosnitch[dash,geoip,notifications,sql,themes]"
 ]
 
 [project.scripts]
