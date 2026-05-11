@@ -454,14 +454,28 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     def queue_lost(event, *args):
         q_error.put(f"BPF callbacks not processing fast enough, missed {event} event, try increasing 'Perf ring buffer (pages)' (power of two) if this continues")
 
+    def resolve_grandparent(event) -> tuple[int, int, int, str, str, str, str]:
+        """resolve grandparent proc info, returning all-empty/zero values when
+        gppid <= 0 (BPF reports tgid=0 for the kernel/swapper). this happens
+        whenever the parent walk hits init or any process whose parent is the
+        kernel idle task, e.g. detached daemons, kernel-thread-spawned procs,
+        or systemd's direct children. without this guard get_fd() and the
+        downstream resolve_hash() would emit "Read Error" toasts and store
+        garbage rows in the executables table."""
+        if event.gppid <= 0:
+            return 0, 0, 0, "", "", "", ""
+        gpcomm = event.gpcomm.decode()
+        gpst_dev, gpst_ino, gppid, gpfd, gpexe = get_fd(event.gpdev, event.gpino, event.gppid, -1, gpcomm)
+        gpcmd = get_cmdline(event.gppid)
+        return gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm
+
     def queue_sendv4_event(cpu, data, size):
         event = b["sendmsg_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
         pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
-        gpst_dev, gpst_ino, gppid, gpfd, gpexe = get_fd(event.gpdev, event.gpino, event.gppid, -1, event.gpcomm.decode())
+        gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(event)
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
-        gpcmd = get_cmdline(event.gppid)
         laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
         raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
         event_pipe_0.send_bytes(
@@ -482,7 +496,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                     "pexe": pexe,
                     "pcmdline": pcmd,
                     "gppid": gppid,
-                    "gpname": event.gpcomm.decode(),
+                    "gpname": gpcomm,
                     "gpfd": gpfd,
                     "gpdev": gpst_dev,
                     "gpino": gpst_ino,
@@ -504,10 +518,9 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         event = b["sendmsg6_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
         pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
-        gpst_dev, gpst_ino, gppid, gpfd, gpexe = get_fd(event.gpdev, event.gpino, event.gppid, -1, event.gpcomm.decode())
+        gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(event)
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
-        gpcmd = get_cmdline(event.gppid)
         laddr = socket.inet_ntop(socket.AF_INET6, bytes(event.saddr)[:16])
         raddr = socket.inet_ntop(socket.AF_INET6, bytes(event.daddr)[:16])
         event_pipe_1.send_bytes(
@@ -528,7 +541,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                     "pexe": pexe,
                     "pcmdline": pcmd,
                     "gppid": gppid,
-                    "gpname": event.gpcomm.decode(),
+                    "gpname": gpcomm,
                     "gpfd": gpfd,
                     "gpdev": gpst_dev,
                     "gpino": gpst_ino,
@@ -550,10 +563,9 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         event = b["recvmsg_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
         pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
-        gpst_dev, gpst_ino, gppid, gpfd, gpexe = get_fd(event.gpdev, event.gpino, event.gppid, -1, event.gpcomm.decode())
+        gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(event)
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
-        gpcmd = get_cmdline(event.gppid)
         laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
         raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
         event_pipe_2.send_bytes(
@@ -574,7 +586,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                     "pexe": pexe,
                     "pcmdline": pcmd,
                     "gppid": gppid,
-                    "gpname": event.gpcomm.decode(),
+                    "gpname": gpcomm,
                     "gpfd": gpfd,
                     "gpdev": gpst_dev,
                     "gpino": gpst_ino,
@@ -596,10 +608,9 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         event = b["recvmsg6_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
         pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
-        gpst_dev, gpst_ino, gppid, gpfd, gpexe = get_fd(event.gpdev, event.gpino, event.gppid, -1, event.gpcomm.decode())
+        gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(event)
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
-        gpcmd = get_cmdline(event.gppid)
         laddr = socket.inet_ntop(socket.AF_INET6, bytes(event.saddr)[:16])
         raddr = socket.inet_ntop(socket.AF_INET6, bytes(event.daddr)[:16])
         event_pipe_3.send_bytes(
@@ -620,7 +631,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                     "pexe": pexe,
                     "pcmdline": pcmd,
                     "gppid": gppid,
-                    "gpname": event.gpcomm.decode(),
+                    "gpname": gpcomm,
                     "gpfd": gpfd,
                     "gpdev": gpst_dev,
                     "gpino": gpst_ino,
@@ -642,10 +653,9 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         event = b["exec_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, -1, event.comm.decode())
         pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
-        gpst_dev, gpst_ino, gppid, gpfd, gpexe = get_fd(event.gpdev, event.gpino, event.gppid, -1, event.gpcomm.decode())
+        gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(event)
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
-        gpcmd = get_cmdline(event.gppid)
         if EVERY_EXE:
             event_pipe_4.send_bytes(
                 pickle.dumps(
@@ -665,7 +675,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                         "pexe": pexe,
                         "pcmdline": pcmd,
                         "gppid": gppid,
-                        "gpname": event.gpcomm.decode(),
+                        "gpname": gpcomm,
                         "gpfd": gpfd,
                         "gpdev": gpst_dev,
                         "gpino": gpst_ino,

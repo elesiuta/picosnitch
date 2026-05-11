@@ -37,6 +37,12 @@ def handle_new_processes(state: State, new_processes: list[bytes], q_notify: mul
             (proc["gpname"], proc["gpexe"], state["Grandparent Names"], state["Grandparent Executables"], " (grandparent)"),
         )
         for proc_name, proc_exe, state_names, state_executables, parent in levels:
+            # skip levels with no real process (e.g. grandparent of an init child
+            # is the kernel/swapper, daemons whose parent walk hits PID 0, or
+            # short-lived processes where /proc was already gone). these would
+            # otherwise pollute state with empty entries and emit blank toasts.
+            if not proc_name and not proc_exe:
+                continue
             notification = []
             if proc_name in state_names:
                 if proc_exe not in state_names[proc_name]:

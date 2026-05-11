@@ -396,6 +396,60 @@ class TestGrandparentTracking:
         gpexes = [row[0] for row in results]
         assert any("sh" in gpexe or "bash" in gpexe for gpexe in gpexes), f"Grandparent should be a shell, got: {gpexes}"
 
+    def test_kernel_grandparent_no_pollution(self, picosnitch_session):
+        """Test that processes without a grandparent (e.g. parented to init or
+        kernel-reparented daemons) produce a clean empty sentinel row instead
+        of garbage sha256s and 'Read Error' log spam.
+
+        Triggered by double-forking so the curl is reparented to PID 1, making
+        its grandparent the kernel (gppid=0 in BPF)."""
+        curl_exe = find_executable("curl")
+        if not curl_exe:
+            pytest.skip("curl not available")
+
+        # Double-fork: parent forks A, A forks B then exits, so B is reparented
+        # to init. B then execs curl, so curl's parent is init (pid 1) and
+        # curl's grandparent is the kernel (gppid=0).
+        daemon_script = (
+            "import os, sys;\n"
+            "pid = os.fork()\n"
+            "if pid:\n"
+            "    os.waitpid(pid, 0); sys.exit(0)\n"
+            "os.setsid()\n"
+            "pid2 = os.fork()\n"
+            "if pid2:\n"
+            "    sys.exit(0)\n"
+            "os.execvp('curl', ['curl', '-s', 'http://example.com', '-o', '/dev/null'])\n"
+        )
+        start_time = int(time.time())
+        subprocess.run([PYTHON_EXE, "-c", daemon_script], capture_output=True, timeout=30)
+        time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT + 2)
+
+        # No executables row should contain a garbage sha (the old bug wrote
+        # "!!! FD Read Error !!! ..." literal strings into sha256).
+        bad = query_db("SELECT id, name, sha256 FROM executables WHERE sha256 LIKE '%Error%'")
+        assert bad == [], f"Found executables with garbage error-string sha256: {bad}"
+
+        # No connection should reference a grandparent named 'swapper/0' or similar
+        # kernel pseudo-process (the old bug captured these as real grandparents).
+        kernel_gp = query_db("SELECT DISTINCT g.name FROM connections c JOIN executables g ON c.gpexe_id = g.id WHERE g.name LIKE 'swapper%' OR g.name LIKE 'kthread%'")
+        assert kernel_gp == [], f"Kernel pseudo-processes captured as grandparents: {kernel_gp}"
+
+        # The empty sentinel row should exist (exe='' AND name='' AND sha256='')
+        # and connections with no grandparent should point to it.
+        sentinel = query_db("SELECT id FROM executables WHERE exe='' AND name='' AND sha256=''")
+        assert len(sentinel) >= 1, "Empty sentinel executables row should exist for 'no grandparent' case"
+
+        # Verify our double-forked curl made it into the DB and its grandparent
+        # resolves to the empty sentinel (gppid was 0).
+        results = query_db(
+            "SELECT g.exe, g.name, g.sha256 FROM connections c JOIN executables e ON c.exe_id = e.id JOIN executables g ON c.gpexe_id = g.id WHERE e.name LIKE '%curl%' AND c.contime >= ?",
+            (start_time,),
+        )
+        assert len(results) > 0, "Should have at least one curl connection from double-fork"
+        # At least one of them should have the empty grandparent sentinel.
+        assert any(row == ("", "", "") for row in results), f"Expected at least one curl with empty grandparent sentinel, got: {results}"
+
 
 if __name__ == "__main__":
     if os.geteuid() != 0:

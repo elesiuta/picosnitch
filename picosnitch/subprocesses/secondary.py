@@ -32,6 +32,13 @@ def resolve_hash(
     q_error: multiprocessing.Queue[str],
 ) -> str:
     """get sha256 of executable and submit to primary or virustotal subprocess if necessary"""
+    # short-circuit when there is no executable to hash (e.g. kernel grandparent /
+    # init's parent, daemons whose parent walk hits PID 0 / swapper, or events
+    # where /proc readability was lost). returning "" produces a stable
+    # ("", "", "", "") executables row instead of spamming hash-failure
+    # toasts and polluting the DB with garbage sha256 values.
+    if not proc["exe"] or proc["pid"] <= 0:
+        return ""
     sha_fd_error = ""
     sha_pid_error = ""
     sha256 = get_sha256_fd(proc["fd"], proc["dev"], proc["ino"], fan_mod_cnt["%d %d" % (proc["dev"], proc["ino"])])
