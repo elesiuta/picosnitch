@@ -374,14 +374,15 @@ class TestGrandparentTracking:
         if not bash_exe:
             pytest.skip("bash not available")
 
-        # Bash optimizes single-command shells (`bash -c "cmd"` and `( cmd )`)
-        # by exec'ing in place to avoid an extra process. Force forks by giving
-        # each shell level multiple statements. Chain:
-        # pytest → bash(outer) → bash(subshell-1) → bash(subshell-2) → curl
+        # Bash exec's the LAST command of any shell/subshell in place to avoid
+        # an extra process. To guarantee a real fork at every level, append a
+        # no-op (`:`) AFTER the inner command at every level so nothing is ever
+        # "last". Chain:
+        #   pytest → bash(outer) → bash(subshell-1) → bash(subshell-2) → curl
         # so curl's parent = subshell-2, grandparent = subshell-1.
         start_time = int(time.time())
         subprocess.run(
-            [bash_exe, "-c", "true; ( true; ( true; curl -s http://example.com -o /dev/null ) )"],
+            [bash_exe, "-c", "( ( curl -s http://example.com -o /dev/null; : ); : ); :"],
             capture_output=True,
             timeout=30,
         )
