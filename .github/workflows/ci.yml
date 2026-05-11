@@ -34,7 +34,7 @@ jobs:
       - name: Install BPF build and picosnitch test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm libbpf-dev linux-tools-common linux-tools-generic linux-tools-$(uname -r) curl wget
+          sudo apt-get install -y clang llvm libbpf-dev linux-tools-common linux-tools-generic linux-tools-$(uname -r) libdbus-1-dev libglib2.0-dev curl wget
       - name: Fetch upstream vmlinux.h (CO-RE)
         # The runner kernel's BTF is too stripped to produce a usable vmlinux.h.
         # CO-RE means a BPF object compiled against any complete vmlinux.h works
