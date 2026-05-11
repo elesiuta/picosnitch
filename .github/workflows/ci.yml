@@ -35,6 +35,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang llvm linux-tools-common linux-tools-generic linux-tools-$(uname -r) curl wget
+      - name: Locate bpftool and pre-generate vmlinux.h
+        run: |
+          BPFTOOL=$(command -v bpftool || echo /usr/lib/linux-tools/$(uname -r)/bpftool)
+          echo "Using bpftool: $BPFTOOL"
+          ls -l /sys/kernel/btf/vmlinux
+          mkdir -p src/picosnitch/bpf
+          sudo "$BPFTOOL" btf dump file /sys/kernel/btf/vmlinux format c | sudo tee src/picosnitch/bpf/vmlinux.h > /dev/null
+          sudo chown "$USER:$USER" src/picosnitch/bpf/vmlinux.h
       - name: Sync project
         run: uv sync --all-extras
       - name: Run all tests
