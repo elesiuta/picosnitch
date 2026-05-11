@@ -16,10 +16,10 @@ import textwrap
 import threading
 import time
 
-from ..config import load_config
-from ..constants import CACHE_DIR, DATA_DIR, DB_VERSION, RUN_DIR, VERSION
-from ..live_feed import EVENTS_SOCKET_PATH, LiveFeedSubscriber
-from ..utils import connect_db_readonly
+from picosnitch.config import load_config
+from picosnitch.constants import CACHE_DIR, DATA_DIR, DB_VERSION, RUN_DIR, VERSION
+from picosnitch.live_feed import EVENTS_SOCKET_PATH, LiveFeedSubscriber
+from picosnitch.utils import connect_db_readonly
 
 
 def init_geoip():

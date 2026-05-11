@@ -15,11 +15,11 @@ import sqlite3
 import sys
 import time
 
-from ..config import Config
-from ..constants import DATA_DIR, DB_VERSION, LOG_DIR, VERSION
-from ..process_manager import ProcessManager
-from ..types import BpfEvent, ProcessHashInfo, State
-from ..utils import get_fanotify_events, get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup, sync_vt_results
+from picosnitch.config import Config
+from picosnitch.constants import DATA_DIR, DB_VERSION, LOG_DIR, VERSION
+from picosnitch.process_manager import ProcessManager
+from picosnitch.types import BpfEvent, ProcessHashInfo, State
+from picosnitch.utils import get_fanotify_events, get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup, sync_vt_results
 
 
 def resolve_hash(

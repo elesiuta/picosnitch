@@ -12,14 +12,14 @@ import sys
 import textwrap
 from pathlib import Path
 
-from .config import load_config, write_default_config
-from .constants import CACHE_DIR, CONFIG_DIR, DATA_DIR, DB_VERSION, LOG_DIR, RUN_DIR, SCHEMA_CONNECTIONS, SCHEMA_EXECUTABLES, VERSION
-from .daemon import Daemon
-from .main_loop import run_main_loop
-from .ui.top import top_init
-from .ui.tui import tui_init
-from .ui.webui import web_dashboard
-from .utils import apply_data_permissions, connect_db_readonly, load_state
+from picosnitch.config import load_config, write_default_config
+from picosnitch.constants import CACHE_DIR, CONFIG_DIR, DATA_DIR, DB_VERSION, LOG_DIR, RUN_DIR, SCHEMA_CONNECTIONS, SCHEMA_EXECUTABLES, VERSION
+from picosnitch.daemon import Daemon
+from picosnitch.main_loop import run_main_loop
+from picosnitch.ui.top import top_init
+from picosnitch.ui.tui import tui_init
+from picosnitch.ui.webui import web_dashboard
+from picosnitch.utils import apply_data_permissions, connect_db_readonly, load_state
 
 
 def check_root(cmd: str) -> int:

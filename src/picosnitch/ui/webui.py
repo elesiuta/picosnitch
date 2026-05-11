@@ -21,9 +21,9 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from ..constants import DATA_DIR, RUN_DIR, VERSION
-from ..live_feed import LiveFeedSubscriber
-from ..utils import connect_db_readonly
+from picosnitch.constants import DATA_DIR, RUN_DIR, VERSION
+from picosnitch.live_feed import LiveFeedSubscriber
+from picosnitch.utils import connect_db_readonly
 
 _DB_PATH = DATA_DIR / "picosnitch.db"
 _STATIC_DIR = Path(__file__).parent / "static"

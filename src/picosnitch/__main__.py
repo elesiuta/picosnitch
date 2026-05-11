@@ -3,7 +3,7 @@
 
 import sys
 
-from .cli import start_picosnitch
+from picosnitch.cli import start_picosnitch
 
 if __name__ == "__main__":
     sys.exit(start_picosnitch())

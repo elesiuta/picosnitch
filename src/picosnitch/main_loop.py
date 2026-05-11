@@ -13,16 +13,16 @@ import sys
 import threading
 import time
 
-from .config import Config
-from .constants import FD_CACHE
-from .process_manager import ProcessManager
-from .subprocesses.fuse import run_fuse
-from .subprocesses.monitor import run_monitor
-from .subprocesses.notifications import run_notifications
-from .subprocesses.primary import run_primary
-from .subprocesses.secondary import run_secondary
-from .subprocesses.virustotal import run_virustotal
-from .types import State
+from picosnitch.config import Config
+from picosnitch.constants import FD_CACHE
+from picosnitch.process_manager import ProcessManager
+from picosnitch.subprocesses.fuse import run_fuse
+from picosnitch.subprocesses.monitor import run_monitor
+from picosnitch.subprocesses.notifications import run_notifications
+from picosnitch.subprocesses.primary import run_primary
+from picosnitch.subprocesses.secondary import run_secondary
+from picosnitch.subprocesses.virustotal import run_virustotal
+from picosnitch.types import State
 
 
 def run_main_loop(config: Config, state: State) -> int:

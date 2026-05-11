@@ -21,9 +21,9 @@ import tempfile
 import termios
 from pathlib import Path
 
-from .config import load_config
-from .constants import DATA_DIR, LOG_DIR, PID_CACHE, ST_DEV_MASK
-from .types import FanotifyEventMetadata, State
+from picosnitch.config import load_config
+from picosnitch.constants import DATA_DIR, LOG_DIR, PID_CACHE, ST_DEV_MASK
+from picosnitch.types import FanotifyEventMetadata, State
 
 
 def drop_root_permanent(uid: int, gid: int) -> None:

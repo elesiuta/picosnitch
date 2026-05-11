@@ -7,7 +7,7 @@ import os
 import tomllib
 from pathlib import Path
 
-from .constants import CONFIG_DIR
+from picosnitch.constants import CONFIG_DIR
 
 
 @dataclasses.dataclass

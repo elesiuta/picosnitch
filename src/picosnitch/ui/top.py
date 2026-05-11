@@ -29,8 +29,8 @@ import socket
 import sys
 import time
 
-from ..constants import LOG_DIR, RUN_DIR, VERSION
-from ..live_feed import EVENTS_SOCKET_PATH, LiveFeedSubscriber
+from picosnitch.constants import LOG_DIR, RUN_DIR, VERSION
+from picosnitch.live_feed import EVENTS_SOCKET_PATH, LiveFeedSubscriber
 
 PR_SET_PDEATHSIG = 1
 

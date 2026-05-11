@@ -14,8 +14,8 @@ import urllib.error
 import urllib.request
 import uuid
 
-from ..config import Config
-from ..utils import get_fstat
+from picosnitch.config import Config
+from picosnitch.utils import get_fstat
 
 
 def _http_get_json(url: str, headers: dict, timeout: int = 60) -> dict:

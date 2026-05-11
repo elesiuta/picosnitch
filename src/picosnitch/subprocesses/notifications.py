@@ -7,7 +7,7 @@ import multiprocessing
 import queue
 import sys
 
-from ..config import Config
+from picosnitch.config import Config
 
 
 def run_notifications(config: Config, q_error: multiprocessing.Queue[str], q_in: multiprocessing.Queue[str], _q_out: multiprocessing.Queue) -> int:

@@ -12,10 +12,10 @@ import sys
 import threading
 import time
 
-from ..config import Config
-from ..live_feed import LiveFeedPublisher
-from ..types import BpfEvent, State
-from ..utils import flush_logs, save_state
+from picosnitch.config import Config
+from picosnitch.live_feed import LiveFeedPublisher
+from picosnitch.types import BpfEvent, State
+from picosnitch.utils import flush_logs, save_state
 
 
 def _toast(q_notify: multiprocessing.Queue[str], msg: str, level: int = logging.INFO) -> None:

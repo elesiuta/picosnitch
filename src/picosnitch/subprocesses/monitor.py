@@ -18,10 +18,10 @@ import sys
 import time
 import typing
 
-from ..bpf_wrapper import BPF, check_bpf_requirements, find_bpf_object
-from ..config import Config
-from ..constants import FD_CACHE, PID_CACHE, ST_DEV_MASK
-from ..utils import get_fstat
+from picosnitch.bpf_wrapper import BPF, check_bpf_requirements, find_bpf_object
+from picosnitch.config import Config
+from picosnitch.constants import FD_CACHE, PID_CACHE, ST_DEV_MASK
+from picosnitch.utils import get_fstat
 
 
 def _read_proc_comm(pid: int) -> str:

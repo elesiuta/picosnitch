@@ -13,7 +13,7 @@ import os
 import socket
 import threading
 
-from .constants import RUN_DIR
+from picosnitch.constants import RUN_DIR
 
 EVENTS_SOCKET_PATH = RUN_DIR / "events.sock"
 

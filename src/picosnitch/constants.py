@@ -9,7 +9,7 @@ import tomllib
 import typing
 from pathlib import Path
 
-from . import __version__
+from picosnitch import __version__
 
 # picosnitch version
 VERSION: typing.Final[str] = __version__

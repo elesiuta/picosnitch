@@ -7,8 +7,8 @@ import pickle
 import queue
 import sys
 
-from ..config import Config
-from ..utils import get_sha256_fd, get_sha256_pid
+from picosnitch.config import Config
+from picosnitch.utils import get_sha256_fd, get_sha256_pid
 
 
 def run_fuse(config: Config, q_error: multiprocessing.Queue[str], q_in: multiprocessing.Queue[bytes], q_out: multiprocessing.Queue[str]) -> int:
