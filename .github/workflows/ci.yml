@@ -34,7 +34,7 @@ jobs:
       - name: Install BPF build and picosnitch test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm linux-tools-common linux-tools-generic linux-tools-$(uname -r) curl wget
+          sudo apt-get install -y clang llvm libbpf-dev linux-tools-common linux-tools-generic linux-tools-$(uname -r) curl wget
       - name: Locate bpftool and pre-generate vmlinux.h
         run: |
           BPFTOOL=$(command -v bpftool || echo /usr/lib/linux-tools/$(uname -r)/bpftool)
