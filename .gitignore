@@ -129,5 +129,5 @@ dmypy.json
 .pyre/
 
 # BPF generated files
-picosnitch/bpf/vmlinux.h
-picosnitch/bpf/*.bpf.o
+src/picosnitch/bpf/vmlinux.h
+src/picosnitch/bpf/*.bpf.o

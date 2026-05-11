@@ -30,27 +30,27 @@ full = [
 picosnitch = "picosnitch.cli:start_picosnitch"
 
 [tool.hatch.version]
-path = "picosnitch/__init__.py"
+path = "src/picosnitch/__init__.py"
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "/picosnitch/",
+    "/src/picosnitch/",
     "/hatch_build.py",
     "/README.md",
     "/LICENSE",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["picosnitch"]
+packages = ["src/picosnitch"]
 
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "hatch_build.py"
 
 [tool.hatch.build.targets.wheel.force-include]
-"picosnitch/bpf/picosnitch.bpf.o" = "picosnitch/bpf/picosnitch.bpf.o"
-"picosnitch/ui/static/index.html" = "picosnitch/ui/static/index.html"
-"picosnitch/ui/static/app.js" = "picosnitch/ui/static/app.js"
-"picosnitch/ui/static/style.css" = "picosnitch/ui/static/style.css"
+"src/picosnitch/bpf/picosnitch.bpf.o" = "picosnitch/bpf/picosnitch.bpf.o"
+"src/picosnitch/ui/static/index.html" = "picosnitch/ui/static/index.html"
+"src/picosnitch/ui/static/app.js" = "picosnitch/ui/static/app.js"
+"src/picosnitch/ui/static/style.css" = "picosnitch/ui/static/style.css"
 
 [tool.ruff]
 target-version = "py312"

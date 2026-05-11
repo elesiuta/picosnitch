@@ -109,7 +109,7 @@ def compile_bpf(output_path: Optional[str] = None, arch: Optional[str] = None) -
     Used by CI/build systems and as a fallback when no pre-compiled .bpf.o is found.
 
     Args:
-        output_path: Where to write the .bpf.o file. Defaults to picosnitch/bpf/picosnitch.bpf.o
+        output_path: Where to write the .bpf.o file. Defaults to src/picosnitch/bpf/picosnitch.bpf.o
         arch: Target architecture (x86_64, aarch64). Defaults to current machine.
 
     Returns:

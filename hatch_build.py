@@ -14,7 +14,7 @@ class BPFBuildHook(BuildHookInterface):
         if self.target_name != "wheel":
             return
 
-        bpf_src_dir = os.path.join(self.root, "picosnitch", "bpf")
+        bpf_src_dir = os.path.join(self.root, "src", "picosnitch", "bpf")
         bpf_src = os.path.join(bpf_src_dir, "picosnitch.bpf.c")
         bpf_obj = os.path.join(bpf_src_dir, "picosnitch.bpf.o")
 

@@ -7,8 +7,8 @@ import pyan
 print("Generating call graph for picosnitch")
 os.chdir(os.path.dirname(__file__))
 dot: str = pyan.create_callgraph(
-    filenames=["../picosnitch/**/*.py"],
-    root="..",
+    filenames=["../src/picosnitch/**/*.py"],
+    root="../src",
     format="dot",
     rankdir="TB",
     nested_groups=True,
