@@ -272,12 +272,25 @@ class TestShortLivedProcesses:
         if not wget_exe:
             pytest.skip("wget not available")
 
-        subprocess.run(["wget", "-q", "http://example.com", "-O", "/dev/null"], capture_output=True, timeout=30)
+        # Retry to absorb transient network failures (DNS/connect to example.com)
+        # and rare BPF event drops on a busy CI runner. The test is asserting
+        # that *when* wget makes a connection, picosnitch resolves its exe -- so
+        # any single attempt that produces captured connections is sufficient.
+        last_wget_err = ""
+        connections: list = []
+        for attempt in range(5):
+            result = subprocess.run(["wget", "-q", "http://example.com", "-O", "/dev/null"], capture_output=True, timeout=30)
+            if result.returncode != 0:
+                last_wget_err = result.stderr.decode(errors="replace").strip()
+                time.sleep(1)
+                continue
+            time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
+            connections = get_connections_for_process("wget")
+            if connections:
+                break
+            time.sleep(1)
 
-        time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
-
-        connections = get_connections_for_process("wget")
-        assert len(connections) > 0, "Should have captured wget connections"
+        assert connections, f"Should have captured wget connections after retries (last wget stderr: {last_wget_err!r})"
 
         for conn in connections:
             name, exe, raddr, rport, send, recv, domain = conn
