@@ -157,6 +157,9 @@ def compile_bpf(output_path: Optional[str] = None, arch: Optional[str] = None) -
         f"-D__TARGET_ARCH_{bpf_target_arch}",
         "-Wall",
         "-Werror",
+        # Anonymous forward decls inside structs in libbpf's curated vmlinux.h
+        # trip -Wmissing-declarations; harmless for BPF compilation.
+        "-Wno-missing-declarations",
         f"-I{bpf_src_dir}",
         "-c",
         str(bpf_src),

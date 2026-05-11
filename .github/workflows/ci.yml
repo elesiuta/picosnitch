@@ -35,14 +35,22 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang llvm libbpf-dev linux-tools-common linux-tools-generic linux-tools-$(uname -r) curl wget
-      - name: Locate bpftool and pre-generate vmlinux.h
+      - name: Fetch upstream vmlinux.h (CO-RE)
+        # The runner kernel's BTF is too stripped to produce a usable vmlinux.h.
+        # CO-RE means a BPF object compiled against any complete vmlinux.h works
+        # at runtime against any kernel, so use libbpf's curated header.
         run: |
-          BPFTOOL=$(command -v bpftool || echo /usr/lib/linux-tools/$(uname -r)/bpftool)
-          echo "Using bpftool: $BPFTOOL"
-          ls -l /sys/kernel/btf/vmlinux
+          arch=$(uname -m)
+          case "$arch" in
+            x86_64) vmarch=x86 ;;
+            aarch64) vmarch=arm64 ;;
+            *) echo "unsupported arch: $arch"; exit 1 ;;
+          esac
+          git clone --depth 1 --filter=blob:none https://github.com/libbpf/libbpf-bootstrap.git /tmp/libbpf-bootstrap
+          git -C /tmp/libbpf-bootstrap submodule update --init --depth 1 vmlinux.h
           mkdir -p src/picosnitch/bpf
-          sudo "$BPFTOOL" btf dump file /sys/kernel/btf/vmlinux format c | sudo tee src/picosnitch/bpf/vmlinux.h > /dev/null
-          sudo chown "$USER:$USER" src/picosnitch/bpf/vmlinux.h
+          cp "/tmp/libbpf-bootstrap/vmlinux.h/include/${vmarch}/vmlinux.h" src/picosnitch/bpf/vmlinux.h
+          wc -l src/picosnitch/bpf/vmlinux.h
       - name: Sync project
         run: uv sync --all-extras
       - name: Run all tests
