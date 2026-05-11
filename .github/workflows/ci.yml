@@ -1,0 +1,41 @@
+name: CI (ruff + pytest)
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+      - name: Install ruff
+        run: uv tool install ruff
+      - name: Ruff check (lint)
+        run: uv tool run ruff check .
+      - name: Ruff format (check no changes)
+        run: uv tool run ruff format --diff .
+
+  test:
+    name: Tests (requires root/BPF)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - name: Install BPF build and picosnitch test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm linux-tools-common linux-tools-generic linux-tools-$(uname -r) curl wget
+      - name: Sync project
+        run: uv sync --all-extras
+      - name: Run all tests
+        run: sudo -E env "PATH=$PATH" uv run pytest tests/ -v
