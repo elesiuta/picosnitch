@@ -1,4 +1,4 @@
-name: CI (ruff + pytest)
+name: CI
 
 on:
   push:
@@ -14,44 +14,52 @@ jobs:
         uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
-      - name: Install ruff
-        run: uv tool install ruff
-      - name: Ruff check (lint)
-        run: uv tool run ruff check .
-      - name: Ruff format (check no changes)
-        run: uv tool run ruff format --diff .
+      - run: uv tool run ruff check .
+      - run: uv tool run ruff format --diff .
+
+  build:
+    name: Build
+    uses: ./.github/workflows/build.yml
 
   test:
-    name: Tests (requires root/BPF)
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.platform }}, requires root/BPF)
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: manylinux_2_34_x86_64
+          - runner: ubuntu-24.04-arm
+            platform: manylinux_2_34_aarch64
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Only need the tests/ directory; install picosnitch from the wheel
+          # that the build job produced rather than from the working tree.
+          sparse-checkout: |
+            tests
+            pyproject.toml
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: wheel-${{ matrix.platform }}
+          path: dist
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
           python-version: "3.13"
-      - name: Install BPF build and picosnitch test dependencies
+      - name: Install runtime dependencies
+        # libbpf1 provides libbpf.so for picosnitch's ctypes wrapper.
+        # curl/wget are exercised by the tests as short-lived processes.
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm libbpf-dev linux-tools-common linux-tools-generic linux-tools-$(uname -r) libdbus-1-dev libglib2.0-dev curl wget
-      - name: Fetch upstream vmlinux.h (CO-RE)
-        # The runner kernel's BTF is too stripped to produce a usable vmlinux.h.
-        # CO-RE means a BPF object compiled against any complete vmlinux.h works
-        # at runtime against any kernel, so use libbpf's curated header.
+          sudo apt-get install -y libbpf1 curl wget
+      - name: Install picosnitch wheel + pytest into venv
         run: |
-          arch=$(uname -m)
-          case "$arch" in
-            x86_64) vmarch=x86 ;;
-            aarch64) vmarch=arm64 ;;
-            *) echo "unsupported arch: $arch"; exit 1 ;;
-          esac
-          git clone --depth 1 --filter=blob:none https://github.com/libbpf/libbpf-bootstrap.git /tmp/libbpf-bootstrap
-          git -C /tmp/libbpf-bootstrap submodule update --init --depth 1 vmlinux.h
-          mkdir -p src/picosnitch/bpf
-          cp "/tmp/libbpf-bootstrap/vmlinux.h/include/${vmarch}/vmlinux.h" src/picosnitch/bpf/vmlinux.h
-          wc -l src/picosnitch/bpf/vmlinux.h
-      - name: Sync project
-        run: uv sync --all-extras
-      - name: Run all tests
-        run: sudo -E env "PATH=$PATH" uv run pytest tests/ -v
+          uv venv
+          uv pip install dist/*.whl pytest
+      - name: Run tests
+        run: sudo -E env "PATH=$PATH" .venv/bin/pytest tests/ -v

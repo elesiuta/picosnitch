@@ -14,6 +14,19 @@ class BPFBuildHook(BuildHookInterface):
         if self.target_name != "wheel":
             return
 
+        # The wheel has no C extension linked against glibc -- it ships a
+        # precompiled BPF object (kernel bytecode, no userspace linkage) plus
+        # pure-Python code that dlopen's libbpf.so via ctypes at runtime.
+        arch = os.environ.get("BPF_TARGET_ARCH", platform.machine())
+        plat_tags = {
+            "x86_64": "manylinux_2_34_x86_64",
+            "aarch64": "manylinux_2_34_aarch64",
+        }
+        if arch not in plat_tags:
+            raise RuntimeError(f"Unsupported arch for BPF build: {arch}")
+        build_data["pure_python"] = False
+        build_data["tag"] = f"py3-none-{plat_tags[arch]}"
+
         bpf_src_dir = os.path.join(self.root, "src", "picosnitch", "bpf")
         bpf_src = os.path.join(bpf_src_dir, "picosnitch.bpf.c")
         bpf_obj = os.path.join(bpf_src_dir, "picosnitch.bpf.o")
@@ -41,9 +54,8 @@ class BPFBuildHook(BuildHookInterface):
                 f.write(result.stdout)
 
         # Determine target architecture
-        arch = os.environ.get("BPF_TARGET_ARCH", platform.machine())
         arch_map = {"x86_64": "x86", "aarch64": "arm64"}
-        bpf_target = arch_map.get(arch, arch)
+        bpf_target = arch_map[arch]
 
         # Compile
         subprocess.run(

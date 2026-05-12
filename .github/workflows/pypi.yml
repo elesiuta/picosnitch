@@ -1,0 +1,27 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    name: Build
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/picosnitch/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - run: ls -l dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

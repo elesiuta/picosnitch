@@ -1,0 +1,73 @@
+name: Build (reusable)
+
+# Reusable workflow that builds the sdist and one wheel per supported
+# architecture (amd64, arm64) and uploads them as artifacts:
+#   sdist                        -> dist/*.tar.gz
+#   wheel-manylinux_2_34_x86_64  -> dist/*.whl
+#   wheel-manylinux_2_34_aarch64 -> dist/*.whl
+# Callers (ci.yml, pypi.yml) consume these via actions/download-artifact.
+
+on:
+  workflow_call:
+
+jobs:
+  sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv build --sdist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  wheel:
+    name: Build wheel (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: manylinux_2_34_x86_64
+          - runner: ubuntu-24.04-arm
+            platform: manylinux_2_34_aarch64
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - name: Install BPF build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libbpf-dev
+      - name: Fetch upstream vmlinux.h (CO-RE)
+        # The runner kernel's BTF is too stripped to produce a usable vmlinux.h.
+        # CO-RE means a BPF object compiled against any complete vmlinux.h works
+        # at runtime against any kernel, so use the header from libbpf-bootstrap.
+        run: |
+          arch=$(uname -m)
+          case "$arch" in
+            x86_64) vmarch=x86 ;;
+            aarch64) vmarch=arm64 ;;
+            *) echo "unsupported arch: $arch"; exit 1 ;;
+          esac
+          git clone --depth 1 --filter=blob:none https://github.com/libbpf/libbpf-bootstrap.git /tmp/libbpf-bootstrap
+          git -C /tmp/libbpf-bootstrap submodule update --init --depth 1 vmlinux.h
+          mkdir -p src/picosnitch/bpf
+          cp "/tmp/libbpf-bootstrap/vmlinux.h/include/${vmarch}/vmlinux.h" src/picosnitch/bpf/vmlinux.h
+      - name: Build wheel
+        run: uv build --wheel
+      - run: ls -l dist/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.platform }}
+          path: dist/*.whl
