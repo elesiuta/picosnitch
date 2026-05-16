@@ -74,16 +74,32 @@ SCHEMA_EXECUTABLES: typing.Final[str] = """
     cmdline TEXT NOT NULL,
     sha256 TEXT NOT NULL,
     UNIQUE(exe, name, cmdline, sha256)"""
+SCHEMA_DOMAINS: typing.Final[str] = """
+    id INTEGER PRIMARY KEY,
+    domain TEXT NOT NULL UNIQUE"""
+SCHEMA_ADDRESSES: typing.Final[str] = """
+    id INTEGER PRIMARY KEY,
+    addr TEXT NOT NULL UNIQUE"""
+# id 0 in each lookup table is the "empty/unknown" sentinel.
+# `family` is AF_INET (2), AF_INET6 (10), or 0 when unknown.
+# `protocol` is an IPPROTO_* value (TCP=6, UDP=17, ...) or 0 when unknown.
+# `netns` is the inode of the socket's network namespace (host netns is
+# typically 4026531840; per-container netns inodes are random per restart,
+# so they're stored inline rather than via a lookup table).
 SCHEMA_CONNECTIONS: typing.Final[str] = """
     contime INTEGER NOT NULL,
     send INTEGER NOT NULL,
     recv INTEGER NOT NULL,
-    exe_id INTEGER NOT NULL,
-    pexe_id INTEGER NOT NULL,
-    gpexe_id INTEGER NOT NULL,
+    events INTEGER NOT NULL,
+    exe_id INTEGER NOT NULL REFERENCES executables(id),
+    pexe_id INTEGER NOT NULL REFERENCES executables(id),
+    gpexe_id INTEGER NOT NULL REFERENCES executables(id),
     uid INTEGER NOT NULL,
+    family INTEGER NOT NULL,
+    protocol INTEGER NOT NULL,
     lport INTEGER NOT NULL,
     rport INTEGER NOT NULL,
-    laddr TEXT NOT NULL DEFAULT '',
-    raddr TEXT NOT NULL DEFAULT '',
-    domain TEXT NOT NULL DEFAULT ''"""
+    laddr_id INTEGER NOT NULL REFERENCES addresses(id),
+    raddr_id INTEGER NOT NULL REFERENCES addresses(id),
+    domain_id INTEGER NOT NULL REFERENCES domains(id),
+    netns INTEGER NOT NULL"""

@@ -32,11 +32,14 @@ class BpfEvent(typing.TypedDict):
     uid: int
     send: int
     recv: int
+    family: int
+    protocol: int
     lport: int
     rport: int
     laddr: str
     raddr: str
     domain: str
+    netns: int
 
 
 class FanotifyEventMetadata(ctypes.Structure):

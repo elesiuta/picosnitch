@@ -10,6 +10,7 @@ import ipaddress
 import multiprocessing
 import os
 import pickle
+import resource
 import shutil
 import signal
 import socket
@@ -70,6 +71,24 @@ def _parse_proc_net_port(hex_addr: str) -> int:
         return int(port_part, 16)
     except ValueError:
         return -1
+
+
+def _initial_family_for(addr: str) -> int:
+    """Best-effort AF_* guess for an initial-poll address. Returns 0 when
+    the address is empty/unparseable."""
+    if not addr:
+        return 0
+    if ":" in addr:
+        return socket.AF_INET6
+    return socket.AF_INET
+
+
+def _read_netns_inode(pid: int) -> int:
+    """Return the network namespace inode for a pid, or 0 if unreadable."""
+    try:
+        return os.stat(f"/proc/{pid}/ns/net").st_ino
+    except OSError:
+        return 0
 
 
 def _scan_proc_net_sockets() -> dict[int, tuple[str, int, str, int]]:
@@ -202,6 +221,12 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     try:
         os.nice(-20)
     except Exception:
+        pass
+    # Required for libbpf to mmap the per-cpu perf event ring buffers
+    # without hitting the inherited 8 MiB cap.
+    try:
+        resource.setrlimit(resource.RLIMIT_MEMLOCK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+    except (ValueError, OSError):
         pass
     parent_process = multiprocessing.parent_process()
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
@@ -402,11 +427,14 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                             "uid": proc["uid"],
                             "send": 0,
                             "recv": 0,
+                            "family": _initial_family_for(proc["raddr"]),
+                            "protocol": 0,
                             "lport": proc["lport"],
                             "rport": proc["rport"],
                             "laddr": proc["laddr"],
                             "raddr": proc["raddr"],
                             "domain": domain_dict[proc["raddr"]],
+                            "netns": _read_netns_inode(pid),
                         }
                     )
                 )
@@ -505,11 +533,14 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                     "uid": event.uid,
                     "send": event.bytes,
                     "recv": 0,
+                    "family": socket.AF_INET,
+                    "protocol": int(event.protocol),
                     "lport": event.lport,
                     "rport": event.dport,
                     "laddr": laddr,
                     "raddr": raddr,
                     "domain": domain_dict[raddr],
+                    "netns": int(event.netns),
                 }
             )
         )
@@ -550,11 +581,14 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                     "uid": event.uid,
                     "send": event.bytes,
                     "recv": 0,
+                    "family": socket.AF_INET6,
+                    "protocol": int(event.protocol),
                     "lport": event.lport,
                     "rport": event.dport,
                     "laddr": laddr,
                     "raddr": raddr,
                     "domain": domain_dict[raddr],
+                    "netns": int(event.netns),
                 }
             )
         )
@@ -595,11 +629,14 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                     "uid": event.uid,
                     "send": 0,
                     "recv": event.bytes,
+                    "family": socket.AF_INET,
+                    "protocol": int(event.protocol),
                     "lport": event.lport,
                     "rport": event.dport,
                     "laddr": laddr,
                     "raddr": raddr,
                     "domain": domain_dict[raddr],
+                    "netns": int(event.netns),
                 }
             )
         )
@@ -640,11 +677,14 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                     "uid": event.uid,
                     "send": 0,
                     "recv": event.bytes,
+                    "family": socket.AF_INET6,
+                    "protocol": int(event.protocol),
                     "lport": event.lport,
                     "rport": event.dport,
                     "laddr": laddr,
                     "raddr": raddr,
                     "domain": domain_dict[raddr],
+                    "netns": int(event.netns),
                 }
             )
         )

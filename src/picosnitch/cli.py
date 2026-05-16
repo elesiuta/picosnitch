@@ -13,7 +13,7 @@ import textwrap
 from pathlib import Path
 
 from picosnitch.config import load_config, write_default_config
-from picosnitch.constants import CACHE_DIR, CONFIG_DIR, DATA_DIR, DB_VERSION, LOG_DIR, RUN_DIR, SCHEMA_CONNECTIONS, SCHEMA_EXECUTABLES, VERSION
+from picosnitch.constants import CACHE_DIR, CONFIG_DIR, DATA_DIR, DB_VERSION, LOG_DIR, RUN_DIR, SCHEMA_ADDRESSES, SCHEMA_CONNECTIONS, SCHEMA_DOMAINS, SCHEMA_EXECUTABLES, VERSION
 from picosnitch.daemon import Daemon
 from picosnitch.main_loop import run_main_loop
 from picosnitch.ui.top import top_init
@@ -87,12 +87,13 @@ def init_dirs_and_config() -> None:
     if not db_path.exists():
         con = sqlite3.connect(db_path)
         cur = con.cursor()
-        cur.execute(f"CREATE TABLE executables ({SCHEMA_EXECUTABLES})")
-        cur.execute(f"""CREATE TABLE connections (
-            {SCHEMA_CONNECTIONS},
-            FOREIGN KEY (exe_id) REFERENCES executables(id),
-            FOREIGN KEY (pexe_id) REFERENCES executables(id),
-            FOREIGN KEY (gpexe_id) REFERENCES executables(id))""")
+        cur.execute(f"CREATE TABLE executables ({SCHEMA_EXECUTABLES}) STRICT")
+        cur.execute(f"CREATE TABLE domains ({SCHEMA_DOMAINS}) STRICT")
+        cur.execute(f"CREATE TABLE addresses ({SCHEMA_ADDRESSES}) STRICT")
+        cur.execute(f"CREATE TABLE connections ({SCHEMA_CONNECTIONS}) STRICT")
+        cur.execute("INSERT INTO executables(id, exe, name, cmdline, sha256) VALUES (0, '', '', '', '')")
+        cur.execute("INSERT INTO domains(id, domain) VALUES (0, '')")
+        cur.execute("INSERT INTO addresses(id, addr) VALUES (0, '')")
         cur.execute("CREATE INDEX idx_contime ON connections(contime)")
         cur.execute("CREATE INDEX idx_exe_id_contime ON connections(exe_id, contime)")
         cur.execute("CREATE INDEX idx_pexe_id_contime ON connections(pexe_id, contime)")
@@ -290,7 +291,11 @@ def start_picosnitch() -> int:
                 remote_exe_schema = SCHEMA_EXECUTABLES.replace("INTEGER PRIMARY KEY", "INTEGER PRIMARY KEY AUTO_INCREMENT").replace(
                     "UNIQUE(exe, name, cmdline, sha256)", "UNIQUE(exe(255), name(255), cmdline(255), sha256(64))"
                 )
+                remote_dom_schema = SCHEMA_DOMAINS.replace("INTEGER PRIMARY KEY", "INTEGER PRIMARY KEY AUTO_INCREMENT").replace("domain TEXT NOT NULL UNIQUE", "domain VARCHAR(255) NOT NULL UNIQUE")
+                remote_addr_schema = SCHEMA_ADDRESSES.replace("INTEGER PRIMARY KEY", "INTEGER PRIMARY KEY AUTO_INCREMENT").replace("addr TEXT NOT NULL UNIQUE", "addr VARCHAR(64) NOT NULL UNIQUE")
                 cur.execute(f"CREATE TABLE IF NOT EXISTS {exe_table} ({remote_exe_schema})")
+                cur.execute(f"CREATE TABLE IF NOT EXISTS domains ({remote_dom_schema})")
+                cur.execute(f"CREATE TABLE IF NOT EXISTS addresses ({remote_addr_schema})")
                 cur.execute(f"CREATE TABLE IF NOT EXISTS {conn_table} ({SCHEMA_CONNECTIONS})")
                 con.commit()
                 con.close()

@@ -31,13 +31,17 @@ class BPFBuildHook(BuildHookInterface):
         bpf_src = os.path.join(bpf_src_dir, "picosnitch.bpf.c")
         bpf_obj = os.path.join(bpf_src_dir, "picosnitch.bpf.o")
 
-        if os.path.exists(bpf_obj):
-            # Already compiled (e.g. CI provided a pre-built object)
+        if not os.path.exists(bpf_src):
+            if os.path.exists(bpf_obj):
+                # No source, but a pre-built object exists (e.g. CI provided it)
+                build_data["shared_data"]["bpf_obj"] = bpf_obj
+                return
+            raise RuntimeError(f"BPF source not found: {bpf_src}")
+
+        if os.path.exists(bpf_obj) and os.path.getmtime(bpf_obj) >= os.path.getmtime(bpf_src):
+            # Object up to date with source; reuse it.
             build_data["shared_data"]["bpf_obj"] = bpf_obj
             return
-
-        if not os.path.exists(bpf_src):
-            raise RuntimeError(f"BPF source not found: {bpf_src}")
 
         # Generate vmlinux.h if needed
         vmlinux_h = os.path.join(bpf_src_dir, "vmlinux.h")

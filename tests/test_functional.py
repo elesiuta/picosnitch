@@ -202,7 +202,15 @@ def query_db(query: str, params: tuple = ()) -> list:
 
 def get_connections_for_process(process_name: str) -> list:
     """Get all connections for a process name."""
-    return query_db("SELECT e.name, e.exe, c.raddr, c.rport, c.send, c.recv, c.domain FROM connections c JOIN executables e ON c.exe_id = e.id WHERE e.name LIKE ?", (f"%{process_name}%",))
+    return query_db(
+        "SELECT e.name, e.exe, a.addr, c.rport, c.send, c.recv, d.domain "
+        "FROM connections c "
+        "JOIN executables e ON c.exe_id = e.id "
+        "JOIN addresses a ON c.raddr_id = a.id "
+        "JOIN domains d ON c.domain_id = d.id "
+        "WHERE e.name LIKE ?",
+        (f"%{process_name}%",),
+    )
 
 
 @pytest.fixture(scope="module")

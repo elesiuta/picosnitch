@@ -8,6 +8,10 @@ RestartSec=5
 ExecStart=/usr/bin/picosnitch start-no-daemon
 PIDFile=/run/picosnitch/picosnitch.pid
 
+# Required for libbpf to mmap the per-cpu perf event ring buffers
+# (~16 MiB by default) without hitting the inherited 8 MiB cap.
+LimitMEMLOCK=infinity
+
 # Hardening
 ProtectHome=read-only
 ProtectSystem=strict

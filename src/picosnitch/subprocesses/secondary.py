@@ -150,18 +150,22 @@ def build_log_entries(
             pexe_key,
             gpexe_key,
             proc["uid"],
+            int(proc.get("family", 0) or 0),
+            int(proc.get("protocol", 0) or 0),
             proc["lport"],
             proc["rport"],
             proc["laddr"],
             proc["raddr"],
             proc["domain"],
+            int(proc.get("netns", 0) or 0),
         )
         if event in traffic_counter:
             traffic_counter[event][0] += proc["send"]
             traffic_counter[event][1] += proc["recv"]
+            traffic_counter[event][2] += 1
         else:
-            traffic_counter[event] = [proc["send"], proc["recv"]]
-    return [(datetime_now, send, recv, *event) for event, (send, recv) in traffic_counter.items()]
+            traffic_counter[event] = [proc["send"], proc["recv"], 1]
+    return [(datetime_now, send, recv, n_events, *event) for event, (send, recv, n_events) in traffic_counter.items()]
 
 
 def run_secondary(
@@ -181,14 +185,21 @@ def run_secondary(
     # maintain a separate copy of the state dictionary here and coordinate with the primary subprocess (sha256 and vt_results)
     sync_vt_results(state, p_virustotal.q_in, q_primary_in, True)
     # init sql
-    # connections: (contime integer, send integer, recv integer, exe_id integer, pexe_id integer, uid integer, lport integer, rport integer, laddr text, raddr text, domain text)
-    # executables: (id integer primary key, exe text, name text, cmdline text, sha256 text)
+    # connections columns: contime, send, recv, events, exe_id, pexe_id, gpexe_id, uid,
+    # family, protocol, lport, rport, laddr_id, raddr_id, domain_id, netns  (16 cols).
+    # executables: (id, exe, name, cmdline, sha256). domains/addresses: (id, value).
     sqlite_insert_exe = "INSERT OR IGNORE INTO executables(exe, name, cmdline, sha256) VALUES (?, ?, ?, ?)"
     sqlite_select_exe = "SELECT id FROM executables WHERE exe = ? AND name = ? AND cmdline = ? AND sha256 = ?"
-    sqlite_insert_conn = "INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    sqlite_insert_dom = "INSERT OR IGNORE INTO domains(domain) VALUES (?)"
+    sqlite_select_dom = "SELECT id FROM domains WHERE domain = ?"
+    sqlite_insert_addr = "INSERT OR IGNORE INTO addresses(addr) VALUES (?)"
+    sqlite_select_addr = "SELECT id FROM addresses WHERE addr = ?"
+    sqlite_insert_conn = "INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     file_path = DATA_DIR / "picosnitch.db"
     text_path = LOG_DIR / "conn.log"
     exe_id_cache: dict[tuple, int] = {}
+    domain_id_cache: dict[str, int] = {"": 0}
+    addr_id_cache: dict[str, int] = {"": 0}
     if config.database.enabled:
         con = sqlite3.connect(file_path)
         cur = con.cursor()
@@ -199,6 +210,8 @@ def run_secondary(
             sys.exit(1)
         retention_cutoff = int(time.time()) - int(config.database.retention_days) * 86400
         cur.execute("DELETE FROM connections WHERE contime < ?", (retention_cutoff,))
+        cur.execute("DELETE FROM domains WHERE id != 0 AND id NOT IN (SELECT DISTINCT domain_id FROM connections)")
+        cur.execute("DELETE FROM addresses WHERE id != 0 AND id NOT IN (SELECT DISTINCT laddr_id FROM connections UNION SELECT DISTINCT raddr_id FROM connections)")
         con.commit()
         con.close()
     if sql_kwargs := dict(config.database.remote):
@@ -215,6 +228,10 @@ def run_secondary(
             sql = importlib.import_module(sql_client)
             sql_insert_exe = sqlite_insert_exe.replace("?", "%s").replace("OR IGNORE ", "IGNORE ").replace("executables", exe_table)
             sql_select_exe = sqlite_select_exe.replace("?", "%s").replace("executables", exe_table)
+            sql_insert_dom = sqlite_insert_dom.replace("?", "%s").replace("OR IGNORE ", "IGNORE ")
+            sql_select_dom = sqlite_select_dom.replace("?", "%s")
+            sql_insert_addr = sqlite_insert_addr.replace("?", "%s").replace("OR IGNORE ", "IGNORE ")
+            sql_select_addr = sqlite_select_addr.replace("?", "%s")
             sql_insert_conn = sqlite_insert_conn.replace("?", "%s").replace("connections", conn_table)
             if not any(k in sql_kwargs for k in ("ssl", "ssl_context", "sslmode", "ssl_mode")):
                 q_error.put("warning: remote database connection has no SSL/TLS parameters configured")
@@ -231,6 +248,22 @@ def run_secondary(
         con.execute(sqlite_insert_exe, exe_key)
         row = con.execute(sqlite_select_exe, exe_key).fetchone()
         exe_id_cache[exe_key] = row[0]
+        return row[0]
+
+    def resolve_domain_id(con: sqlite3.Connection, domain: str) -> int:
+        if domain in domain_id_cache:
+            return domain_id_cache[domain]
+        con.execute(sqlite_insert_dom, (domain,))
+        row = con.execute(sqlite_select_dom, (domain,)).fetchone()
+        domain_id_cache[domain] = row[0]
+        return row[0]
+
+    def resolve_addr_id(con: sqlite3.Connection, addr: str) -> int:
+        if addr in addr_id_cache:
+            return addr_id_cache[addr]
+        con.execute(sqlite_insert_addr, (addr,))
+        row = con.execute(sqlite_select_addr, (addr,)).fetchone()
+        addr_id_cache[addr] = row[0]
         return row[0]
 
     # main loop
@@ -291,11 +324,14 @@ def run_secondary(
                         con = sqlite3.connect(file_path)
                         with con:
                             conn_rows = []
-                            for contime, send, recv, exe_key, pexe_key, gpexe_key, uid, lport, rport, laddr, raddr, domain in transaction:
+                            for contime, send, recv, n_events, exe_key, pexe_key, gpexe_key, uid, family, protocol, lport, rport, laddr, raddr, domain, netns in transaction:
                                 exe_id = resolve_exe_id(con, exe_key)
                                 pexe_id = resolve_exe_id(con, pexe_key)
                                 gpexe_id = resolve_exe_id(con, gpexe_key)
-                                conn_rows.append((contime, send, recv, exe_id, pexe_id, gpexe_id, uid, lport, rport, laddr, raddr, domain))
+                                laddr_id = resolve_addr_id(con, laddr)
+                                raddr_id = resolve_addr_id(con, raddr)
+                                domain_id = resolve_domain_id(con, domain)
+                                conn_rows.append((contime, send, recv, n_events, exe_id, pexe_id, gpexe_id, uid, family, protocol, lport, rport, laddr_id, raddr_id, domain_id, netns))
                             con.executemany(sqlite_insert_conn, conn_rows)
                         con.close()
                         transaction_success = True
@@ -306,7 +342,7 @@ def run_secondary(
                         con = sql.connect(**sql_kwargs)
                         with con.cursor() as cur:
                             conn_rows = []
-                            for contime, send, recv, exe_key, pexe_key, gpexe_key, uid, lport, rport, laddr, raddr, domain in transaction:
+                            for contime, send, recv, n_events, exe_key, pexe_key, gpexe_key, uid, family, protocol, lport, rport, laddr, raddr, domain, netns in transaction:
                                 cur.execute(sql_insert_exe, exe_key)
                                 cur.execute(sql_select_exe, exe_key)
                                 exe_id = cur.fetchone()[0]
@@ -316,7 +352,16 @@ def run_secondary(
                                 cur.execute(sql_insert_exe, gpexe_key)
                                 cur.execute(sql_select_exe, gpexe_key)
                                 gpexe_id = cur.fetchone()[0]
-                                conn_rows.append((contime, send, recv, exe_id, pexe_id, gpexe_id, uid, lport, rport, laddr, raddr, domain))
+                                cur.execute(sql_insert_addr, (laddr,))
+                                cur.execute(sql_select_addr, (laddr,))
+                                laddr_id = cur.fetchone()[0]
+                                cur.execute(sql_insert_addr, (raddr,))
+                                cur.execute(sql_select_addr, (raddr,))
+                                raddr_id = cur.fetchone()[0]
+                                cur.execute(sql_insert_dom, (domain,))
+                                cur.execute(sql_select_dom, (domain,))
+                                domain_id = cur.fetchone()[0]
+                                conn_rows.append((contime, send, recv, n_events, exe_id, pexe_id, gpexe_id, uid, family, protocol, lport, rport, laddr_id, raddr_id, domain_id, netns))
                             cur.executemany(sql_insert_conn, conn_rows)
                         con.commit()
                         con.close()
@@ -326,8 +371,8 @@ def run_secondary(
                 try:
                     if config.database.text_log:
                         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
-                            for contime, send, recv, exe_key, pexe_key, gpexe_key, uid, lport, rport, laddr, raddr, domain in transaction:
-                                flat = (contime, send, recv, *exe_key, *pexe_key, *gpexe_key, uid, lport, rport, laddr, raddr, domain)
+                            for contime, send, recv, n_events, exe_key, pexe_key, gpexe_key, uid, family, protocol, lport, rport, laddr, raddr, domain, netns in transaction:
+                                flat = (contime, send, recv, n_events, *exe_key, *pexe_key, *gpexe_key, uid, family, protocol, lport, rport, laddr, raddr, domain, netns)
                                 clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in flat]
                                 clean_entry[0] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(contime))
                                 text_file.write(",".join(clean_entry) + "\n")

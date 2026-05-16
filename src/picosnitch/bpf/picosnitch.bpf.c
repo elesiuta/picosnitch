@@ -68,8 +68,10 @@ struct sendrecv_event_t {
     __u32 bytes;
     __u32 daddr;
     __u32 saddr;
+    __u32 netns;
     __u16 dport;
     __u16 lport;
+    __u16 protocol;
 } __attribute__((packed));
 
 struct sendrecv6_event_t {
@@ -89,8 +91,10 @@ struct sendrecv6_event_t {
     __u32 pdev;
     __u32 gpdev;
     __u32 bytes;
+    __u32 netns;
     __u16 dport;
     __u16 lport;
+    __u16 protocol;
 } __attribute__((packed));
 
 // Maps
@@ -424,6 +428,8 @@ static __always_inline int trace_sendrecv(void *ctx, struct socket *sock, int re
         data.dport = BPF_CORE_READ(sk, __sk_common.skc_dport);
         data.lport = BPF_CORE_READ(sk, __sk_common.skc_num);
         data.dport = __builtin_bswap16(data.dport);
+        data.protocol = BPF_CORE_READ(sk, sk_protocol);
+        data.netns = BPF_CORE_READ(sk, __sk_common.skc_net.net, ns.inum);
 
         if (is_send)
             bpf_perf_event_output(ctx, &sendmsg_events, BPF_F_CURRENT_CPU, &data, sizeof(data));
@@ -455,6 +461,8 @@ static __always_inline int trace_sendrecv(void *ctx, struct socket *sock, int re
         data.dport = BPF_CORE_READ(sk, __sk_common.skc_dport);
         data.lport = BPF_CORE_READ(sk, __sk_common.skc_num);
         data.dport = __builtin_bswap16(data.dport);
+        data.protocol = BPF_CORE_READ(sk, sk_protocol);
+        data.netns = BPF_CORE_READ(sk, __sk_common.skc_net.net, ns.inum);
 
         if (is_send)
             bpf_perf_event_output(ctx, &sendmsg6_events, BPF_F_CURRENT_CPU, &data, sizeof(data));

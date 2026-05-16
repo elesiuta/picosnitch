@@ -13,6 +13,7 @@ import platform
 import re
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
@@ -257,8 +258,10 @@ class SendRecvEvent(ctypes.Structure):
         ("bytes", ctypes.c_uint32),
         ("daddr", ctypes.c_uint32),
         ("saddr", ctypes.c_uint32),
+        ("netns", ctypes.c_uint32),
         ("dport", ctypes.c_uint16),
         ("lport", ctypes.c_uint16),
+        ("protocol", ctypes.c_uint16),
     ]
 
 
@@ -283,8 +286,10 @@ class SendRecv6Event(ctypes.Structure):
         ("pdev", ctypes.c_uint32),
         ("gpdev", ctypes.c_uint32),
         ("bytes", ctypes.c_uint32),
+        ("netns", ctypes.c_uint32),
         ("dport", ctypes.c_uint16),
         ("lport", ctypes.c_uint16),
+        ("protocol", ctypes.c_uint16),
     ]
 
 
@@ -617,7 +622,8 @@ class BPFObject:
             try:
                 callback(cpu, data, size)
             except Exception:
-                pass  # Don't let exceptions propagate to C
+                sys.stderr.write(f"BPF callback error in {map_name}: {traceback.format_exc()}")
+                sys.stderr.flush()
 
         def lost_cb_wrapper(ctx, cpu, cnt):
             if lost_callback:
