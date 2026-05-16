@@ -53,7 +53,7 @@ def check_database() -> int:
     db_path = DATA_DIR / "picosnitch.db"
     if not db_path.exists():
         logging.error(f"Database not found: {db_path}")
-        logging.error(f"Run: sudo {Path(sys.argv[0]).resolve()} init")
+        logging.error(f"Run: sudo {Path(sys.argv[0]).resolve()} start (or use systemctl) to create it")
         return 1
     try:
         con = connect_db_readonly(db_path)
@@ -66,10 +66,6 @@ def check_database() -> int:
         user_version = cur.fetchone()[0]
     finally:
         con.close()
-    if user_version != DB_VERSION:
-        logging.error(f"Unsupported database version {user_version}, expected {DB_VERSION}")
-        return 1
-    return 0
     if user_version != DB_VERSION:
         logging.error(f"Unsupported database version {user_version}, expected {DB_VERSION}")
         return 1
@@ -134,74 +130,83 @@ def start_picosnitch() -> int:
         def run(self) -> None:
             main()
 
-    readme = textwrap.dedent(f"""    Monitor your system for applications that make network connections, track their
-    bandwidth, verify hashes, and receive notifications.
+    readme = textwrap.dedent(
+        f"""
+        Monitor your system for applications that make network connections, track their
+        bandwidth, verify hashes, and receive notifications.
 
-    picosnitch comes with ABSOLUTELY NO WARRANTY. This is free software, and you
-    are welcome to redistribute it under certain conditions. See version 3 of the
-    GNU General Public License for details.
+        picosnitch comes with ABSOLUTELY NO WARRANTY. This is free software, and you
+        are welcome to redistribute it under certain conditions. See version 3 of the
+        GNU General Public License for details.
 
-    website: https://github.com/elesiuta/picosnitch
-    version: {VERSION}
-    entrypoint: {Path(sys.argv[0]).resolve()}
-    config: {CONFIG_DIR}
-    data: {DATA_DIR}
-    logs: {LOG_DIR}
-    cache: {CACHE_DIR}
+        website: https://github.com/elesiuta/picosnitch
+        version: {VERSION}
+        entrypoint: {Path(sys.argv[0]).resolve()}
+        config: {CONFIG_DIR}
+        data: {DATA_DIR}
+        logs: {LOG_DIR}
+        cache: {CACHE_DIR}
 
-    usage:
-        picosnitch webui|tui|top|status|version|help
-                    |    |   |   |      |       |--> this text
-                    |    |   |   |      |--> version info
-                    |    |   |   |--> show pid
-                    |    |   |--> live event monitor
-                    |    |--> curses tui
-                    |--> web gui (http://{os.getenv("HOST", "localhost")}:{os.getenv("PORT", "5100")})
+        usage:
+            picosnitch webui|tui|top|status|version|help
+                        |     |   |   |      |       |--> this text
+                        |     |   |   |      |--> version number
+                        |     |   |   |--> show pid and service status
+                        |     |   |--> live event monitor
+                        |     |--> curses tui
+                        |--> web gui (http://{os.getenv("PICOSNITCH_HOST", "localhost")}:{os.getenv("PICOSNITCH_PORT", "5100")})
 
-        sudo picosnitch init|start|stop|restart|start-no-daemon|systemd
-                         |    |     |    |       |               |--> create service
-                         |    |     |    |       |--> run without daemonizing
-                         |    |_____|____|--> start/stop/restart daemon
-                         |--> create directories and default config
+            picosnitch start|stop|restart|start-no-daemon|systemd
+                        |     |    |       |               |--> create service
+                        |     |    |       |--> run without daemonizing
+                        |_____|____|--> start/stop/restart daemon
 
-        systemctl enable|disable|start|stop|restart|status picosnitch
-                   |      |       |     |    |       |--> show status with systemd
-                   |      |       |_____|____|--> start/stop/restart picosnitch
-                   |______|--> enable/disable autostart on reboot
+            systemctl enable|disable|start|stop|restart|status picosnitch
+                    |      |       |     |    |       |--> show status with systemd
+                    |      |       |_____|____|--> start/stop/restart picosnitch
+                    |______|--> enable/disable autostart on reboot
 
-    * if systemctl isn't working, recreate the service with `sudo picosnitch systemd`
-    * if you don't use systemd, you can use `sudo picosnitch start|stop|restart`
-    * if the daemon isn't working, try `sudo picosnitch start-no-daemon`
-    * available environment variables for webui: HOST, PORT
-    """)
-    systemd_service = textwrap.dedent(f"""    [Unit]
-    Description=picosnitch
+        * if systemctl isn't working, recreate the service with `sudo picosnitch systemd`
+        * if you don't use systemd, you can use `sudo picosnitch start|stop|restart`
+        * if the daemon isn't working, try `sudo picosnitch start-no-daemon`
+        * available environment variables for webui: PICOSNITCH_HOST, PICOSNITCH_PORT
+        """.lstrip("\n")
+    )
+    systemd_service = textwrap.dedent(
+        f"""
+        [Unit]
+        Description=picosnitch
 
-    [Service]
-    Type=simple
-    Restart=always
-    RestartSec=5
-    ExecStart={sys.executable} -m picosnitch start-no-daemon
-    PIDFile={pid_file}
+        [Service]
+        Type=simple
+        Restart=always
+        RestartSec=5
+        ExecStart={sys.executable} -m picosnitch start-no-daemon
+        PIDFile={pid_file}
 
-    # Hardening
-    ProtectHome=read-only
-    ProtectSystem=strict
-    ReadWritePaths={DATA_DIR} {LOG_DIR} {RUN_DIR} {CACHE_DIR}
-    PrivateTmp=yes
-    NoNewPrivileges=yes
-    CapabilityBoundingSet=CAP_SYS_ADMIN CAP_BPF CAP_PERFMON CAP_NET_ADMIN CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
-    ProtectKernelModules=yes
-    ProtectKernelLogs=yes
-    ProtectControlGroups=yes
-    ProtectClock=yes
-    RestrictRealtime=yes
-    LockPersonality=yes
-    RestrictSUIDSGID=yes
+        # Required for libbpf to mmap the per-cpu perf event ring buffers
+        # (~16 MiB by default) without hitting the inherited 8 MiB cap.
+        LimitMEMLOCK=infinity
 
-    [Install]
-    WantedBy=multi-user.target
-    """)
+        # Hardening
+        ProtectHome=read-only
+        ProtectSystem=strict
+        ReadWritePaths={DATA_DIR} {LOG_DIR} {RUN_DIR} {CACHE_DIR}
+        PrivateTmp=yes
+        NoNewPrivileges=yes
+        CapabilityBoundingSet=CAP_SYS_ADMIN CAP_BPF CAP_PERFMON CAP_NET_ADMIN CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+        ProtectKernelModules=yes
+        ProtectKernelLogs=yes
+        ProtectControlGroups=yes
+        ProtectClock=yes
+        RestrictRealtime=yes
+        LockPersonality=yes
+        RestrictSUIDSGID=yes
+
+        [Install]
+        WantedBy=multi-user.target
+        """.lstrip("\n")
+    )
     if len(sys.argv) != 2:
         print(readme)
         return 2
@@ -219,20 +224,16 @@ def start_picosnitch() -> int:
         return 0
     elif cmd == "version":
         print(f"version: {VERSION}")
-        print(f"entrypoint: {Path(sys.argv[0]).resolve()}")
-        print(f"config: {CONFIG_DIR}")
-        print(f"data: {DATA_DIR}")
-        print(f"logs: {LOG_DIR}")
-        print(f"cache: {CACHE_DIR}")
         return 0
     elif cmd == "status":
         Daemon(pid_file).status()
-        return 0
-    elif cmd == "init":
-        if err := check_root(cmd):
-            return err
-        init_dirs_and_config()
-        logging.info("picosnitch initialized")
+        if Path("/usr/lib/systemd/system/picosnitch.service").exists() or Path("/etc/systemd/system/picosnitch.service").exists():
+            try:
+                r = subprocess.run(["systemctl", "is-active", "picosnitch"], capture_output=True, text=True, check=False)
+                state = (r.stdout or r.stderr).strip() or "unknown"
+            except FileNotFoundError:
+                state = "unknown (systemctl not found)"
+            logging.info(f"picosnitch.service (systemd): {state}")
         return 0
     elif cmd == "systemd":
         if err := check_root(cmd):
@@ -246,12 +247,26 @@ def start_picosnitch() -> int:
         if err := check_root(cmd):
             return err
         if Path("/usr/lib/systemd/system/picosnitch.service").exists() or Path("/etc/systemd/system/picosnitch.service").exists():
-            logging.info("Found picosnitch.service but you are not using systemctl")
-            if sys.stdin.isatty():
-                confirm = input(f"Did you intend to run `systemctl {cmd} picosnitch` (y/N)? ")
-                if confirm.lower().startswith("y"):
-                    subprocess.run(["systemctl", cmd, "picosnitch"])
-                    return 0
+            try:
+                active = (
+                    subprocess.run(
+                        ["systemctl", "is-active", "--quiet", "picosnitch"],
+                        check=False,
+                    ).returncode
+                    == 0
+                )
+            except FileNotFoundError:
+                active = False
+            if active:
+                logging.info("picosnitch.service is active under systemd; killing the pid would just be respawned by Restart=always")
+                if sys.stdin.isatty():
+                    confirm = input("Run `systemctl stop picosnitch` instead (Y/n)? ")
+                    if not confirm.lower().startswith("n"):
+                        subprocess.run(["systemctl", "stop", "picosnitch"])
+                        return 0
+                else:
+                    logging.error("aborted; run `systemctl stop picosnitch` instead")
+                    return 1
         logging.info("stopping picosnitch daemon")
         Daemon(pid_file).stop()
         return 0
@@ -333,7 +348,6 @@ def start_picosnitch() -> int:
     elif cmd == "webui":
         if err := check_database():
             return err
-        logging.info(f"serving web gui on http://{os.getenv('HOST', 'localhost')}:{os.getenv('PORT', '5100')}")
         return web_dashboard()
     elif cmd == "tui":
         if err := check_database():
