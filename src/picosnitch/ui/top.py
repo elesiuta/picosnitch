@@ -2,37 +2,31 @@
 # Copyright (C) 2020 Eric Lesiuta
 
 """
-`picosnitch top` — live curses view of network events as they happen.
+`picosnitch top` -- live curses view of network events as they happen.
 
 Connects to the daemon's live event socket and displays a rolling list of
 recent connections, plus a per-executable rate aggregate.
 
-If no daemon is running, top forks a `multiprocessing.Process` that runs
-`run_main_loop` directly. The child sets PR_SET_PDEATHSIG=SIGTERM so it
-also dies if top is killed with SIGKILL. On normal exit / Ctrl+C /
-SIGTERM, top calls `child.terminate()` (SIGTERM) which trips the main
-loop's shutdown handler and tears down all picosnitch subprocesses
-cleanly. Top requires root for this path (BPF needs CAP_SYS_ADMIN);
-if launched without root it exits with an error rather than escalating
-privileges itself -- the user should re-run with `sudo`.
+If no daemon is running, top spawns `picosnitch start-no-daemon` as a
+subprocess in its own session/process group so a single killpg(SIGTERM)
+on top exit tears down the monitor and all of its helper subprocesses.
+Top requires root for this path (BPF needs CAP_SYS_ADMIN).
 """
 
 import atexit
 import collections
-import ctypes
 import curses
 import logging
-import multiprocessing
 import os
 import signal
 import socket
+import subprocess
 import sys
 import time
 
 from picosnitch.constants import LOG_DIR, RUN_DIR, VERSION
 from picosnitch.live_feed import EVENTS_SOCKET_PATH, LiveFeedSubscriber
-
-PR_SET_PDEATHSIG = 1
+from picosnitch.ui import _chrome, _keys
 
 
 def _format_bytes(n: int) -> str:
@@ -46,13 +40,9 @@ def _format_bytes(n: int) -> str:
 def _scan_listening_ports() -> dict[str, set[int]]:
     """Map executable path -> set of locally-bound ports.
 
-    Picosnitch event records only carry the source port of the connection
-    that triggered the event, so a listening service that has never been
-    contacted (or whose contact was missed) won't show up via the live
-    feed alone. Walk /proc/net/{tcp,tcp6,udp,udp6} for currently-bound
-    sockets and resolve each socket inode back to its owning executable
-    via /proc/<pid>/fd/. Best-effort: silently skips processes we cannot
-    inspect (permission denied, races, etc.)."""
+    Walks /proc/net/{tcp,tcp6,udp,udp6} for currently-bound sockets and
+    resolves each socket inode back to its owning executable via
+    /proc/<pid>/fd/. Best-effort: silently skips processes we cannot inspect."""
     inode_to_port: dict[int, int] = {}
     for proto in ("tcp", "tcp6", "udp", "udp6"):
         try:
@@ -109,82 +99,36 @@ def _scan_listening_ports() -> dict[str, set[int]]:
     return exe_to_ports
 
 
-def _standalone_monitor_entry() -> None:
-    """multiprocessing.Process target that runs the picosnitch main loop.
-
-    Sets PR_SET_PDEATHSIG=SIGTERM so the kernel signals us when the
-    parent (top) dies for any reason -- including SIGKILL. The main
-    loop's SIGTERM handler then tears down all helper subprocesses
-    cleanly.
-
-    Critically, also redirects stdout/stderr (and reconfigures the
-    root logger) to a log file so that warnings / errors emitted by
-    the monitor and its helper subprocesses do not scribble onto
-    top's curses display."""
-    try:
-        libc = ctypes.CDLL("libc.so.6", use_errno=True)
-        libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0)
-    except Exception:
-        pass
-    # If top already died between fork and prctl, exit immediately.
-    if os.getppid() == 1:
+def _stop_spawned(proc: subprocess.Popen) -> None:
+    """SIGTERM the spawned monitor's whole process group, then SIGKILL if needed."""
+    if proc.poll() is not None:
         return
-    # Redirect stdout/stderr to a log file so monitor logging does not
-    # corrupt top's curses screen. Fall back to /dev/null if the log
-    # dir is not writable.
-    log_path = LOG_DIR / "picosnitch-top.log"
+    pgid = proc.pid
     try:
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
-        log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    except OSError:
-        log_fd = os.open(os.devnull, os.O_WRONLY)
-    os.dup2(log_fd, 1)
-    os.dup2(log_fd, 2)
-    os.close(log_fd)
-    # Reconfigure the root logger -- it was set up at module import to
-    # write to the inherited stderr (which we just replaced). Point it
-    # at the new fd 2 explicitly via a fresh StreamHandler.
-    root = logging.getLogger()
-    for h in list(root.handlers):
-        root.removeHandler(h)
-    root.addHandler(logging.StreamHandler(os.fdopen(2, "w", buffering=1)))
-    root.setLevel(logging.INFO)
-    # Imported lazily so importing picosnitch.ui.top stays cheap.
-    from ..config import load_config
-    from ..main_loop import run_main_loop
-    from ..utils import load_state
-
-    # main_loop checks sys.argv[1] -- emulate `start-no-daemon` so it
-    # exits instead of trying to relaunch via subprocess on failure.
-    sys.argv = [sys.argv[0], "start-no-daemon"]
-    config = load_config()
-    state = load_state()
-    sys.exit(run_main_loop(config, state))
-
-
-def _stop_spawned(child: multiprocessing.Process) -> None:
-    """Best-effort clean shutdown of the spawned monitor process tree."""
-    if not child.is_alive():
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
         return
     try:
-        child.terminate()  # SIGTERM -- main_loop sets shutdown_event
-    except (OSError, ValueError):
+        proc.wait(timeout=10)
+        return
+    except subprocess.TimeoutExpired:
         pass
-    child.join(timeout=10)
-    if child.is_alive():
-        try:
-            child.kill()  # SIGKILL as a last resort
-        except (OSError, ValueError):
-            pass
-        child.join(timeout=5)
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
 
 
-def _wait_for_socket(timeout: float, child: multiprocessing.Process) -> bool:
+def _wait_for_socket(timeout: float, proc: subprocess.Popen) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
         if EVENTS_SOCKET_PATH.exists():
             return True
-        if not child.is_alive():
+        if proc.poll() is not None:
             return False
         time.sleep(0.2)
     return False
@@ -196,9 +140,7 @@ def _top_loop(stdscr, sub: LiveFeedSubscriber) -> int:
     curses.curs_set(0)
     stdscr.nodelay(True)
     stdscr.keypad(True)
-    curses.start_color()
-    curses.use_default_colors()
-    curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_MAGENTA)
+    _chrome.init_colors()
 
     recent: collections.deque[dict] = collections.deque(maxlen=10000)
     totals: dict[tuple[str, str], list[int | float]] = {}
@@ -211,6 +153,7 @@ def _top_loop(stdscr, sub: LiveFeedSubscriber) -> int:
     summary_offset = 0  # offset into totals ranking (top panel)
     focus_summary = False  # False = recent panel scrolls, True = summary
     show_help = False
+    find_query = ""  # case-insensitive substring filter (set via `/`)
     total_events_seen = 0
     counters_reset_at = time.time()
     last_render = 0.0
@@ -261,105 +204,94 @@ def _top_loop(stdscr, sub: LiveFeedSubscriber) -> int:
             max_y, max_x = stdscr.getmaxyx()
             elapsed = max(1, int(now - counters_reset_at))
             sort_label = "recv" if sort_by_recv else "send"
-            paused_label = " [paused]" if paused else ""
-            header = f" picosnitch top v{VERSION}  events:{total_events_seen:>6d}  window:{elapsed}s  sort:{sort_label}{paused_label}   q:quit   ?:help "
             stdscr.erase()
-            stdscr.attrset(curses.color_pair(1) | curses.A_BOLD)
-            stdscr.addnstr(0, 0, header.ljust(max_x), max_x - 1)
-            stdscr.attrset(0)
+            _chrome.draw_status_bar(
+                stdscr,
+                left=[("picosnitch top", f"v{VERSION}")],
+                center=[
+                    ("events", f"{total_events_seen}"),
+                    ("window", f"{elapsed}s"),
+                    ("sort", sort_label),
+                    *([("find", find_query)] if find_query else []),
+                ],
+                hint=_keys.format_status_hint(),
+                paused=paused,
+            )
+
+            # Clamp split so the layout has at least 1 row above and 2 below.
+            split = max(2, min(max_y - 2, max_y // 2))
+            sum_marker = "*" if focus_summary else " "
+            col_hdr = f"{sum_marker}{'EXECUTABLE':<40} {'NAME':<16} {'COUNT':>7} {'SENT':>7} {'RECV':>7} {'LISTEN':<14}"
+            sort_idx = 1 if sort_by_recv else 0
+            ranked = sorted(totals.items(), key=lambda kv: kv[1][sort_idx], reverse=True)
+            if find_query:
+                fq = find_query.lower()
+                ranked = [kv for kv in ranked if fq in kv[0][0].lower() or fq in kv[0][1].lower()]
+            totals_rows = max(0, split - 2)
+            sum_max_offset = max(0, len(ranked) - totals_rows)
+            if summary_offset > sum_max_offset:
+                summary_offset = sum_max_offset
+            sum_indicator = ""
+            if ranked:
+                sv_top = summary_offset + 1
+                sv_bot = min(len(ranked), summary_offset + totals_rows)
+                sum_indicator = f"  [{sv_top}-{sv_bot} / {len(ranked)}]"
+            _chrome._safe_addnstr(stdscr, 1, 0, (col_hdr + sum_indicator).ljust(max_x), max_x - 1, curses.A_UNDERLINE)
+            for i, ((name, exe), (s, r, c, _ts)) in enumerate(ranked[summary_offset : summary_offset + totals_rows]):
+                ports = listening.get(exe)
+                ports_s = ",".join(str(p) for p in sorted(ports)) if ports else ""
+                line = f" {exe[:40]:<40} {name[:16]:<16} {c:>7d} {_format_bytes(int(s)):>7} {_format_bytes(int(r)):>7} {ports_s}"
+                _chrome._safe_addnstr(stdscr, 2 + i, 0, line, max_x - 1)
+
+            rec_rows = max(1, max_y - split - 1)
+            recent_list = list(recent)
+            if find_query:
+                fq = find_query.lower()
+                recent_list = [
+                    ev
+                    for ev in recent_list
+                    if fq in (ev.get("name") or "").lower() or fq in (ev.get("exe") or "").lower() or fq in (ev.get("domain") or "").lower() or fq in (ev.get("raddr") or "").lower()
+                ]
+            max_offset = max(0, len(recent_list) - rec_rows)
+            if scroll_offset > max_offset:
+                scroll_offset = max_offset
+            scroll_indicator = ""
+            if recent_list:
+                visible_top = scroll_offset + 1
+                visible_bot = min(len(recent_list), scroll_offset + rec_rows)
+                scroll_indicator = f"  [{visible_top}-{visible_bot} / {len(recent_list)}]"
+            rec_marker = "*" if not focus_summary else " "
+            rec_hdr = f"{rec_marker}{'TIME':<8} {'NAME':<16} {'PNAME':<12} {'GPNAME':<12} {'LPORT':>5} {'REMOTE':<25} {'SEND':>7} {'RECV':>7}{scroll_indicator}"
+            _chrome._safe_addnstr(stdscr, split, 0, rec_hdr.ljust(max_x), max_x - 1, curses.A_UNDERLINE)
+            for i, event in enumerate(recent_list[scroll_offset : scroll_offset + rec_rows]):
+                ts = event.get("_t", 0)
+                t = time.strftime("%H:%M:%S", time.localtime(ts)) if ts else time.strftime("%H:%M:%S")
+                raddr = event.get("raddr", "") or ""
+                rport = event.get("rport", -1)
+                remote = (event.get("domain") or raddr) + (f":{rport}" if rport and rport > 0 else "")
+                lport = event.get("lport", -1)
+                lport_s = f"{lport:d}" if lport and lport > 0 else ""
+                line = (
+                    f" {t:<8} "
+                    f"{(event.get('name') or '')[:16]:<16} "
+                    f"{(event.get('pname') or '')[:12]:<12} "
+                    f"{(event.get('gpname') or '')[:12]:<12} "
+                    f"{lport_s:>5} "
+                    f"{remote[:25]:<25} "
+                    f"{_format_bytes(int(event.get('send', 0) or 0)):>7} "
+                    f"{_format_bytes(int(event.get('recv', 0) or 0)):>7}"
+                )
+                _chrome._safe_addnstr(stdscr, split + 1 + i, 0, line, max_x - 1)
 
             if show_help:
-                help_lines = [
-                    "picosnitch top -- key bindings",
-                    "",
-                    "  q            quit",
-                    "  ?            toggle this help",
-                    "  TAB          switch focus between summary and event log",
-                    "  UP / DOWN    scroll focused panel by 1 row",
-                    "  PgUp / PgDn  scroll focused panel by 1 page",
-                    "  Home / End   jump to top / bottom of focused panel",
-                    "  s            toggle sort by sent / received bytes",
-                    "  p            pause / resume the live event log",
-                    "  r            reset all counters and clear the log",
-                    "",
-                    "  press ? to close",
-                ]
-                for i, line in enumerate(help_lines):
-                    if 1 + i >= max_y:
-                        break
-                    stdscr.addnstr(1 + i, 0, line, max_x - 1)
-                stdscr.noutrefresh()
-                curses.doupdate()
-                split = max(8, max_y // 2)
-                rec_rows = max(1, max_y - split - 1)
-                max_offset = max(0, len(recent) - rec_rows)
-                totals_rows = max(0, split - 2)
-                sum_max_offset = max(0, len(totals) - totals_rows)
-                # skip rendering the live panels while help overlays the screen
-                _skip_panels = True
-            else:
-                _skip_panels = False
+                _chrome.draw_help_popup(stdscr, "picosnitch top", _keys.HELP_LINES)
 
-            if not _skip_panels:
-                split = max(8, max_y // 2)
-                sum_marker = "*" if focus_summary else " "
-                col_hdr = f"{sum_marker}{'EXECUTABLE':<40} {'NAME':<16} {'COUNT':>7} {'SENT':>7} {'RECV':>7} {'LISTEN':<14}"
-                sort_idx = 1 if sort_by_recv else 0
-                ranked = sorted(totals.items(), key=lambda kv: kv[1][sort_idx], reverse=True)
-                totals_rows = max(0, split - 2)
-                sum_max_offset = max(0, len(ranked) - totals_rows)
-                if summary_offset > sum_max_offset:
-                    summary_offset = sum_max_offset
-                sum_indicator = ""
-                if ranked:
-                    sv_top = summary_offset + 1
-                    sv_bot = min(len(ranked), summary_offset + totals_rows)
-                    sum_indicator = f"  [{sv_top}-{sv_bot} / {len(ranked)}]"
-                stdscr.addnstr(1, 0, (col_hdr + sum_indicator).ljust(max_x), max_x - 1, curses.A_UNDERLINE)
-                for i, ((name, exe), (s, r, c, _ts)) in enumerate(ranked[summary_offset : summary_offset + totals_rows]):
-                    ports = listening.get(exe)
-                    ports_s = ",".join(str(p) for p in sorted(ports)) if ports else ""
-                    line = f" {exe[:40]:<40} {name[:16]:<16} {c:>7d} {_format_bytes(int(s)):>7} {_format_bytes(int(r)):>7} {ports_s}"
-                    stdscr.addnstr(2 + i, 0, line, max_x - 1)
-
-                rec_rows = max(1, max_y - split - 1)
-                recent_list = list(recent)
-                max_offset = max(0, len(recent_list) - rec_rows)
-                if scroll_offset > max_offset:
-                    scroll_offset = max_offset
-                scroll_indicator = ""
-                if recent_list:
-                    visible_top = scroll_offset + 1
-                    visible_bot = min(len(recent_list), scroll_offset + rec_rows)
-                    scroll_indicator = f"  [{visible_top}-{visible_bot} / {len(recent_list)}]"
-                rec_marker = "*" if not focus_summary else " "
-                rec_hdr = f"{rec_marker}{'TIME':<8} {'NAME':<16} {'PNAME':<12} {'GPNAME':<12} {'LPORT':>5} {'REMOTE':<25} {'SEND':>7} {'RECV':>7}{scroll_indicator}"
-                stdscr.addnstr(split, 0, rec_hdr.ljust(max_x), max_x - 1, curses.A_UNDERLINE)
-                for i, event in enumerate(recent_list[scroll_offset : scroll_offset + rec_rows]):
-                    ts = event.get("_t", 0)
-                    t = time.strftime("%H:%M:%S", time.localtime(ts)) if ts else time.strftime("%H:%M:%S")
-                    raddr = event.get("raddr", "") or ""
-                    rport = event.get("rport", -1)
-                    remote = (event.get("domain") or raddr) + (f":{rport}" if rport and rport > 0 else "")
-                    lport = event.get("lport", -1)
-                    lport_s = f"{lport:d}" if lport and lport > 0 else ""
-                    line = (
-                        f" {t:<8} "
-                        f"{(event.get('name') or '')[:16]:<16} "
-                        f"{(event.get('pname') or '')[:12]:<12} "
-                        f"{(event.get('gpname') or '')[:12]:<12} "
-                        f"{lport_s:>5} "
-                        f"{remote[:25]:<25} "
-                        f"{_format_bytes(int(event.get('send', 0) or 0)):>7} "
-                        f"{_format_bytes(int(event.get('recv', 0) or 0)):>7}"
-                    )
-                    stdscr.addnstr(split + 1 + i, 0, line, max_x - 1)
-                stdscr.noutrefresh()
-                curses.doupdate()
+            stdscr.noutrefresh()
+            curses.doupdate()
         else:
             # cheap re-derive for key handling without re-render
             max_y, _max_x = stdscr.getmaxyx()
-            split = max(8, max_y // 2)
+            split = max(2, min(max_y - 2, max_y // 2))
             rec_rows = max(1, max_y - split - 1)
             max_offset = max(0, len(recent) - rec_rows)
             totals_rows = max(0, split - 2)
@@ -376,38 +308,43 @@ def _top_loop(stdscr, sub: LiveFeedSubscriber) -> int:
         page_up = page_down = 0
         go_home = go_end = False
         toggle_sort = toggle_pause = do_reset = toggle_focus = toggle_help = False
+        do_find = False
         quit_now = False
         while ch != -1:
-            if ch == ord("?"):
+            action = _keys.key_action(ch)
+            if action == _keys.HELP:
                 toggle_help = True
-            elif ch == ord("q"):
+            elif action == _keys.QUIT:
                 quit_now = True
                 break
             elif show_help:
                 # while help is visible, ignore everything else except resize
-                if ch == curses.KEY_RESIZE:
+                if action == _keys.RESIZE:
                     last_render = 0.0
-            elif ch == ord("s"):
+            elif action == _keys.SORT:
                 toggle_sort = True
-            elif ch == ord("p"):
+            elif action == _keys.PAUSE:
                 toggle_pause = True
-            elif ch == ord("r"):
+            elif action == _keys.RESET:
                 do_reset = True
-            elif ch == ord("\t"):
+            elif action == _keys.FILTER:
+                do_find = True
+                break  # handle prompt outside the drain loop
+            elif action in (_keys.NEXT_SECTION, _keys.PREV_SECTION):
                 toggle_focus = True
-            elif ch == curses.KEY_UP:
+            elif action == _keys.MOVE_UP:
                 steps_up += 1
-            elif ch == curses.KEY_DOWN:
+            elif action == _keys.MOVE_DOWN:
                 steps_down += 1
-            elif ch == curses.KEY_PPAGE:
+            elif action == _keys.PAGE_UP:
                 page_up += 1
-            elif ch == curses.KEY_NPAGE:
+            elif action == _keys.PAGE_DOWN:
                 page_down += 1
-            elif ch == curses.KEY_HOME:
+            elif action == _keys.JUMP_HOME:
                 go_home = True
-            elif ch == curses.KEY_END:
+            elif action == _keys.JUMP_END:
                 go_end = True
-            elif ch == curses.KEY_RESIZE:
+            elif action == _keys.RESIZE:
                 last_render = 0.0  # force immediate repaint
             stdscr.timeout(0)
             ch = stdscr.getch()
@@ -430,6 +367,14 @@ def _top_loop(stdscr, sub: LiveFeedSubscriber) -> int:
             scroll_offset = 0
             summary_offset = 0
             counters_reset_at = time.time()
+            last_render = 0.0
+            continue
+        if do_find:
+            entered = _chrome.prompt_input(stdscr, prompt="/", initial=find_query)
+            if entered is not None:
+                find_query = entered
+                scroll_offset = 0
+                summary_offset = 0
             last_render = 0.0
             continue
         # Scroll direction: UP moves toward the top of the list
@@ -463,26 +408,47 @@ def _top_loop(stdscr, sub: LiveFeedSubscriber) -> int:
 
 def top_init() -> int:
     """Entry point for `picosnitch top`."""
-    spawned: multiprocessing.Process | None = None
+    spawned: subprocess.Popen | None = None
     daemon_pid_file = RUN_DIR / "picosnitch.pid"
 
     if not EVENTS_SOCKET_PATH.exists():
         if daemon_pid_file.exists():
-            logging.error(f"Daemon pid file {daemon_pid_file} exists but socket {EVENTS_SOCKET_PATH} is missing — try `sudo picosnitch restart`.")
-            return 1
+            try:
+                old_pid = int(daemon_pid_file.read_text().strip())
+                os.kill(old_pid, 0)
+                logging.error(f"Daemon pid file {daemon_pid_file} exists but socket {EVENTS_SOCKET_PATH} is missing — try `sudo picosnitch restart`.")
+                return 1
+            except (OSError, ValueError):
+                # stale pidfile from a crashed picosnitch -- remove it
+                try:
+                    daemon_pid_file.unlink()
+                except OSError:
+                    pass
         if os.geteuid() != 0:
             # BPF needs CAP_SYS_ADMIN. Refuse to escalate privileges
             # ourselves (security audit: no implicit sudo re-exec).
             logging.error("picosnitch top needs root to spawn a private monitor; re-run with: sudo picosnitch top")
             return 1
         logging.info("No picosnitch daemon detected — launching a private monitor (will exit when top exits).")
-        # `spawn` start method to avoid sharing curses-related state if the
-        # caller has already done any tty I/O; fork would also work but
-        # spawn is safer across the multiprocessing primitives the main
-        # loop sets up.
-        ctx = multiprocessing.get_context("fork")
-        spawned = ctx.Process(target=_standalone_monitor_entry, name="picosnitch-monitor")
-        spawned.start()
+        # Spawn start-no-daemon as its own session leader so a single
+        # killpg(pgid, SIGTERM) on top exit reaches every helper subprocess.
+        log_path = LOG_DIR / "picosnitch-top.log"
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            mon_log = open(log_path, "ab", buffering=0)
+        except OSError:
+            mon_log = open(os.devnull, "ab", buffering=0)
+        try:
+            spawned = subprocess.Popen(
+                [sys.executable, "-m", "picosnitch", "start-no-daemon"],
+                stdin=subprocess.DEVNULL,
+                stdout=mon_log,
+                stderr=mon_log,
+                start_new_session=True,
+                close_fds=True,
+            )
+        finally:
+            mon_log.close()
 
         atexit.register(_stop_spawned, spawned)
 
@@ -493,7 +459,7 @@ def top_init() -> int:
         signal.signal(signal.SIGTERM, _signal_cleanup)
         signal.signal(signal.SIGHUP, _signal_cleanup)
 
-        if not _wait_for_socket(timeout=20.0, child=spawned):
+        if not _wait_for_socket(timeout=20.0, proc=spawned):
             logging.error("Spawned monitor did not create the live event socket within 20s.")
             _stop_spawned(spawned)
             return 1
