@@ -1,0 +1,57 @@
+name: Screenshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      retention_days:
+        description: "Artifact retention (1-90 days)"
+        required: false
+        default: "14"
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    name: Generate UI screenshots and videos
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install system packages (ttyd, ffmpeg, chromium deps)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ttyd ffmpeg \
+            libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+            libcups2t64 libdrm2 libxkbcommon0 libatspi2.0-0t64 \
+            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libcairo2 libasound2t64
+
+      - name: Allow unprivileged user namespaces (chromium sandbox)
+        # VHS launches chromium via go-rod; on Ubuntu 24.04 the AppArmor
+        # restriction on unprivileged user namespaces breaks the sandbox.
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Generate screenshots
+        run: bash docs/generate_screenshots.sh
+
+      - name: List artifacts
+        run: ls -la docs/screenshots/out/
+
+      - name: Upload screenshot artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: picosnitch-screenshots
+          path: docs/screenshots/out/
+          retention-days: ${{ github.event.inputs.retention_days }}
+          if-no-files-found: error
+
