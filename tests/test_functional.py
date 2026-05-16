@@ -109,10 +109,10 @@ ports = true
 [desktop]
 user = ""
 notifications = false
+geoip_lookup = true
 
 [monitoring]
 every_exe = false
-geoip_lookup = true
 perf_ring_buffer_pages = 256
 
 [virustotal]

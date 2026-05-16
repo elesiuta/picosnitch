@@ -19,11 +19,10 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-geoip = ["geoip2"]
 notifications = ["dbus-python"]
 sql = ["psycopg[binary]", "pymysql"]
 full = [
-    "picosnitch[geoip,notifications,sql]"
+    "picosnitch[notifications,sql]"
 ]
 
 [project.scripts]

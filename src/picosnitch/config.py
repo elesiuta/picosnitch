@@ -41,12 +41,12 @@ class LogConfig:
 class DesktopConfig:
     user: str = ""
     notifications: bool = True
+    geoip_lookup: bool = True
 
 
 @dataclasses.dataclass
 class MonitoringConfig:
     every_exe: bool = False
-    geoip_lookup: bool = True
     perf_ring_buffer_pages: int = 256
     rlimit_nofile: int | None = None
     st_dev_mask: int | None = None

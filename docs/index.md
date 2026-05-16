@@ -6,7 +6,7 @@
 # [Picosnitch](https://elesiuta.github.io/picosnitch/)
 - 🔔 Receive notifications whenever a new program connects to the network, or when it's modified
 - 📈 Monitors your bandwidth, breaking down traffic by executable, hash, parent, domain, port, or user over time
-- 🌍 Web and terminal interfaces with GeoIP lookups for each connection ([IP Geolocation by DB-IP](https://db-ip.com))
+- 🌍 Terminal interface annotates each remote address with a country code via a cached [DB-IP Country Lite](https://db-ip.com/db/download/ip-to-country-lite) lookup (no account required)
 - 🛡️ Can optionally check hashes or executables using [VirusTotal](https://www.virustotal.com)
 - 🚀 Executable hashes are cached based on device + inode for improved performance
 - 🐳 Detects applications running inside containers, multiple versions of the same app are differentiated based on their hash
@@ -75,7 +75,6 @@
 - create a service file for systemd to run picosnitch (recommended)
   - `picosnitch systemd`
 - optional dependencies (will install from [PyPI](https://pypi.org/) with `[full]` if not already installed)
-  - for GeoIP lookups: [geoip2](https://pypi.org/project/geoip2/)
   - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro and should be installed from their repo)
   - for sql server: one of [psycopg](https://pypi.org/project/psycopg/), [pymysql](https://pypi.org/project/PyMySQL/), [mariadb](https://pypi.org/project/mariadb/), or [psycopg2](https://pypi.org/project/psycopg2/) (latter two not included with `[full]`)
   - for VirusTotal: [requests](https://pypi.org/project/requests/)
@@ -130,7 +129,8 @@
   # this feature is experimental but should work fairly well, errors should be expected as
   # picosnitch is unable to open file descriptors for some extremely short-lived processes
   # if you just want logs (no hashes) to trace process hierarchy, see execsnoop or forkstat
-  "GeoIP lookup": true, # GeoIP lookup of IP addresses in user interface (terminal and web)
+  "GeoIP lookup": true, # Annotate remote addresses with country code in the terminal UI
+  # uses the DB-IP Country Lite CSV (cached under ~/.cache/picosnitch, refreshed monthly)
   "Log addresses": true, # Log remote addresses for each connection
   "Log commands": true, # Log command line args for each executable
   "Log ignore": [], # List of hashes (str), domains (str), IP subnets (str), or ports (int)
