@@ -36,9 +36,9 @@ _DIM_SQL: dict[str, str] = {
     "uid": "c.uid",
     "lport": "c.lport",
     "rport": "c.rport",
-    "laddr": "c.laddr",
-    "raddr": "c.raddr",
-    "domain": "c.domain",
+    "laddr": "la.addr",
+    "raddr": "ra.addr",
+    "domain": "dom.domain",
     "pexe": "p.exe",
     "pname": "p.name",
     "pcmdline": "p.cmdline",
@@ -47,6 +47,7 @@ _DIM_SQL: dict[str, str] = {
     "gpname": "g.name",
     "gpcmdline": "g.cmdline",
     "gpsha256": "g.sha256",
+    "netns": "c.netns",
 }
 
 _DIM_LABELS: dict[str, str] = {
@@ -68,9 +69,18 @@ _DIM_LABELS: dict[str, str] = {
     "gpname": "Grandparent Name",
     "gpcmdline": "Grandparent Command",
     "gpsha256": "Grandparent SHA256",
+    "netns": "Network ns",
 }
 
-_FROM_CLAUSE = "connections c JOIN executables e ON c.exe_id = e.id JOIN executables p ON c.pexe_id = p.id JOIN executables g ON c.gpexe_id = g.id"
+_FROM_CLAUSE = (
+    "connections c"
+    " JOIN executables e ON c.exe_id = e.id"
+    " JOIN executables p ON c.pexe_id = p.id"
+    " JOIN executables g ON c.gpexe_id = g.id"
+    " JOIN addresses la ON c.laddr_id = la.id"
+    " JOIN addresses ra ON c.raddr_id = ra.id"
+    " JOIN domains dom ON c.domain_id = dom.id"
+)
 
 _TIME_RANGES: dict[str, int] = {
     "1m": 60,
@@ -85,7 +95,38 @@ _TIME_RANGES: dict[str, int] = {
 }
 
 
-def _query_aggregate(dim: str, time_key: str, where: str | None, whereis: str | None, limit: int) -> dict:
+def _resolve_window(qs: dict) -> tuple[int, int, str]:
+    """Resolve a time window from query string params.
+
+    Accepts either ``range=<preset>`` (e.g. ``1h``, ``1d``, ``all``) or
+    ``from=<unix_ts>&to=<unix_ts>`` for a custom window. Returns
+    ``(since, until, label)`` where ``since == 0`` means no lower
+    bound. ``label`` is what the UI should display for this window.
+    """
+    now = int(time.time())
+    raw_from = qs.get("from", [""])[0]
+    raw_to = qs.get("to", [""])[0]
+    if raw_from or raw_to:
+        try:
+            since = int(float(raw_from)) if raw_from else 0
+            until = int(float(raw_to)) if raw_to else now
+        except ValueError:
+            since, until = 0, now
+        if since < 0:
+            since = 0
+        if until <= 0:
+            until = now
+        if since and until and since > until:
+            since, until = until, since
+        label = f"{since}-{until}"
+        return since, until, label
+    rng = (qs.get("range", ["1h"])[0]).strip()
+    seconds = _TIME_RANGES.get(rng, 0)
+    since = now - seconds if seconds else 0
+    return since, now, rng
+
+
+def _query_aggregate(dim: str, since: int, until: int, label: str, where: str | None, whereis: str | None, limit: int) -> dict:
     """Aggregate by (bucketed contime, dim) -> {send, recv}.
 
     Returns a series-per-dim-value structure so the client can render a
@@ -93,16 +134,19 @@ def _query_aggregate(dim: str, time_key: str, where: str | None, whereis: str | 
     """
     if dim not in _DIM_SQL:
         raise ValueError(f"unknown dim: {dim}")
-    seconds = _TIME_RANGES.get(time_key, 0)
-    now = int(time.time())
+    seconds = max(0, until - since) if since else 0
     params: list = []
-    where_sql = ""
-    if seconds:
-        where_sql = " WHERE c.contime > ?"
-        params.append(now - seconds)
+    where_parts: list[str] = []
+    if since:
+        where_parts.append("c.contime > ?")
+        params.append(since)
+    if until:
+        where_parts.append("c.contime <= ?")
+        params.append(until)
     if where and where in _DIM_SQL and whereis is not None:
-        where_sql += (" AND " if where_sql else " WHERE ") + f"{_DIM_SQL[where]} = ?"
+        where_parts.append(f"{_DIM_SQL[where]} = ?")
         params.append(whereis)
+    where_sql = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
     # bucket size based on range so a chart never has more than ~300 points
     bucket = max(1, seconds // 300) if seconds else 3600
     dim_col = _DIM_SQL[dim]
@@ -134,7 +178,10 @@ def _query_aggregate(dim: str, time_key: str, where: str | None, whereis: str | 
         "dim": dim,
         "label": _DIM_LABELS[dim],
         "bucket": bucket,
-        "now": now,
+        "now": until,
+        "since": since,
+        "until": until,
+        "range": label,
         "range_seconds": seconds,
         "series": {k: series[k] for k in keys if k in series},
         "totals": {k: {"send": v[0], "recv": v[1]} for k, v in ranked},
@@ -150,6 +197,168 @@ def _query_distinct(dim: str, limit: int = 200) -> list[str]:
         return [str(row[0]) for row in con.execute(sql, (limit,)).fetchall() if row[0] is not None]
     finally:
         con.close()
+
+
+def _query_summary(since: int, until: int, label: str) -> dict:
+    """Top-level KPIs for the chosen window: total bytes, connection
+    count, distinct active executables and netns count."""
+    where_parts: list[str] = []
+    params: list = []
+    if since:
+        where_parts.append("c.contime > ?")
+        params.append(since)
+    if until:
+        where_parts.append("c.contime <= ?")
+        params.append(until)
+    where_sql = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
+    sql = f"SELECT COALESCE(SUM(c.send), 0), COALESCE(SUM(c.recv), 0), COUNT(*), COUNT(DISTINCT c.exe_id), COUNT(DISTINCT c.netns) FROM connections c{where_sql}"
+    con = connect_db_readonly(_DB_PATH)
+    try:
+        row = con.execute(sql, params).fetchone()
+    finally:
+        con.close()
+    sent, recv, conns, exes, netns = row or (0, 0, 0, 0, 0)
+    return {
+        "range": label,
+        "since": since,
+        "until": until,
+        "now": until,
+        "sent": int(sent),
+        "recv": int(recv),
+        "connections": int(conns),
+        "executables": int(exes),
+        "netns": int(netns),
+    }
+
+
+def _query_drilldown(dim: str, value: str, since: int, until: int, label: str) -> dict:
+    """Drilldown payload for a single (dim, value) selection: KPIs,
+    a sparkline of received bytes over time, the top remote
+    destinations and the most recent connections.
+
+    Empty `value` is matched as the dim-NULL case so the user can drill
+    into rows that have no domain / cmdline / etc."""
+    if dim not in _DIM_SQL:
+        raise ValueError(f"unknown dim: {dim}")
+    seconds = max(0, until - since) if since else 0
+    dim_col = _DIM_SQL[dim]
+    where_parts: list[str] = []
+    params: list = []
+    if since:
+        where_parts.append("c.contime > ?")
+        params.append(since)
+    if until:
+        where_parts.append("c.contime <= ?")
+        params.append(until)
+    if value == "" or value is None:
+        where_parts.append(f"({dim_col} IS NULL OR {dim_col} = '')")
+    else:
+        where_parts.append(f"{dim_col} = ?")
+        params.append(value)
+    where_sql = " WHERE " + " AND ".join(where_parts)
+    bucket = max(60, seconds // 120) if seconds else 3600
+
+    con = connect_db_readonly(_DB_PATH)
+    try:
+        # KPIs in one round trip.
+        row = con.execute(
+            "SELECT COALESCE(SUM(c.send), 0), COALESCE(SUM(c.recv), 0),"
+            " COUNT(*), COUNT(DISTINCT c.domain_id), COUNT(DISTINCT c.raddr_id),"
+            " COUNT(DISTINCT c.uid), COUNT(DISTINCT c.netns),"
+            " MIN(c.contime), MAX(c.contime)"
+            f" FROM {_FROM_CLAUSE}{where_sql}",
+            params,
+        ).fetchone() or (0, 0, 0, 0, 0, 0, 0, None, None)
+        sent, recv, conns, dom_n, addr_n, uid_n, ns_n, first_t, last_t = row
+
+        # Sparkline (received bytes per bucket).
+        bucket_expr = f"(c.contime / {bucket}) * {bucket}"
+        spark_rows = con.execute(
+            f"SELECT {bucket_expr} AS t, SUM(c.send), SUM(c.recv) FROM {_FROM_CLAUSE}{where_sql} GROUP BY t ORDER BY t",
+            params,
+        ).fetchall()
+
+        # Recent connections (latest first).
+        recent_rows = con.execute(
+            f"SELECT c.contime, ra.addr, c.rport, COALESCE(dom.domain, ''), c.send, c.recv, e.name FROM {_FROM_CLAUSE}{where_sql} ORDER BY c.contime DESC LIMIT 12",
+            params,
+        ).fetchall()
+
+        # Process info: distinct {name, cmdline, exe, sha256} for e/p/g
+        # across every connection that matched the drilldown filter.
+        def _process_info(alias: str, limit: int = 8) -> dict:
+            out: dict[str, list[str]] = {}
+            for field in ("name", "cmdline", "exe", "sha256"):
+                col = f"{alias}.{field}"
+                rows = con.execute(
+                    f"SELECT {col} AS v, COUNT(*) AS n FROM {_FROM_CLAUSE}{where_sql} AND {col} IS NOT NULL AND {col} != '' GROUP BY v ORDER BY n DESC LIMIT {limit}",
+                    params,
+                ).fetchall()
+                out[field] = [str(v) for v, _ in rows]
+            return out
+
+        process_info = {
+            "e": _process_info("e"),
+            "p": _process_info("p"),
+            "g": _process_info("g"),
+        }
+
+        # Breakdowns: per-uid / per-netns / per-domain / per-address totals.
+        def _breakdown(group_expr: str, limit: int = 25) -> list:
+            rows = con.execute(
+                f"SELECT {group_expr} AS k,"
+                " COALESCE(SUM(c.send), 0), COALESCE(SUM(c.recv), 0), COUNT(*)"
+                f" FROM {_FROM_CLAUSE}{where_sql}"
+                f" GROUP BY k ORDER BY SUM(c.send) + SUM(c.recv) DESC LIMIT {limit}",
+                params,
+            ).fetchall()
+            return [{"key": "" if k is None else str(k), "send": int(s or 0), "recv": int(r or 0), "count": int(n)} for k, s, r, n in rows]
+
+        breakdowns = {
+            "uid": _breakdown("c.uid"),
+            "netns": _breakdown("c.netns"),
+            "domain": _breakdown("COALESCE(NULLIF(dom.domain, ''), '(none)')"),
+            "address": _breakdown("ra.addr"),
+        }
+    finally:
+        con.close()
+
+    return {
+        "dim": dim,
+        "label": _DIM_LABELS[dim],
+        "value": value,
+        "range": label,
+        "since": since,
+        "until": until,
+        "now": until,
+        "bucket": bucket,
+        "totals": {
+            "sent": int(sent),
+            "recv": int(recv),
+            "connections": int(conns),
+            "domains": int(dom_n),
+            "addresses": int(addr_n),
+            "uids": int(uid_n),
+            "netns": int(ns_n),
+            "first_seen": int(first_t) if first_t else 0,
+            "last_seen": int(last_t) if last_t else 0,
+        },
+        "sparkline": [{"t": int(t), "s": int(s or 0), "r": int(r or 0)} for t, s, r in spark_rows],
+        "recent": [
+            {
+                "t": int(t),
+                "raddr": addr or "",
+                "rport": int(rport or 0),
+                "domain": dom,
+                "send": int(s or 0),
+                "recv": int(r or 0),
+                "name": name or "",
+            }
+            for t, addr, rport, dom, s, r, name in recent_rows
+        ],
+        "breakdowns": breakdowns,
+        "process_info": process_info,
+    }
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
@@ -202,29 +411,87 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._serve_static(path[len("/static/") :])
                 return
             if path == "/api/meta":
-                pid_status = "not running"
+                # status_state: "running" (green), "stopped" (red), "unknown" (yellow)
+                pid_path = RUN_DIR / "picosnitch.pid"
+                status_state = "unknown"
+                status_text = "unknown"
+                uptime_seconds = 0
+                start_ts = 0
                 try:
-                    with open(RUN_DIR / "picosnitch.pid", "r") as f:
-                        pid_status = "pid: " + f.read().strip()
+                    pid_str = pid_path.read_text().strip()
+                    try:
+                        pid_int = int(pid_str)
+                    except ValueError:
+                        pid_int = 0
+                    if pid_int and (Path("/proc") / str(pid_int)).exists():
+                        status_state = "running"
+                        status_text = "running (pid " + pid_str + ")"
+                        try:
+                            mtime = pid_path.stat().st_mtime
+                            uptime_seconds = max(0, int(time.time() - mtime))
+                            start_ts = int(mtime)
+                        except OSError:
+                            pass
+                    else:
+                        status_state = "stopped"
+                        status_text = "not running (stale pid file)"
+                except PermissionError:
+                    status_state = "unknown"
+                    status_text = "unknown (insufficient permission to read pid file)"
+                except FileNotFoundError:
+                    status_state = "stopped"
+                    status_text = "not running"
+                except OSError:
+                    status_state = "unknown"
+                    status_text = "unknown"
+                db_size = 0
+                try:
+                    db_size = _DB_PATH.stat().st_size
                 except OSError:
                     pass
-                self._send_json(200, {"version": VERSION, "status": pid_status, "db": str(_DB_PATH), "dims": _DIM_LABELS, "ranges": list(_TIME_RANGES.keys())})
+                self._send_json(
+                    200,
+                    {
+                        "version": VERSION,
+                        "status": status_text,
+                        "status_state": status_state,
+                        "db": str(_DB_PATH),
+                        "db_size_bytes": db_size,
+                        "uptime_seconds": uptime_seconds,
+                        "start_ts": start_ts,
+                        "dims": _DIM_LABELS,
+                        "ranges": list(_TIME_RANGES.keys()),
+                    },
+                )
+                return
+            if path == "/api/summary":
+                since, until, label = _resolve_window(qs)
+                self._send_json(200, _query_summary(since, until, label))
                 return
             if path == "/api/aggregate":
                 dim = (qs.get("dim", ["exe"])[0]).strip()
-                rng = (qs.get("range", ["1h"])[0]).strip()
+                since, until, label = _resolve_window(qs)
                 where = qs.get("where", [None])[0]
                 whereis = qs.get("whereis", [None])[0]
                 try:
-                    limit = int(qs.get("limit", ["20"])[0])
+                    limit = int(qs.get("limit", ["1000"])[0])
                 except ValueError:
-                    limit = 20
-                limit = max(1, min(200, limit))
-                self._send_json(200, _query_aggregate(dim, rng, where, whereis, limit))
+                    limit = 1000
+                limit = max(1, min(5000, limit))
+                self._send_json(200, _query_aggregate(dim, since, until, label, where, whereis, limit))
                 return
             if path == "/api/distinct":
                 dim = (qs.get("dim", ["exe"])[0]).strip()
                 self._send_json(200, _query_distinct(dim))
+                return
+            if path == "/api/drilldown":
+                dim = (qs.get("dim", ["exe"])[0]).strip()
+                value = qs.get("value", [""])[0]
+                since, until, label = _resolve_window(qs)
+                try:
+                    self._send_json(200, _query_drilldown(dim, value, since, until, label))
+                except ValueError as e:
+                    self._send_json(400, {"error": str(e)})
                 return
             if path == "/api/live":
                 # Server-Sent Events stream of live picosnitch events.
@@ -294,9 +561,9 @@ class _ThreadingServer(http.server.ThreadingHTTPServer):
 
 def web_dashboard() -> int:
     """Entry point for `picosnitch webui`."""
-    host = os.getenv("HOST", "localhost")
+    host = os.getenv("PICOSNITCH_HOST", "localhost")
     try:
-        port = int(os.getenv("PORT", "5100"))
+        port = int(os.getenv("PICOSNITCH_PORT", "5100"))
     except ValueError:
         port = 5100
     try:

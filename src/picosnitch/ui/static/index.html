@@ -5,73 +5,234 @@
 <title>picosnitch</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/static/style.css">
+<script>
+  // Apply theme synchronously so we never flash the wrong palette.
+  (function () {
+    var sys = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    var stored = null;
+    try { stored = localStorage.getItem("picosnitch-theme"); } catch (_) {}
+    document.documentElement.dataset.theme = stored || sys;
+  })();
+</script>
 </head>
 <body>
-<header>
-  <h1>picosnitch <span id="version" class="muted"></span></h1>
-  <div id="status" class="muted"></div>
-</header>
-<nav id="tabs">
-  <button class="tab active" data-tab="explore">Explore</button>
-  <button class="tab" data-tab="live">Live</button>
-</nav>
-<main>
-  <section id="tab-explore" class="tab-panel active">
-    <div class="controls">
-      <label>Group by
-        <select id="dim"></select>
-      </label>
-      <label>Range
-        <select id="range"></select>
-      </label>
-      <label>Where
-        <select id="where"><option value="">(none)</option></select>
-      </label>
-      <label>Is
-        <select id="whereis"><option value="">(any)</option></select>
-      </label>
-      <label>Top N
-        <input id="limit" type="number" min="1" max="200" value="20">
-      </label>
-      <label>Auto-refresh
-        <select id="autorefresh">
-          <option value="0">off</option>
-          <option value="5">5s</option>
-          <option value="15" selected>15s</option>
-          <option value="30">30s</option>
-          <option value="60">60s</option>
-          <option value="300">5m</option>
-        </select>
-      </label>
-      <button id="refresh">Refresh</button>
+
+<aside class="nav">
+  <div class="brand">picosnitch <span id="version" class="ver"></span></div>
+  <div class="heading">View</div>
+  <ul id="view-tabs">
+    <li class="tab active" data-tab="overview">Overview</li>
+    <li class="tab" data-tab="explore">Explore</li>
+    <li class="tab" data-tab="live">Live feed</li>
+  </ul>
+
+  <div class="heading group-only">Group by</div>
+  <ul id="group-by" class="group-only"></ul>
+
+  <div class="heading group-only">Filter</div>
+  <div class="group-pad group-only">
+    <select id="where"><option value="">(none)</option></select>
+    <select id="whereis" style="margin-top:4px;"><option value="">(any)</option></select>
+  </div>
+</aside>
+
+<div class="main">
+  <header class="chrome-header">
+    <h1 id="page-title">Overview</h1>
+    <div class="meta">
+      <details class="settings-pop range-pop" id="range-pop">
+        <summary id="range-summary" title="Change time range">last 1h</summary>
+        <div class="pop range-pop-body">
+          <div class="pop-section">
+            <div class="pop-section-title">Quick range</div>
+            <div class="range-presets" id="range-presets"></div>
+          </div>
+          <hr>
+          <div class="pop-section">
+            <div class="pop-section-title">Custom date range</div>
+            <div class="range-custom">
+              <label>From <input type="date" id="range-from"></label>
+              <label>To <input type="date" id="range-to"></label>
+              <button class="btn primary" id="range-apply">Apply</button>
+            </div>
+            <div class="hint">Leave “To” blank for up to now. Selecting a single day shows that whole day.</div>
+          </div>
+        </div>
+      </details>
+      <span><b>uptime</b> <span id="meta-uptime">—</span></span>
+      <span><b>db</b> <span id="meta-db">—</span></span>
+      <span><b>events/s</b> <span id="meta-rate">—</span></span>
+      <button class="btn theme-btn" id="theme-toggle" title="Toggle dark / light">
+        <span data-theme-icon>☾</span>
+      </button>
     </div>
-    <div id="charts">
-      <h2>Bytes sent</h2>
-      <div id="chart-send"></div>
-      <h2>Bytes received</h2>
-      <div id="chart-recv"></div>
-      <h2>Totals</h2>
-      <table id="totals">
-        <thead><tr><th id="totals-head">Value</th><th>Sent</th><th>Received</th></tr></thead>
-        <tbody></tbody>
-      </table>
+  </header>
+
+  <!-- ── Overview tab ─────────────────────────────────────────── -->
+  <section id="tab-overview" class="tab-panel active">
+    <div class="body">
+      <div class="kpi-row">
+        <div class="kpi"><div class="label">Bytes sent</div><div class="value" id="kpi-sent">—</div><div class="delta muted">last <span class="kpi-range">1h</span></div></div>
+        <div class="kpi"><div class="label">Bytes received</div><div class="value" id="kpi-recv">—</div><div class="delta muted">last <span class="kpi-range">1h</span></div></div>
+        <div class="kpi"><div class="label">Connections</div><div class="value" id="kpi-conns">—</div><div class="delta muted">last <span class="kpi-range">1h</span></div></div>
+        <div class="kpi"><div class="label">Active processes</div><div class="value" id="kpi-procs">—</div><div class="delta muted">netns: <span id="kpi-netns">—</span></div></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="chart-wrap">
+          <div class="chart-head">
+            <h3 id="overview-chart-title">Bytes received · top contributors</h3>
+            <div class="metric-toggle" data-metric-target="overview">
+              <button data-metric="r" class="active">Received</button>
+              <button data-metric="s">Sent</button>
+              <button data-metric="t">Total</button>
+            </div>
+          </div>
+          <div id="overview-chart"></div>
+        </div>
+        <div class="chart-wrap">
+          <h3>Top contributors</h3>
+          <div id="overview-legend" class="legend"></div>
+        </div>
+      </div>
+
+      <div class="chart-wrap" style="margin-top:14px;">
+        <h3>Totals · group by executable</h3>
+        <table class="data" id="overview-table">
+          <thead><tr>
+            <th>Process</th>
+            <th class="right">Connections</th>
+            <th class="right">Sent</th>
+            <th class="right">Received</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
-  <section id="tab-live" class="tab-panel">
-    <div class="controls">
-      <button id="live-toggle">Start live feed</button>
-      <span id="live-status" class="muted">stopped</span>
-      <span class="muted">events: <span id="live-count">0</span></span>
+  <!-- ── Explore tab ──────────────────────────────────────────── -->
+  <section id="tab-explore" class="tab-panel">
+    <div class="body explore-body">
+      <div class="explore-main">
+        <div class="controls-row">
+          <span class="crumb">Group: <b id="explore-group">Executable</b> · Range: <b id="explore-range">1h</b></span>
+          <span class="grow"></span>
+          <label class="muted" style="font-size:0.85em;">Auto
+            <select id="autorefresh">
+              <option value="0">off</option>
+              <option value="5">5s</option>
+              <option value="15" selected>15s</option>
+              <option value="30">30s</option>
+              <option value="60">60s</option>
+              <option value="300">5m</option>
+            </select>
+          </label>
+          <button id="refresh" class="btn primary">Refresh</button>
+        </div>
+
+        <div class="chart-wrap">
+          <div class="chart-head">
+            <h3 id="explore-chart-title">Bytes received</h3>
+            <div class="metric-toggle" data-metric-target="explore">
+              <button data-metric="r" class="active">Received</button>
+              <button data-metric="s">Sent</button>
+              <button data-metric="t">Total</button>
+            </div>
+          </div>
+          <div id="chart-main"></div>
+        </div>
+
+        <div class="chart-wrap" style="margin-top:12px; padding:0;">
+          <table class="data" id="totals">
+            <thead><tr>
+              <th id="totals-head">Value</th>
+              <th class="right">Sent</th>
+              <th class="right">Received</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <aside class="drilldown" id="drilldown-pane">
+        <div class="drilldown-empty muted">
+          Click a row in the table to drill down.
+        </div>
+      </aside>
     </div>
-    <div id="live-error" class="notice" style="display:none"></div>
-    <table id="live-table">
-      <thead><tr><th>Time</th><th>Name</th><th>Parent</th><th>Grandparent</th><th>Remote</th><th>Sent</th><th>Recv</th></tr></thead>
-      <tbody></tbody>
-    </table>
   </section>
-</main>
-<footer class="muted" id="footer"></footer>
+
+  <!-- ── Live tab ─────────────────────────────────────────────── -->
+  <section id="tab-live" class="tab-panel">
+    <div class="body">
+      <div class="topbar">
+        <button class="btn primary" id="live-toggle">Start live feed</button>
+        <button class="btn" id="live-clear" title="Clear all events and aggregate">Clear</button>
+        <span id="live-status" class="muted">stopped</span>
+        <input type="text" id="live-filter" placeholder="filter (substring across process, remote, etc.)" autocomplete="off" style="flex:1; min-width:180px;">
+        <span class="grow"></span>
+        <span class="muted">events: <b id="live-count">0</b></span>
+      </div>
+      <div id="live-error" class="notice" style="display:none"></div>
+      <div class="live-card">
+        <div class="head">
+          <span class="pulse pulse-bad" id="live-pulse"></span>
+          <h2>Live feed</h2>
+          <span class="grow"></span>
+          <div class="stats">
+            <span>events <b id="live-stat-count">0</b></span>
+            <span>shown <b id="live-stat-shown">0</b></span>
+            <span>matched <b id="live-stat-matched">0</b></span>
+          </div>
+        </div>
+        <div class="live-split">
+          <div class="live-summary-wrap">
+            <div class="live-summary-head">
+              <h3>By process</h3>
+              <span class="muted" style="font-size:0.78em;">click to filter</span>
+            </div>
+            <table class="data live-summary" id="live-summary">
+              <thead><tr>
+                <th>Process</th>
+                <th class="right">Conn</th>
+                <th class="right">Sent</th>
+                <th class="right">Recv</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="live-recent-wrap">
+            <div class="live-summary-head">
+              <h3>Recent events</h3>
+              <span class="muted" style="font-size:0.78em;" id="live-buffer-info">—</span>
+            </div>
+            <table class="data live-table" id="live-table">
+              <thead><tr>
+                <th>Time</th>
+                <th>Process</th>
+                <th>Parent</th>
+                <th>Grandparent</th>
+                <th>Remote</th>
+                <th class="right">Sent</th>
+                <th class="right">Recv</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="statusbar">
+    <span class="seg"><span class="pulse" id="status-pulse"></span><b id="status-text">starting…</b></span>
+    <span class="seg">events/s <b id="status-rate">—</b></span>
+    <span class="seg">db <b id="status-db">—</b></span>
+    <span class="grow"></span>
+  </div>
+</div>
+
 <script src="/static/app.js"></script>
 </body>
 </html>
