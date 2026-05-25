@@ -1,0 +1,116 @@
+## Tach configuration: see https://docs.gauge.sh/usage/configuration
+## Module layering for picosnitch. Run `tach check` to enforce.
+## Dependencies are populated by `tach sync`.
+
+exclude = [
+    "**/__pycache__",
+    "**/*__pycache__",
+    "**/tests",
+    "**/docs",
+    "**/build",
+    "**/dist",
+    ".venv",
+]
+source_roots = ["src"]
+exact = true
+forbid_circular_dependencies = true
+
+[[modules]]
+path = "picosnitch"
+depends_on = []
+
+[[modules]]
+path = "picosnitch.constants"
+depends_on = ["picosnitch"]
+
+[[modules]]
+path = "picosnitch.types"
+depends_on = []
+
+[[modules]]
+path = "picosnitch.bpf_wrapper"
+depends_on = []
+
+[[modules]]
+path = "picosnitch.config"
+depends_on = ["picosnitch.constants"]
+
+[[modules]]
+path = "picosnitch.utils"
+depends_on = ["picosnitch.config", "picosnitch.types", "picosnitch.constants"]
+
+[[modules]]
+path = "picosnitch.live_feed"
+depends_on = ["picosnitch.constants"]
+
+[[modules]]
+path = "picosnitch.daemon"
+depends_on = []
+
+[[modules]]
+path = "picosnitch.process_manager"
+depends_on = []
+
+[[modules]]
+path = "picosnitch.main_loop"
+depends_on = ["picosnitch.subprocesses.secondary", "picosnitch.subprocesses.virustotal", "picosnitch.types", "picosnitch.subprocesses.fuse", "picosnitch.subprocesses.notifications", "picosnitch.config", "picosnitch.process_manager", "picosnitch.constants", "picosnitch.subprocesses.monitor", "picosnitch.subprocesses.primary"]
+
+[[modules]]
+path = "picosnitch.cli"
+depends_on = ["picosnitch.utils", "picosnitch.ui.webui", "picosnitch.ui.top", "picosnitch.config", "picosnitch.constants", "picosnitch.bpf_wrapper", "picosnitch.ui.tui", "picosnitch.daemon", "picosnitch.main_loop"]
+
+[[modules]]
+path = "picosnitch.__main__"
+depends_on = ["picosnitch.cli"]
+
+[[modules]]
+path = "picosnitch.subprocesses"
+depends_on = []
+
+[[modules]]
+path = "picosnitch.subprocesses.monitor"
+depends_on = ["picosnitch.bpf_wrapper", "picosnitch.constants", "picosnitch.utils", "picosnitch.config"]
+
+[[modules]]
+path = "picosnitch.subprocesses.primary"
+depends_on = ["picosnitch.types", "picosnitch.config", "picosnitch.utils", "picosnitch.live_feed"]
+
+[[modules]]
+path = "picosnitch.subprocesses.secondary"
+depends_on = ["picosnitch.config", "picosnitch.utils", "picosnitch.constants", "picosnitch.types", "picosnitch.process_manager"]
+
+[[modules]]
+path = "picosnitch.subprocesses.fuse"
+depends_on = ["picosnitch.config", "picosnitch.utils"]
+
+[[modules]]
+path = "picosnitch.subprocesses.virustotal"
+depends_on = ["picosnitch.utils", "picosnitch.config"]
+
+[[modules]]
+path = "picosnitch.subprocesses.notifications"
+depends_on = ["picosnitch.config", "picosnitch.utils"]
+
+[[modules]]
+path = "picosnitch.ui"
+depends_on = []
+
+[[modules]]
+path = "picosnitch.ui.top"
+depends_on = ["picosnitch.ui._keys", "picosnitch.constants", "picosnitch.ui._chrome", "picosnitch.live_feed"]
+
+[[modules]]
+path = "picosnitch.ui.tui"
+depends_on = ["picosnitch.constants", "picosnitch.config", "picosnitch.live_feed", "picosnitch.ui._chrome", "picosnitch.ui._keys", "picosnitch.utils"]
+
+[[modules]]
+path = "picosnitch.ui.webui"
+depends_on = ["picosnitch.utils", "picosnitch.constants", "picosnitch.live_feed"]
+
+[[modules]]
+path = "picosnitch.ui._chrome"
+depends_on = []
+
+[[modules]]
+path = "picosnitch.ui._keys"
+depends_on = []

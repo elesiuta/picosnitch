@@ -14,8 +14,9 @@ jobs:
         uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
-      - run: uv tool run ruff check .
-      - run: uv tool run ruff format --diff .
+      - run: uv tool run ruff check
+      - run: uv tool run ruff format --diff
+      - run: uv tool run tach check
 
   build:
     name: Build
