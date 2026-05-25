@@ -97,6 +97,33 @@ struct sendrecv6_event_t {
     __u16 protocol;
 } __attribute__((packed));
 
+// CO-RE compat for possible_net_t: on kernels built with CONFIG_NET_NS=n
+// (or when BTF deduplication drops the field) `possible_net_t` has no
+// `.net` member, which breaks direct field access at compile time.
+// Define local "flavor" types (libbpf ___suffix convention) so the BPF
+// source always compiles; `bpf_core_field_exists` guards the read at load.
+struct possible_net_t___compat {
+    struct net *net;
+};
+
+struct sock_common___compat {
+    struct possible_net_t___compat skc_net;
+};
+
+struct sock___compat {
+    struct sock_common___compat __sk_common;
+};
+
+static __always_inline __u32 read_netns(struct sock *sk) {
+    struct sock___compat *s = (struct sock___compat *)sk;
+    if (!bpf_core_field_exists(s->__sk_common.skc_net.net))
+        return 0;
+    struct net *n = BPF_CORE_READ(s, __sk_common.skc_net.net);
+    if (!n)
+        return 0;
+    return BPF_CORE_READ(n, ns.inum);
+}
+
 // Maps
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -429,7 +456,7 @@ static __always_inline int trace_sendrecv(void *ctx, struct socket *sock, int re
         data.lport = BPF_CORE_READ(sk, __sk_common.skc_num);
         data.dport = __builtin_bswap16(data.dport);
         data.protocol = BPF_CORE_READ(sk, sk_protocol);
-        data.netns = BPF_CORE_READ(sk, __sk_common.skc_net.net, ns.inum);
+        data.netns = read_netns(sk);
 
         if (is_send)
             bpf_perf_event_output(ctx, &sendmsg_events, BPF_F_CURRENT_CPU, &data, sizeof(data));
@@ -462,7 +489,7 @@ static __always_inline int trace_sendrecv(void *ctx, struct socket *sock, int re
         data.lport = BPF_CORE_READ(sk, __sk_common.skc_num);
         data.dport = __builtin_bswap16(data.dport);
         data.protocol = BPF_CORE_READ(sk, sk_protocol);
-        data.netns = BPF_CORE_READ(sk, __sk_common.skc_net.net, ns.inum);
+        data.netns = read_netns(sk);
 
         if (is_send)
             bpf_perf_event_output(ctx, &sendmsg6_events, BPF_F_CURRENT_CPU, &data, sizeof(data));

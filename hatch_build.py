@@ -14,6 +14,12 @@ class BPFBuildHook(BuildHookInterface):
         if self.target_name != "wheel":
             return
 
+        # Skip BPF compilation for editable installs (used by `uv sync` /
+        # dev workflows). The BPF object is only needed for runtime, not
+        # for importing the package during development or testing.
+        if version == "editable" or os.environ.get("PICOSNITCH_SKIP_BPF_BUILD"):
+            return
+
         # The wheel has no C extension linked against glibc -- it ships a
         # precompiled BPF object (kernel bytecode, no userspace linkage) plus
         # pure-Python code that dlopen's libbpf.so via ctypes at runtime.
