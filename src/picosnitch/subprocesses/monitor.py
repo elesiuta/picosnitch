@@ -740,7 +740,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         if event.daddr:
             ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
         else:
-            ip = socket.inet_ntop(socket.AF_INET6, event.daddr6)
+            ip = socket.inet_ntop(socket.AF_INET6, bytes(event.daddr6))
         domain = event.host.decode("utf-8", "replace")
         try:
             ipaddress.ip_address(domain)

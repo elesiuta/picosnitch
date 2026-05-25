@@ -272,8 +272,8 @@ class SendRecv6Event(ctypes.Structure):
         ("comm", ctypes.c_char * 16),
         ("pcomm", ctypes.c_char * 16),
         ("gpcomm", ctypes.c_char * 16),
-        ("daddr", ctypes.c_char * 16),  # 128-bit IPv6 address as bytes
-        ("saddr", ctypes.c_char * 16),  # 128-bit IPv6 address as bytes
+        ("daddr", ctypes.c_ubyte * 16),  # 128-bit IPv6 address as bytes
+        ("saddr", ctypes.c_ubyte * 16),  # 128-bit IPv6 address as bytes
         ("ino", ctypes.c_uint64),
         ("pino", ctypes.c_uint64),
         ("gpino", ctypes.c_uint64),
@@ -299,7 +299,7 @@ class DNSEvent(ctypes.Structure):
     _fields_ = [
         ("host", ctypes.c_char * 80),
         ("daddr", ctypes.c_uint32),
-        ("daddr6", ctypes.c_char * 16),  # 128-bit IPv6 address as bytes
+        ("daddr6", ctypes.c_ubyte * 16),  # 128-bit IPv6 address as bytes
     ]
 
 

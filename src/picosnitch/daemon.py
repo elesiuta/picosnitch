@@ -48,11 +48,15 @@ class Daemon:
         os.dup2(si.fileno(), sys.stdin.fileno())
         os.dup2(so.fileno(), sys.stdout.fileno())
         os.dup2(se.fileno(), sys.stderr.fileno())
-        # write pidfile
+        # write pidfile (world-readable so non-root `picosnitch status` works)
         atexit.register(self.delpid)
         pid = str(os.getpid())
         with open(self.pidfile, "w+") as f:
             f.write(pid + "\n")
+        try:
+            os.chmod(self.pidfile, 0o644)
+        except OSError:
+            pass
 
     def delpid(self) -> None:
         self.pidfile.unlink(missing_ok=True)

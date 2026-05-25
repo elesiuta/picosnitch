@@ -339,6 +339,10 @@ def start_picosnitch() -> int:
             RUN_DIR.mkdir(parents=True, exist_ok=True)
             with open(pid_file, "w") as f:
                 f.write(str(os.getpid()) + "\n")
+            try:
+                os.chmod(pid_file, 0o644)
+            except OSError:
+                pass
             logging.info("starting picosnitch in simple mode")
             logging.info(f"config: {CONFIG_DIR}")
             logging.info(f"data: {DATA_DIR}")
