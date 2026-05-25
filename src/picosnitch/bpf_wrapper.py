@@ -15,7 +15,6 @@ import subprocess
 import sys
 import traceback
 from pathlib import Path
-from typing import Callable, Dict, Optional
 
 
 def _detect_distro() -> str:
@@ -102,7 +101,7 @@ def check_bpf_requirements() -> None:
     find_bpf_object()
 
 
-def compile_bpf(output_path: Optional[str] = None, arch: Optional[str] = None) -> str:
+def compile_bpf(output_path: str | None = None, arch: str | None = None) -> str:
     """
     Compile the BPF CO-RE program from source.
 
@@ -476,7 +475,7 @@ class BPFMap:
             return DNSEvent
         return None
 
-    def open_perf_buffer(self, callback: Callable, lost_cb: Optional[Callable] = None, page_cnt: int = 64):
+    def open_perf_buffer(self, callback, lost_cb=None, page_cnt: int = 64):
         """
         Open a perf buffer for this map with BCC-style API.
 
@@ -512,9 +511,9 @@ class BPFObject:
         self.libbpf = LibBPF()
         self.obj_path = obj_path
         self.obj = None
-        self._programs: Dict[str, ctypes.c_void_p] = {}
-        self._maps: Dict[str, ctypes.c_void_p] = {}
-        self._map_fds: Dict[str, int] = {}
+        self._programs: dict[str, ctypes.c_void_p] = {}
+        self._maps: dict[str, ctypes.c_void_p] = {}
+        self._map_fds: dict[str, int] = {}
         self._links = []
         self._perf_buffers = []
         self._callbacks = []  # Must keep references to prevent garbage collection
@@ -613,7 +612,7 @@ class BPFObject:
         self._links.append(link)
         return link
 
-    def _open_perf_buffer(self, map_name: str, callback: Callable, lost_callback: Optional[Callable], page_cnt: int):
+    def _open_perf_buffer(self, map_name: str, callback, lost_callback, page_cnt: int):
         """Internal: Open a perf buffer for a map."""
         map_fd = self.get_map_fd(map_name)
 
@@ -711,7 +710,7 @@ class BPF:
     This is the primary interface for picosnitch to interact with BPF.
     """
 
-    def __init__(self, src_file: Optional[str] = None, text: Optional[str] = None, obj_file: Optional[str] = None):
+    def __init__(self, src_file: str | None = None, text: str | None = None, obj_file: str | None = None):
         """
         Initialize and load a BPF program.
 

@@ -1,31 +1,22 @@
 Name:           picosnitch
 Version:        1.0.3
 Release:        1%{?dist}
-License:        GPL-3.0
+License:        GPL-3.0-or-later
 Summary:        Monitor network traffic per executable using BPF
 Url:            https://github.com/elesiuta/picosnitch
 Source:         https://github.com/elesiuta/picosnitch/releases/download/v%{version}/picosnitch.tar.gz
-BuildRequires:  python3
-BuildRequires:  python3-devel
-BuildRequires:  python3-setuptools
-Requires:       python3
-Requires:       python3-geoip2
+BuildRequires:  python3-devel >= 3.12
+BuildRequires:  python3-hatchling
+BuildRequires:  python3-pip
+BuildRequires:  python3-wheel
+BuildRequires:  clang
+BuildRequires:  llvm
+BuildRequires:  bpftool
+BuildRequires:  libbpf-devel
+Requires:       python3 >= 3.12
+Requires:       libbpf
+Recommends:     libnotify
 Suggests:       pipx
-
-%if 0%{?fedora}%{?mageia}
-BuildRequires:  python3-wheel
-Requires:       python3-dbus
-%endif
-
-%if 0%{?suse_version}
-BuildRequires:  python3-wheel
-BuildRequires:  python3-curses
-Requires:       python3-curses
-Requires:       python3-dbus-python
-Requires:       bcc-tools
-%else
-Requires:       bcc
-%endif
 
 %if 0%{?fedora}
 BuildRequires:  systemd-rpm-macros
@@ -42,10 +33,10 @@ Monitors your bandwidth, breaking down traffic by executable, hash, parent, doma
 %setup -c -q -n %{name}
 
 %build
-%py3_build
+%pyproject_wheel
 
 %install
-%py3_install
+%pyproject_install
 mkdir -vp %{buildroot}%{_unitdir}
 install -D -m 644 debian/picosnitch.service %{buildroot}%{_unitdir}/%{name}.service
 
@@ -61,8 +52,8 @@ install -D -m 644 debian/picosnitch.service %{buildroot}%{_unitdir}/%{name}.serv
 %files -n picosnitch
 %license LICENSE
 %doc README.md
-%{python3_sitelib}/picosnitch-*.egg-info/
 %{python3_sitelib}/picosnitch/
+%{python3_sitelib}/picosnitch-*.dist-info/
 /usr/bin/picosnitch
 %{_unitdir}/%{name}.service
 

@@ -5,72 +5,57 @@ from __future__ import annotations
 import logging
 import multiprocessing
 import queue
+import shutil
+import subprocess
 
 from picosnitch.config import Config
 
 
+def _send_notification(msg: str) -> None:
+    """fire-and-forget desktop notification via libnotify's notify-send"""
+    subprocess.run(
+        ["notify-send", "--app-name=picosnitch", "--expire-time=2000", "picosnitch", msg],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 def run_notifications(config: Config, q_error: multiprocessing.Queue[str], q_in: multiprocessing.Queue[str], _q_out: multiprocessing.Queue) -> int:
-    """notification subprocess: drops root then sends desktop notifications via D-Bus"""
+    """notification subprocess: drops root then sends desktop notifications via notify-send (libnotify)"""
     parent_process = multiprocessing.parent_process()
     assert parent_process is not None
-    # drop root before importing dbus
     if config.desktop.user:
         from ..utils import drop_root_permanent, resolve_group, resolve_owner
 
         uid = resolve_owner(config.desktop.user)
         gid = resolve_group(config.desktop.user)
         drop_root_permanent(uid, gid)
-    # try to set up dbus notifications
-    dbus_ready = False
-    system_notification = None
-    if config.desktop.notifications:
-        try:
-            import dbus  # ty: ignore[unresolved-import]
-
-            dbus_session_obj = dbus.SessionBus().get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications")
-            interface = dbus.Interface(dbus_session_obj, "org.freedesktop.Notifications")
-
-            def system_notification(msg):
-                return interface.Notify("picosnitch", 0, "", "picosnitch", msg, [], [], 2000)
-
-            dbus_ready = True
-        except Exception:
-            pass
+    notifier_ready = bool(config.desktop.notifications) and shutil.which("notify-send") is not None
     last_notification = ""
-    pending = []
+    pending: list[str] = []
     while True:
         if not parent_process.is_alive():
             return 0
         try:
             msg = q_in.get(block=True, timeout=15)
-            if dbus_ready:
+            if notifier_ready:
                 if msg != last_notification:
                     last_notification = msg
-                    system_notification(msg)  # ty: ignore[call-non-callable]
+                    _send_notification(msg)
             else:
                 logging.warning(msg)
                 pending.append(msg)
-                if config.desktop.notifications:
-                    try:
-                        import dbus  # ty: ignore[unresolved-import]
-
-                        dbus_session_obj = dbus.SessionBus().get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications")
-                        interface = dbus.Interface(dbus_session_obj, "org.freedesktop.Notifications")
-
-                        def system_notification(msg):
-                            return interface.Notify("picosnitch", 0, "", "picosnitch", msg, [], [], 2000)
-
-                        dbus_ready = True
-                        for queued_msg in pending:
-                            try:
-                                if queued_msg != last_notification:
-                                    last_notification = queued_msg
-                                    system_notification(queued_msg)
-                            except Exception:
-                                pass
-                        pending = []
-                    except Exception:
-                        pass
+                if config.desktop.notifications and shutil.which("notify-send") is not None:
+                    notifier_ready = True
+                    for queued_msg in pending:
+                        try:
+                            if queued_msg != last_notification:
+                                last_notification = queued_msg
+                                _send_notification(queued_msg)
+                        except Exception:
+                            pass
+                    pending = []
         except queue.Empty:
             pass
         except Exception as e:

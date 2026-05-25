@@ -19,10 +19,9 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-notifications = ["dbus-python"]
 sql = ["psycopg[binary]", "pymysql"]
-full = [
-    "picosnitch[notifications,sql]"
+all = [
+    "picosnitch[sql]"
 ]
 
 [project.scripts]

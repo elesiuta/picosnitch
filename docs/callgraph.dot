@@ -170,12 +170,8 @@ digraph G {
         subgraph "cluster_picosnitch__subprocesses__notifications" {
 
             graph [style="filled,rounded", fillcolor="#80808018", label="picosnitch.subprocesses.notifications"];
+            "picosnitch__subprocesses__notifications___send_notification" [label="_send_notification", style="filled", fillcolor="#65ffbdb2", fontcolor="#000000", group="6"];
             "picosnitch__subprocesses__notifications__run_notifications" [label="run_notifications", style="filled", fillcolor="#65ffbdb2", fontcolor="#000000", group="6"];
-            subgraph "cluster_picosnitch__subprocesses__notifications__run_notifications" {
-
-                graph [style="filled,rounded", fillcolor="#80808018", label="picosnitch.subprocesses.notifications.run_notifications"];
-                "picosnitch__subprocesses__notifications__run_notifications__system_notification" [label="system_notification", style="filled", fillcolor="#32ffa7b2", fontcolor="#000000", group="6"];
-            }
         }
         subgraph "cluster_picosnitch__subprocesses__primary" {
 
@@ -565,9 +561,9 @@ digraph G {
         "picosnitch__subprocesses__monitor__run_monitor__queue_sendv6_event" -> "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" -> "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" -> "picosnitch__subprocesses__monitor__run_monitor__get_fd" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__notifications" -> "picosnitch__subprocesses__notifications___send_notification" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__notifications" -> "picosnitch__subprocesses__notifications__run_notifications" [style="dashed",  color="#ffffff00"];
-        "picosnitch__subprocesses__notifications__run_notifications" -> "picosnitch__subprocesses__notifications__run_notifications__system_notification" [style="dashed",  color="#ffffff00"];
-        "picosnitch__subprocesses__notifications__run_notifications" -> "picosnitch__subprocesses__notifications__run_notifications__system_notification" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__notifications__run_notifications" -> "picosnitch__subprocesses__notifications___send_notification" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__notifications__run_notifications" -> "picosnitch__utils__drop_root_permanent" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__notifications__run_notifications" -> "picosnitch__utils__resolve_group" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__notifications__run_notifications" -> "picosnitch__utils__resolve_owner" [style="solid",  color="#000000"];

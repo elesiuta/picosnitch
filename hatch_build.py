@@ -23,7 +23,7 @@ class BPFBuildHook(BuildHookInterface):
         # The wheel has no C extension linked against glibc -- it ships a
         # precompiled BPF object (kernel bytecode, no userspace linkage) plus
         # pure-Python code that dlopen's libbpf.so via ctypes at runtime.
-        arch = os.environ.get("BPF_TARGET_ARCH", platform.machine())
+        arch = os.environ.get("PICOSNITCH_BPF_TARGET_ARCH", platform.machine())
         plat_tags = {
             "x86_64": "manylinux_2_34_x86_64",
             "aarch64": "manylinux_2_34_aarch64",
