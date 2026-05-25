@@ -182,6 +182,7 @@ def run_secondary(
 ) -> int:
     """second to receive connection data from monitor, less responsive than primary, coordinates connection data with virustotal subprocess and checks fanotify, updates connection logs and reports sha256/vt_results back to primary subprocess if needed"""
     parent_process = multiprocessing.parent_process()
+    assert parent_process is not None
     # maintain a separate copy of the state dictionary here and coordinate with the primary subprocess (sha256 and vt_results)
     sync_vt_results(state, p_virustotal.q_in, q_primary_in, True)
     # init sql
@@ -336,7 +337,7 @@ def run_secondary(
                         con.close()
                         transaction_success = True
                 except Exception as e:
-                    q_error.put("SQLite execute %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transaction)))
+                    q_error.put("SQLite execute %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?", len(transaction)))
                 try:
                     if sql_kwargs:
                         con = sql.connect(**sql_kwargs)
@@ -367,7 +368,7 @@ def run_secondary(
                         con.close()
                         transaction_success = True
                 except Exception as e:
-                    q_error.put("SQL server execute %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transaction)))
+                    q_error.put("SQL server execute %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?", len(transaction)))
                 try:
                     if config.database.text_log:
                         with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
@@ -378,11 +379,11 @@ def run_secondary(
                                 text_file.write(",".join(clean_entry) + "\n")
                         transaction_success = True
                 except Exception as e:
-                    q_error.put("text log %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno, len(transaction)))
+                    q_error.put("text log %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?", len(transaction)))
                 if transaction_success or log_destinations == 0:
                     transaction = []
                 else:
                     q_error.put("secondary subprocess all log desinations failed, will retry %s entries with next write" % (len(transaction)))
                 last_write = current_write
         except Exception as e:
-            q_error.put("secondary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+            q_error.put("secondary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))

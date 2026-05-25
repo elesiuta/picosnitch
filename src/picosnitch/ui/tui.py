@@ -914,7 +914,7 @@ def tui_loop(stdscr: curses.window) -> int:
             if first_line <= screen_y < max_y - 1:
                 # special-case formatting for known columns
                 if col_sql_now == "c.contime":
-                    name = datetime.datetime.fromtimestamp(name).strftime("%Y-%m-%d %H:%M:%S")
+                    name = datetime.datetime.fromtimestamp(name).strftime("%Y-%m-%d %H:%M:%S")  # ty: ignore[invalid-argument-type]
                 elif isinstance(name, str):
                     name = name.replace("\0", "")
                 elif col_sql_now == "c.uid":
@@ -926,7 +926,7 @@ def tui_loop(stdscr: curses.window) -> int:
                     name = get_remote_label(name)
                 if col_sql_now.endswith(".sha256"):
                     name = f"{name}{vt_status[name]}"
-                value = f"{round_bytes(send, byte_units):>14.14} {round_bytes(recv, byte_units):>14.14}"
+                value = f"{round_bytes(send, byte_units):>14.14} {round_bytes(recv, byte_units):>14.14}"  # ty: ignore[invalid-argument-type]
                 name_w = max(1, main_w - 29)
                 disp = f"{name!s:<{name_w}.{name_w}}{value}"
                 _chrome._safe_addnstr(stdscr, screen_y, main_x, disp, main_w, row_attr)

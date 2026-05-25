@@ -8,7 +8,6 @@ import multiprocessing
 import os
 import pickle
 import queue
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -58,6 +57,7 @@ def _http_post_multipart_file_json(url: str, headers: dict, file_obj, filename: 
 def run_virustotal(config: Config, q_error: multiprocessing.Queue[str], q_vt_pending: multiprocessing.Queue[bytes], q_vt_results: multiprocessing.Queue[bytes]) -> int:
     """get virustotal results of process executable"""
     parent_process = multiprocessing.parent_process()
+    assert parent_process is not None
     if config.desktop.user:
         from ..utils import drop_root_permanent, resolve_group, resolve_owner
 
@@ -124,7 +124,7 @@ def run_virustotal(config: Config, q_error: multiprocessing.Queue[str], q_vt_pen
             # daemon=True flag for multiprocessing.Process does not work after root privileges are dropped for parent
             pass
         except Exception as e:
-            q_error.put("VT %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+            q_error.put("VT %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
             try:
                 analysis = str(analysis)
             except Exception:

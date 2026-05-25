@@ -5,7 +5,6 @@ from __future__ import annotations
 import multiprocessing
 import pickle
 import queue
-import sys
 
 from picosnitch.config import Config
 from picosnitch.utils import get_sha256_fd, get_sha256_pid
@@ -14,6 +13,7 @@ from picosnitch.utils import get_sha256_fd, get_sha256_pid
 def run_fuse(config: Config, q_error: multiprocessing.Queue[str], q_in: multiprocessing.Queue[bytes], q_out: multiprocessing.Queue[str]) -> int:
     """runs as user to read executables for FUSE/AppImage (since real, effective, and saved UID must match)"""
     parent_process = multiprocessing.parent_process()
+    assert parent_process is not None
     if config.desktop.user:
         from ..utils import drop_root_permanent, resolve_group, resolve_owner
 
@@ -34,4 +34,4 @@ def run_fuse(config: Config, q_error: multiprocessing.Queue[str], q_in: multipro
         except queue.Empty:
             pass
         except Exception as e:
-            q_error.put("rfuse subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+            q_error.put("rfuse subprocess %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))

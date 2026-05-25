@@ -229,6 +229,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     except (ValueError, OSError):
         pass
     parent_process = multiprocessing.parent_process()
+    assert parent_process is not None
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
     event_pipe_0, event_pipe_1, event_pipe_2, event_pipe_3, event_pipe_4 = event_pipes
     EVERY_EXE: typing.Final[bool] = config.monitoring.every_exe
@@ -451,9 +452,10 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         b = BPF(obj_file=bpf_obj_path)
         b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
     except Exception as e:
-        q_error.put("Init BPF %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+        q_error.put("Init BPF %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
         time.sleep(5)
-        os.kill(parent_process.pid, signal.SIGTERM)
+        if parent_process.pid is not None:
+            os.kill(parent_process.pid, signal.SIGTERM)
         raise e
     use_getaddrinfo_uprobe = False
     try:
@@ -759,4 +761,4 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         try:
             b.perf_buffer_poll(timeout=1000)
         except Exception as e:
-            q_error.put("BPF %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+            q_error.put("BPF %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))

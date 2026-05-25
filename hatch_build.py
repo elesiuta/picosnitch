@@ -4,7 +4,7 @@ import os
 import platform
 import subprocess
 
-from hatchling.builders.hooks.plugin.interface import BuildHookInterface
+from hatchling.builders.hooks.plugin.interface import BuildHookInterface  # ty: ignore[unresolved-import]
 
 
 class BPFBuildHook(BuildHookInterface):

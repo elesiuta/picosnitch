@@ -47,7 +47,7 @@ STARTUP_WAIT = 8  # seconds to wait for picosnitch to fully start
 TRAFFIC_WAIT = 3  # seconds to wait after network activity
 
 
-def get_executable_hash(exe_path: str) -> str:
+def get_executable_hash(exe_path: str) -> str | None:
     """Calculate SHA256 hash of an executable file."""
     sha256 = hashlib.sha256()
     try:
@@ -59,7 +59,7 @@ def get_executable_hash(exe_path: str) -> str:
         return None
 
 
-def find_executable(name: str) -> str:
+def find_executable(name: str) -> str | None:
     """Find the full path to an executable."""
     result = subprocess.run(["which", name], capture_output=True, text=True)
     if result.returncode == 0:
@@ -129,6 +129,7 @@ request_limit_seconds = 15
         f.write(config_toml)
 
     proc = subprocess.Popen([PYTHON_EXE, "-m", "picosnitch", "start-no-daemon"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert proc.stdout is not None and proc.stderr is not None
 
     # wait for the events socket to appear -- means primary subprocess is listening
     events_sock = RUN_DIR / "events.sock"
@@ -409,7 +410,7 @@ class TestGrandparentTracking:
                 self.end_headers()
                 self.wfile.write(b"ok")
 
-            def log_message(self, *_):
+            def log_message(self, format, *args):
                 pass
 
         server = socketserver.TCPServer(("127.0.0.1", 0), _Quiet)

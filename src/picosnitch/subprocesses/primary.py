@@ -80,6 +80,7 @@ def run_primary(
         pass
     # init variables for loop
     parent_process = multiprocessing.parent_process()
+    assert parent_process is not None
     live_feed = LiveFeedPublisher(group=config.data.group)
     live_feed.start()
     state_record = pickle.dumps(
@@ -214,6 +215,6 @@ def run_primary(
                     write_record = False
                 last_write = time.time()
         except Exception as e:
-            q_error.put("primary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+            q_error.put("primary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
     # clean exit after shutdown_event was set (by signal handler)
     save_state_and_exit(state, q_error, event_pipes)

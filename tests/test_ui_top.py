@@ -48,7 +48,7 @@ def _run_top_in_pty(events: list[dict], keystrokes: bytes, deadline_s: float) ->
             from picosnitch.ui.top import _top_loop
 
             sub = _StubSub(events)
-            rc = curses.wrapper(_top_loop, sub)
+            rc = curses.wrapper(_top_loop, sub)  # ty: ignore[invalid-argument-type]
             os._exit(0 if rc == 0 else 1)
         except SystemExit:
             raise

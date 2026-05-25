@@ -57,6 +57,8 @@ class LiveFeedPublisher:
 
     def _accept_loop(self) -> None:
         while not self._stopped.is_set():
+            if self._sock is None:
+                return
             try:
                 conn, _ = self._sock.accept()
             except OSError:

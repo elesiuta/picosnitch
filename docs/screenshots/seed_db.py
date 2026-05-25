@@ -202,12 +202,14 @@ def main() -> int:
     def domain_id(value: str) -> int:
         if value not in domain_ids:
             cur.execute("INSERT INTO domains (domain) VALUES (?)", (value,))
+            assert cur.lastrowid is not None
             domain_ids[value] = cur.lastrowid
         return domain_ids[value]
 
     def addr_id(value: str) -> int:
         if value not in addr_ids:
             cur.execute("INSERT INTO addresses (addr) VALUES (?)", (value,))
+            assert cur.lastrowid is not None
             addr_ids[value] = cur.lastrowid
         return addr_ids[value]
 

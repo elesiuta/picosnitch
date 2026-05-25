@@ -135,6 +135,9 @@ def load_config(config_dir: Path = CONFIG_DIR) -> Config:
                     # skip type check for parameterized generics (e.g. list[int])
                     if hasattr(expected_type, "__origin__"):
                         pass
+                    elif not isinstance(expected_type, type):
+                        # field.type may be a forward-ref string under `from __future__ import annotations`
+                        pass
                     elif not isinstance(value, expected_type) or (isinstance(value, bool) and expected_type is not bool):
                         type_name = getattr(expected_type, "__name__", str(expected_type))
                         logging.warning(f"config.{section_name}.{field.name}: expected {type_name}, got {type(value).__name__}, skipping")

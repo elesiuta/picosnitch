@@ -125,8 +125,8 @@ def load_state() -> State:
             state_record = json.load(json_file)
         for key in ["Executables", "Names", "Parent Executables", "Parent Names", "Grandparent Executables", "Grandparent Names", "SHA256"]:
             if key in state_record:
-                data[key] = state_record[key]
-            if not isinstance(data[key], dict):
+                data[key] = state_record[key]  # ty: ignore[invalid-key]
+            if not isinstance(data[key], dict):  # ty: ignore[invalid-key]
                 logging.error("Invalid state.json")
                 sys.exit(1)
     return data
@@ -272,7 +272,7 @@ def get_fanotify_events(fan_fd: int, fan_mod_cnt: dict[str, int], q_error: multi
             fan_mod_cnt[f"{st_dev} {st_ino}"] += 1
             os.close(fanotify_event_metadata.fd)
         except Exception as e:
-            q_error.put("Fanotify Event %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+            q_error.put("Fanotify Event %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
 
 
 def sync_vt_results(state: State, q_vt: multiprocessing.Queue[bytes], q_out: multiprocessing.Queue[bytes], check_pending: bool = False) -> None:

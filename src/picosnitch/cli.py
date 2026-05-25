@@ -315,7 +315,7 @@ def start_picosnitch() -> int:
                 con.commit()
                 con.close()
             except Exception as e:
-                logging.warning(f"{type(e).__name__}{e.args} on line {sys.exc_info()[2].tb_lineno}")
+                logging.warning(f"{type(e).__name__}{e.args} on line {e.__traceback__.tb_lineno if e.__traceback__ else '?'}")
         apply_data_permissions(CONFIG_DIR, DATA_DIR, LOG_DIR, CACHE_DIR)
         # dispatch
         if cmd == "start":

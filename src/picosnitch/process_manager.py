@@ -7,13 +7,15 @@ import multiprocessing.connection
 import os
 
 
-def _read_proc_stat_state(pid: int) -> str:
+def _read_proc_stat_state(pid: int | None) -> str:
     """Read the single-character state field (3rd field) from /proc/{pid}/stat.
 
     The stat format is: pid (comm) state ppid ... where comm may itself
     contain spaces and parentheses. Splitting on the last `)` works around
     that since state is always the next token.
     """
+    if pid is None:
+        return ""
     try:
         with open(f"/proc/{pid}/stat", "r") as f:
             return f.read().rsplit(")", 1)[1].split()[0]
@@ -21,8 +23,10 @@ def _read_proc_stat_state(pid: int) -> str:
         return ""
 
 
-def _read_proc_rss_bytes(pid: int) -> int:
+def _read_proc_rss_bytes(pid: int | None) -> int:
     """Resident set size in bytes from /proc/{pid}/statm field 2 (pages)."""
+    if pid is None:
+        return 0
     try:
         with open(f"/proc/{pid}/statm", "r") as f:
             rss_pages = int(f.read().split()[1])

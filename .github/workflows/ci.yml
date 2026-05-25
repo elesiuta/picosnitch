@@ -17,6 +17,7 @@ jobs:
       - run: uv tool run ruff check
       - run: uv tool run ruff format --diff
       - run: uv tool run tach check
+      - run: uv tool run ty check
 
   build:
     name: Build

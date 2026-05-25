@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import multiprocessing
 import queue
-import sys
 
 from picosnitch.config import Config
 
@@ -13,6 +12,7 @@ from picosnitch.config import Config
 def run_notifications(config: Config, q_error: multiprocessing.Queue[str], q_in: multiprocessing.Queue[str], _q_out: multiprocessing.Queue) -> int:
     """notification subprocess: drops root then sends desktop notifications via D-Bus"""
     parent_process = multiprocessing.parent_process()
+    assert parent_process is not None
     # drop root before importing dbus
     if config.desktop.user:
         from ..utils import drop_root_permanent, resolve_group, resolve_owner
@@ -25,7 +25,7 @@ def run_notifications(config: Config, q_error: multiprocessing.Queue[str], q_in:
     system_notification = None
     if config.desktop.notifications:
         try:
-            import dbus
+            import dbus  # ty: ignore[unresolved-import]
 
             dbus_session_obj = dbus.SessionBus().get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications")
             interface = dbus.Interface(dbus_session_obj, "org.freedesktop.Notifications")
@@ -46,13 +46,13 @@ def run_notifications(config: Config, q_error: multiprocessing.Queue[str], q_in:
             if dbus_ready:
                 if msg != last_notification:
                     last_notification = msg
-                    system_notification(msg)
+                    system_notification(msg)  # ty: ignore[call-non-callable]
             else:
                 logging.warning(msg)
                 pending.append(msg)
                 if config.desktop.notifications:
                     try:
-                        import dbus
+                        import dbus  # ty: ignore[unresolved-import]
 
                         dbus_session_obj = dbus.SessionBus().get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications")
                         interface = dbus.Interface(dbus_session_obj, "org.freedesktop.Notifications")
@@ -74,4 +74,4 @@ def run_notifications(config: Config, q_error: multiprocessing.Queue[str], q_in:
         except queue.Empty:
             pass
         except Exception as e:
-            q_error.put("notification subprocess %s%s on line %s" % (type(e).__name__, str(e.args), sys.exc_info()[2].tb_lineno))
+            q_error.put("notification subprocess %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
