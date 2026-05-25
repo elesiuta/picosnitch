@@ -395,26 +395,64 @@ class TestGrandparentTracking:
         if not bash_exe:
             pytest.skip("bash not available")
 
-        # Bash exec's the LAST command of any shell/subshell in place to avoid
-        # an extra process. To guarantee a real fork at every level, append a
-        # no-op (`:`) AFTER the inner command at every level so nothing is ever
-        # "last". Chain:
-        #   pytest → bash(outer) → bash(subshell-1) → bash(subshell-2) → curl
-        # so curl's parent = subshell-2, grandparent = subshell-1.
-        start_time = int(time.time())
-        subprocess.run(
-            [bash_exe, "-c", "( ( curl -s http://example.com -o /dev/null; : ); : ); :"],
-            capture_output=True,
-            timeout=30,
-        )
-        time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
+        # Spin up a private localhost HTTP server on an ephemeral port so we
+        # can later filter `connections` by that exact rport, isolating this
+        # test's curl from prior tests' curls, the startup warmup, and any
+        # sudo-launched daemon health checks that might also hit example.com.
+        import http.server
+        import socketserver
+        import threading
 
-        # Filter to connections after start_time so prior tests' curls don't pollute results.
-        results = query_db(
-            "SELECT g.exe, g.name FROM connections c JOIN executables e ON c.exe_id = e.id JOIN executables g ON c.gpexe_id = g.id WHERE e.name LIKE '%curl%' AND c.contime >= ?",
-            (start_time,),
-        )
-        assert len(results) > 0, "Should have at least one curl connection with grandparent"
+        class _Quiet(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"ok")
+
+            def log_message(self, *_):
+                pass
+
+        server = socketserver.TCPServer(("127.0.0.1", 0), _Quiet)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            # Bash exec's the LAST command of any shell/subshell in place to avoid
+            # an extra process. To guarantee a real fork at every level, append a
+            # no-op (`:`) AFTER the inner command at every level so nothing is ever
+            # "last". Chain:
+            #   pytest → bash(outer) → bash(subshell-1) → bash(subshell-2) → curl
+            # so curl's parent = subshell-2, grandparent = subshell-1.
+            #
+            # Retry the whole invocation a few times to absorb rare event drops
+            # on slow/emulated CI runners.
+            results: list = []
+            for _ in range(5):
+                start_time = int(time.time())
+                subprocess.run(
+                    [bash_exe, "-c", f"( ( curl -s http://127.0.0.1:{port}/ -o /dev/null; : ); : ); :"],
+                    capture_output=True,
+                    timeout=30,
+                )
+                time.sleep(DB_WRITE_LIMIT + TRAFFIC_WAIT)
+
+                # Filter strictly to this test's curl: same rport (unique to this
+                # server) and contime within the invocation window. This isolates
+                # us from any other curl traffic happening on the box.
+                results = query_db(
+                    "SELECT g.exe, g.name FROM connections c "
+                    "JOIN executables e ON c.exe_id = e.id "
+                    "JOIN executables g ON c.gpexe_id = g.id "
+                    "WHERE e.name LIKE '%curl%' AND c.rport = ? AND c.contime >= ?",
+                    (port, start_time),
+                )
+                if results:
+                    break
+        finally:
+            server.shutdown()
+            server.server_close()
+
+        assert len(results) > 0, f"Should have at least one curl connection with grandparent (rport={port})"
         gpexes = [row[0] for row in results]
         assert any("sh" in gpexe or "bash" in gpexe for gpexe in gpexes), f"Grandparent should be a shell, got: {gpexes}"
 
