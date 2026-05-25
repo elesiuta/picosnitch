@@ -75,7 +75,7 @@ class Daemon:
         # Check for a pidfile to see if the daemon already runs
         pid = self.getpid()
         if pid:
-            message = f"pidfile {self.pidfile} already exist. picosnitch already running?"
+            message = f"pidfile {self.pidfile} already exists. picosnitch already running?"
             logging.error(message)
             sys.exit(1)
         # Start the daemon
@@ -120,7 +120,7 @@ class Daemon:
             if "picosnitch" in cmdline:
                 logging.info(f"picosnitch is currently running with pid {pid}.")
             else:
-                logging.info("pidfile exists however picosnitch was not detected.")
+                logging.info("pidfile exists but no picosnitch process is running.")
         else:
             logging.info("picosnitch does not appear to be running.")
 

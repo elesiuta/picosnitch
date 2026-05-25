@@ -218,7 +218,7 @@ def start_picosnitch() -> int:
     # nix platform checks
     if sys.executable.startswith("/nix/"):
         if cmd in ("start", "stop", "restart"):
-            logging.warning("built in daemon mode is not supported on Nix, use picosnitch start-no-daemon or systemctl instead")
+            logging.warning("built-in daemon mode is not supported on Nix, use picosnitch start-no-daemon or systemctl instead")
         if cmd == "systemd":
             logging.error("Command not supported on Nix, add `services.picosnitch.enable = true;` to your Nix configuration")
             return 2
@@ -245,7 +245,8 @@ def start_picosnitch() -> int:
         with open("/usr/lib/systemd/system/picosnitch.service", "w") as f:
             f.write(systemd_service)
         subprocess.run(["systemctl", "daemon-reload"])
-        logging.info("Wrote /usr/lib/systemd/system/picosnitch.service\nYou can now run picosnitch using systemctl")
+        logging.info("Wrote /usr/lib/systemd/system/picosnitch.service")
+        logging.info("Enable on boot and start now with: sudo systemctl enable --now picosnitch")
         return 0
     elif cmd == "stop":
         if err := check_root(cmd):
@@ -264,7 +265,10 @@ def start_picosnitch() -> int:
             if active:
                 logging.info("picosnitch.service is active under systemd; killing the pid would just be respawned by Restart=always")
                 if sys.stdin.isatty():
-                    confirm = input("Run `systemctl stop picosnitch` instead (Y/n)? ")
+                    try:
+                        confirm = input("Run `systemctl stop picosnitch` instead (Y/n)? ")
+                    except EOFError:
+                        confirm = ""
                     if not confirm.lower().startswith("n"):
                         subprocess.run(["systemctl", "stop", "picosnitch"])
                         return 0
@@ -287,7 +291,10 @@ def start_picosnitch() -> int:
             if Path("/usr/lib/systemd/system/picosnitch.service").exists() or Path("/etc/systemd/system/picosnitch.service").exists():
                 logging.info("Found picosnitch.service but you are not using systemctl")
                 if sys.stdin.isatty():
-                    confirm = input(f"Did you intend to run `systemctl {cmd} picosnitch` (y/N)? ")
+                    try:
+                        confirm = input(f"Did you intend to run `systemctl {cmd} picosnitch` (y/N)? ")
+                    except EOFError:
+                        confirm = ""
                     if confirm.lower().startswith("y"):
                         subprocess.run(["systemctl", cmd, "picosnitch"])
                         return 0
