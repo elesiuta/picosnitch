@@ -17,7 +17,10 @@ jobs:
       - run: uv tool run ruff check
       - run: uv tool run ruff format --diff
       - run: uv tool run tach check
-      - run: uv tool run ty check
+      # ty needs the project env so it can resolve dev deps (pytest) and the
+      # picosnitch package itself when checking tests/.
+      - run: uv sync
+      - run: uv run ty check
 
   build:
     name: Build
