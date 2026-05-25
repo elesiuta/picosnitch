@@ -128,7 +128,11 @@ def start_picosnitch() -> int:
 
     class PicoDaemon(Daemon):
         def run(self) -> None:
-            main()
+            try:
+                main()
+            except Exception:
+                logging.exception("picosnitch daemon crashed")
+                raise
 
     readme = textwrap.dedent(
         f"""
@@ -317,6 +321,12 @@ def start_picosnitch() -> int:
             except Exception as e:
                 logging.warning(f"{type(e).__name__}{e.args} on line {e.__traceback__.tb_lineno if e.__traceback__ else '?'}")
         apply_data_permissions(CONFIG_DIR, DATA_DIR, LOG_DIR, CACHE_DIR)
+        # log warnings/errors to the existing error.log so failures in the
+        # forked daemon (where stderr is /dev/null) are still visible
+        error_log_handler = logging.FileHandler(LOG_DIR / "error.log")
+        error_log_handler.setLevel(logging.WARNING)
+        error_log_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+        logging.getLogger().addHandler(error_log_handler)
         # dispatch
         if cmd == "start":
             logging.info("starting picosnitch daemon")
