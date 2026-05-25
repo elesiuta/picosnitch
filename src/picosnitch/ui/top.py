@@ -467,7 +467,12 @@ def top_init() -> int:
     sub = LiveFeedSubscriber(timeout=1.0)
     try:
         sub.connect()
-    except (OSError, PermissionError) as e:
+    except PermissionError:
+        logging.error(f"Live event socket {EVENTS_SOCKET_PATH} is not accessible (permission denied) — re-run with: sudo picosnitch top")
+        if spawned is not None:
+            _stop_spawned(spawned)
+        return 1
+    except OSError as e:
         logging.error(f"Could not connect to picosnitch live feed: {e}")
         if spawned is not None:
             _stop_spawned(spawned)

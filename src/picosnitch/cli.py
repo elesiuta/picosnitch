@@ -188,6 +188,13 @@ def start_picosnitch() -> int:
         ExecStart={sys.executable} -m picosnitch start-no-daemon
         PIDFile={pid_file}
 
+        # Auto-create FHS dirs (so ProtectSystem/ReadWritePaths can bind them on a clean install)
+        RuntimeDirectory=picosnitch
+        StateDirectory=picosnitch
+        LogsDirectory=picosnitch
+        CacheDirectory=picosnitch
+        ConfigurationDirectory=picosnitch
+
         # Required for libbpf to mmap the per-cpu perf event ring buffers
         # (~16 MiB by default) without hitting the inherited 8 MiB cap.
         LimitMEMLOCK=infinity
@@ -289,15 +296,39 @@ def start_picosnitch() -> int:
         # offer systemctl for start/restart
         if cmd in ("start", "restart"):
             if Path("/usr/lib/systemd/system/picosnitch.service").exists() or Path("/etc/systemd/system/picosnitch.service").exists():
-                logging.info("Found picosnitch.service but you are not using systemctl")
-                if sys.stdin.isatty():
-                    try:
-                        confirm = input(f"Did you intend to run `systemctl {cmd} picosnitch` (y/N)? ")
-                    except EOFError:
-                        confirm = ""
-                    if confirm.lower().startswith("y"):
-                        subprocess.run(["systemctl", cmd, "picosnitch"])
-                        return 0
+                try:
+                    active = (
+                        subprocess.run(
+                            ["systemctl", "is-active", "--quiet", "picosnitch"],
+                            check=False,
+                        ).returncode
+                        == 0
+                    )
+                except FileNotFoundError:
+                    active = False
+                if active:
+                    logging.info("picosnitch.service is active under systemd; the built-in daemon would conflict with it")
+                    if sys.stdin.isatty():
+                        try:
+                            confirm = input(f"Run `systemctl {cmd} picosnitch` instead (Y/n)? ")
+                        except EOFError:
+                            confirm = ""
+                        if not confirm.lower().startswith("n"):
+                            subprocess.run(["systemctl", cmd, "picosnitch"])
+                            return 0
+                    else:
+                        logging.error(f"aborted; run `systemctl {cmd} picosnitch` instead")
+                        return 1
+                else:
+                    logging.info("Found picosnitch.service but you are not using systemctl")
+                    if sys.stdin.isatty():
+                        try:
+                            confirm = input(f"Did you intend to run `systemctl {cmd} picosnitch` (y/N)? ")
+                        except EOFError:
+                            confirm = ""
+                        if confirm.lower().startswith("y"):
+                            subprocess.run(["systemctl", cmd, "picosnitch"])
+                            return 0
         # optional remote database
         config = load_config()
         if sql_kwargs := dict(config.database.remote):

@@ -8,6 +8,13 @@ RestartSec=5
 ExecStart=/usr/bin/picosnitch start-no-daemon
 PIDFile=/run/picosnitch/picosnitch.pid
 
+# Auto-create FHS dirs (so ProtectSystem/ReadWritePaths can bind them on a clean install)
+RuntimeDirectory=picosnitch
+StateDirectory=picosnitch
+LogsDirectory=picosnitch
+CacheDirectory=picosnitch
+ConfigurationDirectory=picosnitch
+
 # Required for libbpf to mmap the per-cpu perf event ring buffers
 # (~16 MiB by default) without hitting the inherited 8 MiB cap.
 LimitMEMLOCK=infinity
