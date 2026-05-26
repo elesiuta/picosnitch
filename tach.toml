@@ -97,7 +97,7 @@ depends_on = []
 
 [[modules]]
 path = "picosnitch.ui.top"
-depends_on = ["picosnitch.ui._keys", "picosnitch.constants", "picosnitch.ui._chrome", "picosnitch.live_feed"]
+depends_on = ["picosnitch.ui._keys", "picosnitch.constants", "picosnitch.ui._chrome", "picosnitch.live_feed", "picosnitch.utils"]
 
 [[modules]]
 path = "picosnitch.ui.tui"

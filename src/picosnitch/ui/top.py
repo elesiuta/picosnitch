@@ -27,6 +27,7 @@ import time
 from picosnitch.constants import LOG_DIR, RUN_DIR, VERSION
 from picosnitch.live_feed import EVENTS_SOCKET_PATH, LiveFeedSubscriber
 from picosnitch.ui import _chrome, _keys
+from picosnitch.utils import safe_log_open
 
 
 def _format_bytes(n: int) -> str:
@@ -435,7 +436,7 @@ def top_init() -> int:
         log_path = LOG_DIR / "picosnitch-top.log"
         try:
             LOG_DIR.mkdir(parents=True, exist_ok=True)
-            mon_log = open(log_path, "ab", buffering=0)
+            mon_log = safe_log_open(log_path, binary=True)
         except OSError:
             mon_log = open(os.devnull, "ab", buffering=0)
         try:
@@ -484,7 +485,7 @@ def top_init() -> int:
     log_path = LOG_DIR / "picosnitch-top.log"
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
     except OSError:
         log_fd = os.open(os.devnull, os.O_WRONLY)
     os.dup2(log_fd, 2)

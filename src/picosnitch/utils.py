@@ -63,16 +63,20 @@ def resolve_group(group: str) -> int:
 def connect_db_readonly(db_path: Path | str, timeout: float = 5.0) -> sqlite3.Connection:
     """Open a sqlite3 connection for read-only access.
 
-    Tries in order: read-write, then `mode=ro`, then `mode=ro&immutable=1`.
-    The immutable fallback is needed when the caller cannot write to the
-    -shm / -wal sidecar files of a WAL-mode database (e.g. a non-root
-    user opening the picosnitch database written by the root daemon).
-    Raises sqlite3.OperationalError if every attempt fails."""
+    Tries in order: `mode=ro`, then `mode=ro&immutable=1`, and finally a
+    plain read-write open as a last resort. Read-only is preferred so a
+    buggy caller cannot accidentally issue writes against the daemon's
+    database. The immutable fallback is needed when the caller cannot
+    write to the -shm / -wal sidecar files of a WAL-mode database (e.g.
+    a non-root user opening the picosnitch database written by the root
+    daemon). The RW fallback covers exotic cases (e.g. older sqlite3
+    builds that reject the URI form). Raises sqlite3.OperationalError
+    if every attempt fails."""
     last_err: Exception | None = None
     for uri in (
-        str(db_path),
         f"file:{db_path}?mode=ro",
         f"file:{db_path}?mode=ro&immutable=1",
+        str(db_path),
     ):
         try:
             con = sqlite3.connect(uri, uri=uri.startswith("file:"), timeout=timeout)
@@ -85,6 +89,23 @@ def connect_db_readonly(db_path: Path | str, timeout: float = 5.0) -> sqlite3.Co
             last_err = e
             continue
     raise sqlite3.OperationalError(f"could not open {db_path} for reading: {last_err}")
+
+
+def safe_log_open(path: Path | str, binary: bool = False):
+    """Open a log file for appending without following symlinks.
+
+    `LOG_DIR` may be chown'd to a non-root account when `[data].owner` is
+    overridden in config.toml. Without `O_NOFOLLOW` that user could swap
+    a log file for a symlink and trick the root daemon into appending
+    sanitized lines to an arbitrary path. `O_NOFOLLOW` causes open() to
+    fail with ELOOP if the final path component is a symlink; the file
+    itself is still created if it does not exist.
+    """
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW
+    fd = os.open(str(path), flags, 0o644)
+    if binary:
+        return os.fdopen(fd, "ab", buffering=0)
+    return os.fdopen(fd, "a", encoding="utf-8", errors="surrogateescape")
 
 
 def apply_data_permissions(config_dir: Path, data_dir: Path, log_dir: Path, cache_dir: Path) -> None:
@@ -147,14 +168,14 @@ def flush_logs(state: State) -> None:
     error_log_path = LOG_DIR / "error.log"
     try:
         if state["Error Log"]:
-            with open(error_log_path, "a", encoding="utf-8", errors="surrogateescape") as f:
+            with safe_log_open(error_log_path) as f:
                 f.write("\n".join(sanitize_log_line(line) for line in state["Error Log"]) + "\n")
             state["Error Log"] = []
     except Exception as e:
         logging.error(f"picosnitch write error (error.log): {type(e).__name__}{e.args}")
     try:
         if state["Exe Log"]:
-            with open(exe_log_path, "a", encoding="utf-8", errors="surrogateescape") as f:
+            with safe_log_open(exe_log_path) as f:
                 f.write("\n".join(sanitize_log_line(line) for line in state["Exe Log"]) + "\n")
             state["Exe Log"] = []
     except Exception as e:

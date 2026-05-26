@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import multiprocessing
+import os
 import queue
 import shutil
 import subprocess
@@ -21,7 +22,7 @@ def _send_notification(msg: str) -> None:
     )
 
 
-def run_notifications(config: Config, q_error: multiprocessing.Queue[str], q_in: multiprocessing.Queue[str], _q_out: multiprocessing.Queue) -> int:
+def run_notifications(config: Config, fan_fd: int, q_error: multiprocessing.Queue[str], q_in: multiprocessing.Queue[str], _q_out: multiprocessing.Queue) -> int:
     """notification subprocess: drops root then sends desktop notifications via notify-send (libnotify)"""
     parent_process = multiprocessing.parent_process()
     assert parent_process is not None
@@ -31,6 +32,13 @@ def run_notifications(config: Config, q_error: multiprocessing.Queue[str], q_in:
         uid = resolve_owner(config.desktop.user)
         gid = resolve_group(config.desktop.user)
         drop_root_permanent(uid, gid)
+    # fan_fd is inherited via fork() but this subprocess never uses it;
+    # closing it prevents leaking a privileged fanotify handle into a
+    # dropped-privilege security domain.
+    try:
+        os.close(fan_fd)
+    except OSError:
+        pass
     notifier_ready = bool(config.desktop.notifications) and shutil.which("notify-send") is not None
     last_notification = ""
     pending: list[str] = []

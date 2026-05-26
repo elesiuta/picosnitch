@@ -245,6 +245,7 @@ digraph G {
             "picosnitch__utils__resolve_group" [label="resolve_group", style="filled", fillcolor="#ff99f0b2", fontcolor="#000000", group="12"];
             "picosnitch__utils__resolve_owner" [label="resolve_owner", style="filled", fillcolor="#ff99f0b2", fontcolor="#000000", group="12"];
             "picosnitch__utils__reverse_dns_lookup" [label="reverse_dns_lookup", style="filled", fillcolor="#ff99f0b2", fontcolor="#000000", group="12"];
+            "picosnitch__utils__safe_log_open" [label="safe_log_open", style="filled", fillcolor="#ff99f0b2", fontcolor="#000000", group="12"];
             "picosnitch__utils__sanitize_log_line" [label="sanitize_log_line", style="filled", fillcolor="#ff99f0b2", fontcolor="#000000", group="12"];
             "picosnitch__utils__save_state" [label="save_state", style="filled", fillcolor="#ff99f0b2", fontcolor="#000000", group="12"];
             "picosnitch__utils__sync_vt_results" [label="sync_vt_results", style="filled", fillcolor="#ff99f0b2", fontcolor="#000000", group="12"];
@@ -608,6 +609,7 @@ digraph G {
         "picosnitch__subprocesses__secondary" -> "picosnitch__utils__get_sha256_fuse" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary" -> "picosnitch__utils__get_sha256_pid" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary" -> "picosnitch__utils__reverse_dns_lookup" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__secondary" -> "picosnitch__utils__safe_log_open" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary" -> "picosnitch__utils__sync_vt_results" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary__build_log_entries" -> "picosnitch__process_manager__ProcessManager" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary__build_log_entries" -> "picosnitch__subprocesses__secondary__resolve_hash" [style="solid",  color="#000000"];
@@ -626,6 +628,7 @@ digraph G {
         "picosnitch__subprocesses__secondary__run_secondary" -> "picosnitch__subprocesses__secondary__run_secondary__resolve_exe_id" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__secondary__run_secondary" -> "picosnitch__subprocesses__secondary__run_secondary__resolve_exe_id" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary__run_secondary" -> "picosnitch__utils__get_fanotify_events" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__secondary__run_secondary" -> "picosnitch__utils__safe_log_open" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary__run_secondary" -> "picosnitch__utils__sync_vt_results" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__virustotal" -> "picosnitch__subprocesses__virustotal___http_get_json" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__virustotal" -> "picosnitch__subprocesses__virustotal___http_post_multipart_file_json" [style="dashed",  color="#ffffff00"];
@@ -665,11 +668,13 @@ digraph G {
         "picosnitch__utils" -> "picosnitch__utils__resolve_group" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__resolve_owner" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__reverse_dns_lookup" [style="dashed",  color="#ffffff00"];
+        "picosnitch__utils" -> "picosnitch__utils__safe_log_open" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__sanitize_log_line" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__save_state" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__sync_vt_results" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils__apply_data_permissions" -> "picosnitch__utils__resolve_group" [style="solid",  color="#000000"];
         "picosnitch__utils__apply_data_permissions" -> "picosnitch__utils__resolve_owner" [style="solid",  color="#000000"];
+        "picosnitch__utils__flush_logs" -> "picosnitch__utils__safe_log_open" [style="solid",  color="#000000"];
         "picosnitch__utils__flush_logs" -> "picosnitch__utils__sanitize_log_line" [style="solid",  color="#000000"];
         "picosnitch__utils__get_fanotify_events" -> "picosnitch__utils__get_fstat" [style="solid",  color="#000000"];
         "picosnitch__utils__get_sha256_fd" -> "picosnitch__utils__get_fstat" [style="solid",  color="#000000"];

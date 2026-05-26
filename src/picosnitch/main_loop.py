@@ -46,6 +46,7 @@ def run_main_loop(config: Config, state: State) -> int:
         target=run_notifications,
         init_args=(
             config,
+            fan_fd,
             q_error,
         ),
     )
@@ -64,6 +65,7 @@ def run_main_loop(config: Config, state: State) -> int:
         target=run_fuse,
         init_args=(
             config,
+            fan_fd,
             q_error,
         ),
     )
@@ -72,6 +74,7 @@ def run_main_loop(config: Config, state: State) -> int:
         target=run_virustotal,
         init_args=(
             config,
+            fan_fd,
             q_error,
         ),
     )

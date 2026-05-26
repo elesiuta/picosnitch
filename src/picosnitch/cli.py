@@ -19,7 +19,7 @@ from picosnitch.main_loop import run_main_loop
 from picosnitch.ui.top import top_init
 from picosnitch.ui.tui import tui_init
 from picosnitch.ui.webui import web_dashboard
-from picosnitch.utils import apply_data_permissions, connect_db_readonly, load_state
+from picosnitch.utils import apply_data_permissions, connect_db_readonly, load_state, safe_log_open
 
 
 def check_root(cmd: str) -> int:
@@ -360,8 +360,11 @@ def start_picosnitch() -> int:
                 logging.warning(f"{type(e).__name__}{e.args} on line {e.__traceback__.tb_lineno if e.__traceback__ else '?'}")
         apply_data_permissions(CONFIG_DIR, DATA_DIR, LOG_DIR, CACHE_DIR)
         # log warnings/errors to the existing error.log so failures in the
-        # forked daemon (where stderr is /dev/null) are still visible
-        error_log_handler = logging.FileHandler(LOG_DIR / "error.log")
+        # forked daemon (where stderr is /dev/null) are still visible.
+        # Use O_NOFOLLOW so the daemon never follows an attacker-placed
+        # symlink in LOG_DIR (relevant when [data].owner is non-root).
+        error_log_stream = safe_log_open(LOG_DIR / "error.log")
+        error_log_handler = logging.StreamHandler(error_log_stream)
         error_log_handler.setLevel(logging.WARNING)
         error_log_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
         logging.getLogger().addHandler(error_log_handler)

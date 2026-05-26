@@ -19,7 +19,7 @@ from picosnitch.config import Config
 from picosnitch.constants import DATA_DIR, DB_VERSION, LOG_DIR, VERSION
 from picosnitch.process_manager import ProcessManager
 from picosnitch.types import BpfEvent, ProcessHashInfo, State
-from picosnitch.utils import get_fanotify_events, get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup, sync_vt_results
+from picosnitch.utils import get_fanotify_events, get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup, safe_log_open, sync_vt_results
 
 
 def resolve_hash(
@@ -371,7 +371,7 @@ def run_secondary(
                     q_error.put("SQL server execute %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?", len(transaction)))
                 try:
                     if config.database.text_log:
-                        with open(text_path, "a", encoding="utf-8", errors="surrogateescape") as text_file:
+                        with safe_log_open(text_path) as text_file:
                             for contime, send, recv, n_events, exe_key, pexe_key, gpexe_key, uid, family, protocol, lport, rport, laddr, raddr, domain, netns in transaction:
                                 flat = (contime, send, recv, n_events, *exe_key, *pexe_key, *gpexe_key, uid, family, protocol, lport, rport, laddr, raddr, domain, netns)
                                 clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in flat]

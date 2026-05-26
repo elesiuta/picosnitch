@@ -54,7 +54,7 @@ def _http_post_multipart_file_json(url: str, headers: dict, file_obj, filename: 
         return json.loads(resp.read().decode("utf-8", "replace"))
 
 
-def run_virustotal(config: Config, q_error: multiprocessing.Queue[str], q_vt_pending: multiprocessing.Queue[bytes], q_vt_results: multiprocessing.Queue[bytes]) -> int:
+def run_virustotal(config: Config, fan_fd: int, q_error: multiprocessing.Queue[str], q_vt_pending: multiprocessing.Queue[bytes], q_vt_results: multiprocessing.Queue[bytes]) -> int:
     """get virustotal results of process executable"""
     parent_process = multiprocessing.parent_process()
     assert parent_process is not None
@@ -64,6 +64,13 @@ def run_virustotal(config: Config, q_error: multiprocessing.Queue[str], q_vt_pen
         uid = resolve_owner(config.desktop.user)
         gid = resolve_group(config.desktop.user)
         drop_root_permanent(uid, gid)
+    # fan_fd is inherited via fork() but this subprocess never uses it;
+    # closing it prevents leaking a privileged fanotify handle into a
+    # dropped-privilege security domain.
+    try:
+        os.close(fan_fd)
+    except OSError:
+        pass
     request_limit = config.virustotal.request_limit_seconds if config.virustotal.api_key else 0
     headers = {"x-apikey": config.virustotal.api_key} if config.virustotal.api_key else {}
 
