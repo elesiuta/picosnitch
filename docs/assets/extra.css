@@ -1,0 +1,57 @@
+/* Mermaid: make diagrams horizontally scrollable so we can use a larger
+   font without squeezing edge labels. Font size itself is controlled by
+   the %%{init}%% directive in each diagram (CSS can't override SVG
+   <text> sizing reliably). */
+.md-typeset .mermaid {
+  overflow-x: auto;
+  text-align: left;
+  padding-bottom: 0.25rem;
+}
+
+.md-typeset .mermaid svg {
+  max-width: none;
+  height: auto;
+}
+
+/* Light theme: dark text on light fills (Mermaid's default already works). */
+[data-md-color-scheme="default"] .md-typeset .mermaid .nodeLabel,
+[data-md-color-scheme="default"] .md-typeset .mermaid .edgeLabel,
+[data-md-color-scheme="default"] .md-typeset .mermaid .cluster-label {
+  color: #1a1a1a;
+  fill: #1a1a1a;
+}
+[data-md-color-scheme="default"] .md-typeset .mermaid .edgeLabel {
+  background-color: var(--md-default-bg-color);
+}
+
+/* Dark (slate) theme: light text and a translucent dark background behind
+   edge labels so they don't disappear into the page background. */
+[data-md-color-scheme="slate"] .md-typeset .mermaid .nodeLabel,
+[data-md-color-scheme="slate"] .md-typeset .mermaid .cluster-label {
+  color: #f5f5f5;
+  fill: #f5f5f5;
+}
+[data-md-color-scheme="slate"] .md-typeset .mermaid .edgeLabel {
+  color: #f5f5f5;
+  fill: #f5f5f5;
+  background-color: var(--md-default-bg-color);
+}
+[data-md-color-scheme="slate"] .md-typeset .mermaid .edgeLabel rect {
+  fill: var(--md-default-bg-color);
+}
+[data-md-color-scheme="slate"] .md-typeset .mermaid .marker,
+[data-md-color-scheme="slate"] .md-typeset .mermaid .flowchart-link {
+  stroke: #cfd8dc;
+}
+[data-md-color-scheme="slate"] .md-typeset .mermaid .node rect,
+[data-md-color-scheme="slate"] .md-typeset .mermaid .node circle,
+[data-md-color-scheme="slate"] .md-typeset .mermaid .node ellipse,
+[data-md-color-scheme="slate"] .md-typeset .mermaid .node polygon,
+[data-md-color-scheme="slate"] .md-typeset .mermaid .node path {
+  fill: #1f2933;
+  stroke: #607d8b;
+}
+[data-md-color-scheme="slate"] .md-typeset .mermaid .cluster rect {
+  fill: #263238;
+  stroke: #455a64;
+}

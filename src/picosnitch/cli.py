@@ -334,12 +334,11 @@ def start_picosnitch() -> int:
         if sql_kwargs := dict(config.database.remote):
             sql_client = sql_kwargs.pop("client", "no client error")
             conn_table = sql_kwargs.pop("connections_table", "connections")
-            exe_table = sql_kwargs.pop("executables_table", "executables")
             if sql_client not in ["mariadb", "psycopg", "psycopg2", "pymysql"]:
                 logging.error(f'unsupported database.remote "client": {sql_client}')
                 return 1
-            if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", conn_table) or not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", exe_table):
-                logging.error(f"invalid remote table name: {conn_table!r} or {exe_table!r}")
+            if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", conn_table):
+                logging.error(f"invalid remote table name: {conn_table!r}")
                 return 1
             sql = importlib.import_module(sql_client)
             try:
@@ -350,7 +349,7 @@ def start_picosnitch() -> int:
                 )
                 remote_dom_schema = SCHEMA_DOMAINS.replace("INTEGER PRIMARY KEY", "INTEGER PRIMARY KEY AUTO_INCREMENT").replace("domain TEXT NOT NULL UNIQUE", "domain VARCHAR(255) NOT NULL UNIQUE")
                 remote_addr_schema = SCHEMA_ADDRESSES.replace("INTEGER PRIMARY KEY", "INTEGER PRIMARY KEY AUTO_INCREMENT").replace("addr TEXT NOT NULL UNIQUE", "addr VARCHAR(64) NOT NULL UNIQUE")
-                cur.execute(f"CREATE TABLE IF NOT EXISTS {exe_table} ({remote_exe_schema})")
+                cur.execute(f"CREATE TABLE IF NOT EXISTS executables ({remote_exe_schema})")
                 cur.execute(f"CREATE TABLE IF NOT EXISTS domains ({remote_dom_schema})")
                 cur.execute(f"CREATE TABLE IF NOT EXISTS addresses ({remote_addr_schema})")
                 cur.execute(f"CREATE TABLE IF NOT EXISTS {conn_table} ({SCHEMA_CONNECTIONS})")

@@ -131,3 +131,7 @@ dmypy.json
 # BPF generated files
 src/picosnitch/bpf/vmlinux.h
 src/picosnitch/bpf/*.bpf.o
+
+# MkDocs build output
+site/
+

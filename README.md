@@ -1,197 +1,170 @@
-<p align="center">
-<img src="https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/screenshot.png" width="90%" height="90%" class="center">
-<img src="https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/web_ui.gif" width="45%" height="45%" class="center"><img src="https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/terminal_ui.gif" width="45%" height="45%" class="center">
-</p>
-
 # [Picosnitch](https://elesiuta.github.io/picosnitch/)
+
 - 🔔 Receive notifications whenever a new program connects to the network, or when it's modified
 - 📈 Monitors your bandwidth, breaking down traffic by executable, hash, parent, domain, port, or user over time
 - 🌍 Web and terminal interfaces with GeoIP lookups for each connection ([IP Geolocation by DB-IP](https://db-ip.com))
 - 🛡️ Can optionally check hashes or executables using [VirusTotal](https://www.virustotal.com)
 - 🚀 Executable hashes are cached based on device + inode for improved performance
 - 🐳 Detects applications running inside containers, multiple versions of the same app are differentiated based on their hash
-- 🕵️ Uses [BPF](https://ebpf.io/) for [accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and [fanotify](https://man7.org/linux/man-pages/man7/fanotify.7.html) to watch executables for modification
-- 👨‍👦 Since applications can call others to send/receive data for them, the parent executable and hash is also logged for each connection
+- 🕵️ Uses [BPF](https://ebpf.io/) for accurate, low overhead bandwidth monitoring and [fanotify](https://man7.org/linux/man-pages/man7/fanotify.7.html) to watch executables for modification
+- 👨‍👦 Since applications can call others to send/receive data for them, the parent and grandparent executables (with hashes) are also logged for each connection
 - 🧰 Pragmatic and minimalist design focusing on [accurate detection with clear and reliable error reporting when it isn't possible](#limitations)
+
+<!--
+  Image URLs below use the GitHub "latest release" redirect, so they always
+  point at the most recent release's assets. The `screenshots` workflow
+  attaches these files on every `release: created`.
+-->
+
+<table>
+  <tr>
+    <td align="center" width="34%" valign="top">
+      <a href="https://github.com/elesiuta/picosnitch/releases/latest/download/webui-by-exe-1d.png"><img src="https://github.com/elesiuta/picosnitch/releases/latest/download/webui-by-exe-1d.png" alt="picosnitch web UI: bandwidth grouped by executable with drill-down"></a>
+      <br><sub><b>picosnitch webui</b><br>bandwidth by executable, with drill-down</sub>
+    </td>
+    <td align="center" width="33%" valign="top">
+      <a href="https://github.com/elesiuta/picosnitch/releases/latest/download/tui-executables.png"><img src="https://github.com/elesiuta/picosnitch/releases/latest/download/tui-executables.png" alt="picosnitch terminal UI: bandwidth per executable"></a>
+      <br><sub><b>picosnitch tui</b><br>read-only browser over the same DB</sub>
+    </td>
+    <td align="center" width="33%" valign="top">
+      <a href="https://github.com/elesiuta/picosnitch/releases/latest/download/top-sort-recv.png"><img src="https://github.com/elesiuta/picosnitch/releases/latest/download/top-sort-recv.png" alt="picosnitch top: live event feed sorted by bytes received"></a>
+      <br><sub><b>picosnitch top</b><br>live event feed</sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <sub>More screenshots and short demo videos in the <a href="https://elesiuta.github.io/picosnitch/screenshots/">picosnitch screenshots gallery</a>.</sub>
+</p>
 
 # [Installation](#installation)
 
-### [AUR](https://aur.archlinux.org/packages/picosnitch/) for Arch and derivatives <img src="https://cdn.simpleicons.org/archlinux" width="16" height="16">
-<details><summary>Details</summary>
+<a href="https://repology.org/project/picosnitch/versions">
+  <img align="right" hspace="20" vspace="6" src="https://repology.org/badge/vertical-allrepos/picosnitch.svg?exclude_unsupported=1&header=Packaging%20status" alt="Packaging status">
+</a>
 
-- install `picosnitch` [manually](https://wiki.archlinux.org/title/Arch_User_Repository#Installing_and_upgrading_packages) or using your preferred [AUR helper](https://wiki.archlinux.org/title/AUR_helpers)
-</details>
+The recommended install is a system-wide [pipx](https://pipx.pypa.io/stable/how-to/install-pipx/) install. It works on every Linux distribution with Python >= 3.12 and a kernel new enough to run modern [libbpf](https://github.com/libbpf/libbpf) CO-RE programs (Linux 5.8+).
 
-### [PPA](https://launchpad.net/~elesiuta/+archive/ubuntu/picosnitch) for Ubuntu and derivatives <img src="https://cdn.simpleicons.org/ubuntu" width="16" height="16">
-<details><summary>Details</summary>
-
-- `sudo add-apt-repository ppa:elesiuta/picosnitch`
-- `sudo apt update`
-- `sudo apt install picosnitch`
-- you may require a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#ubuntu---binary) ([unofficial PPA](https://launchpad.net/~hadret/+archive/ubuntu/bpfcc)) since the version in the [Ubuntu repos](https://repology.org/project/bcc-bpf/versions) sometimes lags behind its [supported kernel](https://github.com/iovisor/bcc/releases)
-</details>
-
-### [OBS](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) for Debian and derivatives <img src="https://cdn.simpleicons.org/debian" width="16" height="16">
-<details><summary>Details</summary>
-
-- visit the [OBS picosnitch page](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) and follow the instructions for your distribution
-- if you're having issues on bullseye, you may need a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#debian---binary)
-</details>
-
-### [OBS](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) for openSUSE Tumbleweed and derivatives <img src="https://cdn.simpleicons.org/opensuse" width="16" height="16">
-<details><summary>Details</summary>
-
-- `sudo zypper addrepo https://download.opensuse.org/repositories/home:elesiuta/openSUSE_Tumbleweed/home:elesiuta.repo`
-- `sudo zypper refresh`
-- `sudo zypper install picosnitch`
-</details>
-
-### [Copr](https://copr.fedorainfracloud.org/coprs/elesiuta/picosnitch/) for Fedora, Mageia, Mandriva, and derivatives <img src="https://cdn.simpleicons.org/fedora" width="16" height="16">
-<details><summary>Details</summary>
-
-- `sudo dnf copr enable elesiuta/picosnitch`
-- `sudo dnf install picosnitch`
-</details>
-
-### [Nixpkgs](https://search.nixos.org/packages?show=picosnitch) for Nix <img src="https://cdn.simpleicons.org/nixos" width="16" height="16">
-<details><summary>Details</summary>
-
-- install and enable using the [picosnitch service option](https://search.nixos.org/options?show=services.picosnitch.enable)
-  - add `services.picosnitch.enable = true;` to your Nix configuration file (typically `/etc/nixos/configuration.nix`)
-  - run `sudo nixos-rebuild switch`
-- workaround for "Failed to compile BPF module"
-  - `systemctl stop picosnitch`
-  - `sudo picosnitch start-no-daemon` then send SIGINT (ctrl + c)
-  - `systemctl start picosnitch`
-</details>
-
-### [PyPI](https://pypi.org/project/picosnitch/) for any Linux distribution with Python >= 3.8 <img src="https://cdn.simpleicons.org/python" width="16" height="16">
-<details><summary>Details</summary>
-
-- install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
-  - it should be called `python-bcc` or `python-bpfcc`
-- install picosnitch using [pip](https://pip.pypa.io/) or [pipx](https://pypa.github.io/pipx/)
-  - `pipx install "picosnitch[full]"`
-- create a service file for systemd to run picosnitch (recommended)
-  - `picosnitch systemd`
-- optional dependencies (will install from [PyPI](https://pypi.org/) with `[full]` if not already installed)
-  - for GeoIP lookups: [geoip2](https://pypi.org/project/geoip2/)
-  - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro and should be installed from their repo)
-  - for sql server: one of [psycopg](https://pypi.org/project/psycopg/), [pymysql](https://pypi.org/project/PyMySQL/), [mariadb](https://pypi.org/project/mariadb/), or [psycopg2](https://pypi.org/project/psycopg2/) (latter two not included with `[full]`)
-  - for VirusTotal: [requests](https://pypi.org/project/requests/)
-</details>
-
-### [GitHub](https://github.com/elesiuta/picosnitch) for installing from source <img src="https://cdn.simpleicons.org/linux" width="16" height="16">
-<details><summary>Details</summary>
-
-- clone the repo or download `picosnitch.py` and `setup.py`
-- install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
-  - it should be called `python-bcc` or `python-bpfcc`
-- install [psutil](https://pypi.org/project/psutil/)
-- install `python-setuptools`
-- install picosnitch with `python setup.py install --user`
-- see other options with `python setup.py [build|install] --help`
-- you can also run the script `picosnitch.py` directly
-</details>
-
-# [Usage](#usage)
-- Running picosnitch
-  - enable/disable autostart on reboot with `systemctl enable|disable picosnitch`
-  - start/stop/restart with `systemctl start|stop|restart picosnitch`
-  - or if you don't use systemd `picosnitch start|stop|restart`
-- Web user interface for browsing past connections
-  - start with `picosnitch webui`
-  - visit [http://localhost:5100](http://localhost:5100) (you change this by setting the environment variables `HOST` and `PORT`)
-- Terminal user interface for browsing past connections
-  - start with `picosnitch view`
-  - `space/enter/f`: filter on entry `e`: exclude entry `backspace/F/E`: remove filter `h/H`: step through history (time offset) `t/T`: cycle time range `u/U`: cycle byte units `r`: refresh view `q`: quit
-- Show usage with `picosnitch help`
-
-# [Configuration](#configuration)
-- Config is stored in `~/.config/picosnitch/config.json`
-  - restart picosnitch if it is currently running for any changes to take effect
-
-```yaml
-{
-  "DB retention (days)": 30, # How many days to keep connection logs in snitch.db
-  "DB sql log": true, # Write connection logs to snitch.db (SQLite)
-  "DB sql server": {}, # Write connection logs to a MariaDB, MySQL, or PostgreSQL server
-  "DB text log": false, # Write connection logs to conn.log
-  "DB write limit (seconds)": 10, # Minimum time between connection log entries
-  # increasing it decreases disk writes by grouping traffic into larger time windows
-  # reducing time precision, decreasing database size, and increasing hash latency
-  "Dash scroll zoom": true, # Enable scroll zooming on plots
-  "Dash theme": "", # Select a theme name from https://bootswatch.com/
-  # requires installing https://pypi.org/project/dash-bootstrap-components/
-  # and https://pypi.org/project/dash-bootstrap-templates/ with pip or pipx
-  "Desktop notifications": true, # Try connecting to dbus to show notifications
-  "Every exe (not just conns)": false, # Check every running executable with picosnitch
-  # these are treated as "connections" with a port of -1
-  # this feature is experimental but should work fairly well, errors should be expected as
-  # picosnitch is unable to open file descriptors for some extremely short-lived processes
-  # if you just want logs (no hashes) to trace process hierarchy, see execsnoop or forkstat
-  "GeoIP lookup": true, # GeoIP lookup of IP addresses in user interface (terminal and web)
-  "Log addresses": true, # Log remote addresses for each connection
-  "Log commands": true, # Log command line args for each executable
-  "Log ignore": [], # List of hashes (str), domains (str), IP subnets (str), or ports (int)
-  # will omit connections that match any of these from the connection log
-  # domains are in reverse domain name notation and will match all subdomains
-  # the process name, executable, and hash will still be recorded in record.json
-  "Log ports": true, # Log local and remote ports for each connection
-  "Perf ring buffer (pages)": 256, # Power of two number of pages for BPF program
-  # only change this if it is giving you errors (e.g. missed events)
-  # picosnitch opens a perf buffer for each event type, so this is multiplied by up to 18
-  "Set RLIMIT_NOFILE": null, # Set the maximum number of open file descriptors (int)
-  # it is used for caching process executables and hashes (typical system default is 1024)
-  # this is good enough for most people since caching is based on executable device + inode
-  # fanotify is used to detect if a cached executable is modified to trigger a hash update
-  "Set st_dev mask": null, # Mask device number for open file descriptors (int)
-  # set to 0 to disable verification if it is giving you errors (e.g. FD cache errors)
-  # defaults to 0 if a btrfs partition is detected, otherwise 0xffffffff
-  "VT API key": "", # API key for VirusTotal, leave blank to disable (str)
-  "VT file upload": false, # Upload file if hash not found, only hashes are used by default
-  "VT request limit (seconds)": 15 # Number of seconds between requests (free tier quota)
-}
+```sh
+sudo pipx install picosnitch --global
+sudo picosnitch systemd
+sudo systemctl enable --now picosnitch
 ```
 
+- requires `pipx` >= 1.5.0 (this is when the `--global` flag was added); see [pipx installation](https://pipx.pypa.io/stable/how-to/install-pipx/) if you don't already have it
+- `sudo picosnitch systemd` writes `/usr/lib/systemd/system/picosnitch.service`
+- `picosnitch[sql]` adds optional MariaDB / MySQL / PostgreSQL drivers for [remote logging](#configuration)
+
+# [Usage](#usage)
+
+- Run/enable the daemon
+  - `sudo systemctl enable|disable picosnitch`: autostart on reboot
+  - `sudo systemctl start|stop|restart picosnitch`: daemon lifecycle
+  - or without systemd: `sudo picosnitch start|stop|restart`
+  - or to keep it in the foreground: `sudo picosnitch start-no-daemon`
+- `picosnitch webui`: web UI for browsing past connections
+  - visit [http://localhost:5100](http://localhost:5100); override with the `PICOSNITCH_HOST` / `PICOSNITCH_PORT` environment variables
+- `picosnitch tui`: terminal UI for browsing past connections
+- `sudo picosnitch top`: live event feed (requires root to read the daemon's event socket)
+- `picosnitch status`: show daemon pid and systemd service state
+- `picosnitch help`: full usage
+
+# [Configuration](#configuration)
+
+Config is stored at `/etc/picosnitch/config.toml` and is created with defaults on first run.
+
+<!-- --8<-- [start:config-toml] -->
+```toml
+[database]
+enabled = true                # write connection logs to /var/lib/picosnitch/picosnitch.db (SQLite)
+retention_days = 30           # how many days to keep connection logs in the local database
+                              # (the remote database is append-only; see [database.remote])
+write_limit_seconds = 10      # minimum time between connection log entries
+                              # increasing it groups traffic into larger time windows, decreasing
+                              # disk writes, time precision, and database size
+text_log = false              # also write a CSV connection log to /var/log/picosnitch/conn.log
+
+[database.remote]             # optional: also write connection logs to an external SQL server
+                              # used for off-system / tamper-evident logs (see Logging below).
+                              # mirrors the local SQLite schema (connections, executables,
+                              # domains, addresses).
+                              # set `client` to "mariadb", "psycopg", "psycopg2", or "pymysql";
+                              # add the rest of the connection parameters as key/value pairs and
+                              # optionally `connections_table` to override the default; this lets
+                              # multiple hosts share one server with a `connections` table each
+                              # while reusing the shared `executables`/`domains`/`addresses`
+
+[data]
+owner = "root"                # owner for files in /etc/picosnitch, /var/lib/picosnitch,
+group = "root"                # /var/log/picosnitch, and /var/cache/picosnitch
+mode = "0644"                 # mode applied to those files (directories add execute bits)
+
+[log]
+addresses = true              # log remote addresses for each connection
+commands = true               # log command line args for each executable
+ports = true                  # log local and remote ports for each connection
+ignore_ports = []             # list of ints; matching connections are omitted from the log
+ignore_domains = []           # list of strings in reverse-dns notation (matches all subdomains)
+ignore_ips = []               # list of IPs/CIDRs (e.g. "192.168.0.0/16")
+ignore_sha256 = []            # list of executable sha256 hashes
+                              # the process name, executable, and hash are still recorded
+
+[desktop]
+user = ""                     # username to send notifications to; defaults to $SUDO_UID
+notifications = true          # try connecting to dbus to show desktop notifications
+geoip_lookup = true           # annotate remote addresses with a country code in the TUI/webui
+                              # uses the DB-IP Country Lite CSV cached under /var/cache/picosnitch
+
+[monitoring]
+every_exe = false             # check every running executable, not just ones that open sockets
+                              # these are treated as "connections" with a port of -1
+                              # experimental; expect occasional errors for short-lived processes
+                              # if you only want process logs (no hashes), see execsnoop / forkstat
+perf_ring_buffer_pages = 256  # power of two number of pages per BPF perf buffer
+                              # only change this if you are seeing missed-event errors
+# rlimit_nofile = 65536       # optional int; raises RLIMIT_NOFILE for the daemon
+                              # picosnitch caches one file descriptor per (device, inode);
+                              # set this if you see "Too many open files" errors
+# st_dev_mask = 0             # optional int; masks the device number reported for opened fds
+                              # auto-detected at startup; only set this to override the default
+                              # for filesystems that reuse inodes across subvolumes (e.g. btrfs)
+
+[virustotal]
+api_key = ""                  # VirusTotal API key, leave blank to disable
+file_upload = false           # upload the executable when its hash isn't already known
+                              # leave false to only submit hashes
+request_limit_seconds = 15    # seconds between requests (free-tier quota)
+```
+<!-- --8<-- [end:config-toml] -->
+
+Restart picosnitch for any configuration changes to take effect.
+
 # [Logging](#logging)
-- A log of seen executables is stored in `~/.config/picosnitch/exe.log`
-  - this is a history of your notifications
-- A record of seen executables is stored in `~/.config/picosnitch/record.json`
-  - this is used for determining whether to create a notification
-  - it contains known process name(s) by executable, executable(s) by process name, and sha256 hash(es) with VirusTotal results by executable
-- Enable `DB sql log` (default) to write the full connection log to `~/.config/picosnitch/snitch.db`
-  - this is used for `picosnitch webui`, `picosnitch tui`, or something like [DB Browser](https://sqlitebrowser.org/)
-  - note, connection times are based on when the group is processed, so they are accurate to within `DB write limit (seconds)` at best, and could be delayed if the previous group is slow to hash
-  - notifications are handled by a separate subprocess, so they are not subject to the same delays as the connection log
-- Use `DB sql server` to write the full connection log to a MariaDB, MySQL, or PostgreSQL server
-  - this is independent of `DB sql log` and is used for providing an [off-system copy to prevent tampering](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS) (use [GRANT](https://www.postgresql.org/docs/current/sql-grant.html) to assign privileges and see [limitations](#limitations) for other caveats)
-  - to configure, add the key `client` to `DB sql server` with value `mariadb`, `psycopg`, `psycopg2`, or `pymysql`, you can also optionally set `table_name`
-  - assign remaining connection parameters for [mariadb](https://mariadb-corporation.github.io/mariadb-connector-python/usage.html#connecting), [psycopg](https://www.psycopg.org/docs/module.html#psycopg2.connect), or [pymysql](https://pymysql.readthedocs.io/en/latest/modules/connections.html) to `DB sql server` as key/value pairs
-- Enable `DB text log` to write the full connection log to `~/.config/picosnitch/conn.log`
-  - this may be useful for watching with another program
-  - it contains the following fields, separated by commas (commas, newlines, and null characters are removed from values)
-  - `entry time, sent bytes, received bytes, executable path, process name, cmdline, sha256, parent executable, parent name, parent cmdline, parent sha256, user id, local port, remote port, local address, remote address, domain`
-- The error log is stored in `~/.config/picosnitch/error.log`
-  - errors will also trigger a notification and are usually caused by far too many or extremely short-lived processes/connections, or suspending your system while a new executable is being hashed
-  - while it is very unlikely for processes/connections to be missed (unless `Every exe (not just conns)` is enabled), picosnitch was designed such that it should still detect this and log an error giving you some indication of what happened
-  - for most people in most cases, this should raise suspicion that a program may be misbehaving
-  - a program should not be able to hide from picosnitch (either by omission or spoofing another program) without picosnitch reporting an error
-  - see [limitations](#limitations) below for other sources of errors
+
+Picosnitch splits its on-disk state across the FHS directories. All defaults assume the systemd unit (the unit also creates these on first start).
+
+| Path | Contents |
+| --- | --- |
+| `/etc/picosnitch/config.toml` | configuration |
+| `/var/lib/picosnitch/picosnitch.db` | SQLite connection log (read by `picosnitch tui` and `picosnitch webui`) |
+| `/var/lib/picosnitch/state.json` | known executables + sha256 hashes, used to decide when to notify |
+| `/var/log/picosnitch/exe.log` | history of new-executable notifications |
+| `/var/log/picosnitch/error.log` | errors (also surfaced as desktop notifications) |
+| `/var/log/picosnitch/conn.log` | optional CSV connection log (enable with `[database].text_log = true`) |
+| `/var/cache/picosnitch/` | DB-IP Country Lite database, refreshed monthly |
+| `/run/picosnitch/picosnitch.pid` | pid file (world-readable, used by `picosnitch status`) |
+| `/run/picosnitch/events.sock` | live event socket consumed by `picosnitch top` |
+
+`[database.remote]` can be used to additionally ship every connection to a MariaDB, MySQL, or PostgreSQL server. It mirrors the local SQLite schema (`connections`, `executables`, `domains`, `addresses`); only the `connections` table name can be overridden (via `connections_table`), which lets multiple hosts share one server with a `connections` table each while reusing the shared reference tables. Picosnitch only ever issues `INSERT` against the remote (no retention, no garbage collection), so it is intended for keeping an [off-system copy of your logs](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS); grant `INSERT` only to prevent an adversary on the monitored host from deleting picosnitch's off-system logs.
+
+`conn.log` is a CSV with these fields (commas, newlines, and NUL characters are stripped from values): `entry time, sent bytes, received bytes, event count, executable path, process name, cmdline, sha256, parent executable, parent name, parent cmdline, parent sha256, grandparent executable, grandparent name, grandparent cmdline, grandparent sha256, user id, address family, protocol, local port, remote port, local address, remote address, domain, network namespace`.
+
+Entries in `error.log` are usually triggered by an unusually large burst of new processes or connections, by extremely short-lived processes that exit before picosnitch can open a file descriptor to them, or by suspending the system while a new executable is being hashed. Unexpected entries are worth investigating, since picosnitch is designed to surface an error whenever a process slips past its normal observation path.
 
 # [Limitations](#limitations)
-- Despite focusing on reliability and notable advantages over [existing tools](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/#existing-tools-to-measure-bandwidth-usage-on-linux), picosnitch still has some limitations depending on its use case
-- When used as a security/auditing tool, a program with sufficient privileges might alter picosnitch or its logs, or employ alternative communication mechanisms not monitored by picosnitch and potentially invisible to the kernel, some mitigations include
-  - use `DB sql server` to maintain an [off-system copy of your logs](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS)
-  - cross-checking with a [standalone router/firewall](https://en.wikipedia.org/wiki/List_of_router_and_firewall_distributions) to ensure all communication is accounted for
-  - use [sandboxing](https://wiki.archlinux.org/title/Security#Sandboxing_applications) such as [flatpak](https://www.privacyguides.org/linux-desktop/sandboxing/#flatpak)
-- Detecting open sockets and identifying the process is very reliable with [BPF](https://ebpf.io/); however, the executable name and path could be ambiguous or spoofed if malicious, as a countermeasure, picosnitch hashes the executable to provide a reliable identifier
-  - only the process executable itself is hashed, leaving out shared libraries (e.g. LD_PRELOAD rootkits), extensions, or scripts which could become compromised
-    - some possible mitigations include using an [immutable OS](https://www.redhat.com/sysadmin/immutability-silverblue) or tools such as [AIDE](https://wiki.archlinux.org/title/AIDE), [fs-verity](https://www.kernel.org/doc/html/latest/filesystems/fsverity.html), [IMA/EVM](https://wiki.gentoo.org/wiki/Integrity_Measurement_Architecture), or [debsums (with caveats)](https://manpages.debian.org/unstable/debsums/debsums.1.en.html)
-  - for extremely short-lived processes, picosnitch may not be able to open a file descriptor in time in order to hash it (this is rare)
-  - the device and inode of the opened file descriptor are checked against what was reported by the BPF program to detect if the executable was replaced; however, BTRFS uses non-unique inodes, negating this protection (a negligible issue mentioned for completeness)
-  - if hashing the executable fails for any reason, the traffic will still be logged with all available information, accompanied by an error notification
-- A large influx of new processes or connections may lead to some missed log entries as picosnitch preserves system traffic latency rather than impeding it to catch up with processing event callbacks
-  - such incidents will be detected, logged as an error, and you will be notified
-  - you can mitigate this by increasing `Perf ring buffer (pages)`
-- In addition to bugs, please report any other limitations that may have been missed!
+
+- Picosnitch is a userspace daemon. A program with sufficient privileges can alter picosnitch or its logs, or fall back to communication channels invisible to the kernel. Use `[database.remote]` for an off-system copy of the connection log, and consider corroborating with a separate router/firewall.
+- Detecting open sockets and the originating process is reliable via BPF, but the executable path and name could be ambiguous or spoofed. As a countermeasure picosnitch hashes the executable itself; only the process executable is hashed, so shared libraries, scripts, and runtime extensions are not covered by the hash.
+- The device and inode of the opened file descriptor are checked against what the BPF program reported to detect runtime replacement of the executable. Filesystems that reuse inodes across subvolumes (e.g. btrfs) defeat this check and are auto-detected at startup (`st_dev_mask = 0`).
+- For extremely short-lived processes, picosnitch may not be able to open a file descriptor in time to hash the executable. The connection is still logged with everything else picosnitch has, along with an entry in `error.log`.
+- A large influx of new processes or connections can cause missed log entries, since picosnitch preserves system traffic latency rather than blocking to catch up. Such incidents are detected, logged, and notified, and can be mitigated by raising `[monitoring].perf_ring_buffer_pages`.

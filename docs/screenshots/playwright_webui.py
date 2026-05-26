@@ -236,12 +236,22 @@ async def capture_stills(pw, out_dir: Path) -> None:
     await page.reload(wait_until="networkidle")
     await page.wait_for_selector("#tab-overview.active")
 
-    # 4. Explore tab grouped by domain. Click the top row so the
-    # right-hand drilldown pane is populated for the screenshot.
+    # 4. Explore tab grouped by executable. The per-executable view is
+    # picosnitch's whole point, so this is the README/docs hero shot.
     await _select_view(page, "explore")
     await page.wait_for_selector("#group-by li[data-dim]")
-    await _select_group(page, "domain")
+    await _select_group(page, "exe")
     await _select_range(page, "1d")
+    await page.wait_for_selector("#totals tbody tr")
+    await page.click("#totals tbody tr:first-child")
+    await page.wait_for_selector("#drilldown-pane .meta-cell")
+    await page.wait_for_load_state("networkidle")
+    await page.wait_for_timeout(400)
+    await shot("by-exe-1d")
+
+    # 5. Explore tab grouped by domain. Click the top row so the
+    # right-hand drilldown pane is populated for the screenshot.
+    await _select_group(page, "domain")
     await page.wait_for_selector("#totals tbody tr")
     await page.click("#totals tbody tr:first-child")
     await page.wait_for_selector("#drilldown-pane .meta-cell")
@@ -249,7 +259,7 @@ async def capture_stills(pw, out_dir: Path) -> None:
     await page.wait_for_timeout(400)
     await shot("by-domain-1d")
 
-    # 5. Filter to a single process name (firefox "Web Content") at 1d.
+    # 6. Filter to a single process name (firefox "Web Content") at 1d.
     # Group by name then click the matching row so the drilldown panel
     # is populated for this state too.
     await _select_group(page, "name")
@@ -264,7 +274,7 @@ async def capture_stills(pw, out_dir: Path) -> None:
     await page.wait_for_timeout(400)
     await shot("filter-web-content")
 
-    # 6. Live tab -- reset filter first so explore stays clean
+    # 7. Live tab -- reset filter first so explore stays clean
     await page.select_option("#where", "")
     await _select_view(page, "live")
     await page.wait_for_selector("#live-toggle")

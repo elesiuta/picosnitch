@@ -24,7 +24,10 @@ Set Shell "bash"
 Hide
 Type "PICOSNITCH_TEST=1 PYTHONUNBUFFERED=1 .venv/bin/python -m picosnitch tui"
 Enter
-Sleep 3s
+# Give the TUI enough time to load the seeded DB and clear its splash
+# screen before we start grabbing screenshots; 3s was occasionally
+# short enough that the first frame still showed the splash.
+Sleep 6s
 Show
 
 # view 0: Process > Executable

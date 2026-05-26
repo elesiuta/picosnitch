@@ -1,197 +1,88 @@
-<p align="center">
-<img src="https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/screenshot.png" width="90%" height="90%" class="center">
-<img src="https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/web_ui.gif" width="45%" height="45%" class="center"><img src="https://raw.githubusercontent.com/elesiuta/picosnitch/master/docs/terminal_ui.gif" width="45%" height="45%" class="center">
-</p>
+# picosnitch
 
-# [Picosnitch](https://elesiuta.github.io/picosnitch/)
-- 🔔 Receive notifications whenever a new program connects to the network, or when it's modified
-- 📈 Monitors your bandwidth, breaking down traffic by executable, hash, parent, domain, port, or user over time
-- 🌍 Terminal interface annotates each remote address with a country code via a cached [DB-IP Country Lite](https://db-ip.com/db/download/ip-to-country-lite) lookup (no account required)
-- 🛡️ Can optionally check hashes or executables using [VirusTotal](https://www.virustotal.com)
-- 🚀 Executable hashes are cached based on device + inode for improved performance
-- 🐳 Detects applications running inside containers, multiple versions of the same app are differentiated based on their hash
-- 🕵️ Uses [BPF](https://ebpf.io/) for [accurate, low overhead bandwidth monitoring](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/) and [fanotify](https://man7.org/linux/man-pages/man7/fanotify.7.html) to watch executables for modification
-- 👨‍👦 Since applications can call others to send/receive data for them, the parent executable and hash is also logged for each connection
-- 🧰 Pragmatic and minimalist design focusing on [accurate detection with clear and reliable error reporting when it isn't possible](#limitations)
+**Per-executable network bandwidth monitoring for Linux.**
 
-# [Installation](#installation)
+Picosnitch is a small userspace daemon built on
+[BPF](https://ebpf.io/) and
+[fanotify](https://man7.org/linux/man-pages/man7/fanotify.7.html).
+It notifies you when a new program connects to the network or when one
+is modified on disk, and keeps a per-executable log of every
+connection, with sent/received bytes, hashes, parents, domains, ports,
+and users.
 
-### [AUR](https://aur.archlinux.org/packages/picosnitch/) for Arch and derivatives <img src="https://cdn.simpleicons.org/archlinux" width="16" height="16">
-<details><summary>Details</summary>
+[:material-github: GitHub](https://github.com/elesiuta/picosnitch){ .md-button .md-button--primary }
+[:simple-pypi: PyPI](https://pypi.org/project/picosnitch/){ .md-button }
+[:material-package-variant: Packages](https://repology.org/project/picosnitch/versions){ .md-button }
 
-- install `picosnitch` [manually](https://wiki.archlinux.org/title/Arch_User_Repository#Installing_and_upgrading_packages) or using your preferred [AUR helper](https://wiki.archlinux.org/title/AUR_helpers)
-</details>
+---
 
-### [PPA](https://launchpad.net/~elesiuta/+archive/ubuntu/picosnitch) for Ubuntu and derivatives <img src="https://cdn.simpleicons.org/ubuntu" width="16" height="16">
-<details><summary>Details</summary>
+## Web UI
 
-- `sudo add-apt-repository ppa:elesiuta/picosnitch`
-- `sudo apt update`
-- `sudo apt install picosnitch`
-- you may require a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#ubuntu---binary) ([unofficial PPA](https://launchpad.net/~hadret/+archive/ubuntu/bpfcc)) since the version in the [Ubuntu repos](https://repology.org/project/bcc-bpf/versions) sometimes lags behind its [supported kernel](https://github.com/iovisor/bcc/releases)
-</details>
+<video controls muted playsinline loop preload="metadata" width="100%"
+       src="https://github.com/elesiuta/picosnitch/releases/latest/download/web_ui.webm"
+       poster="https://github.com/elesiuta/picosnitch/releases/latest/download/webui-filter-web-content.png"></video>
 
-### [OBS](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) for Debian and derivatives <img src="https://cdn.simpleicons.org/debian" width="16" height="16">
-<details><summary>Details</summary>
+Bandwidth and connection counts broken down by executable, parent,
+domain, port, or user, over a configurable time range. Light and dark
+themes follow your system preference.
 
-- visit the [OBS picosnitch page](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) and follow the instructions for your distribution
-- if you're having issues on bullseye, you may need a newer version of [BCC](https://github.com/iovisor/bcc/blob/master/INSTALL.md#debian---binary)
-</details>
-
-### [OBS](https://software.opensuse.org//download.html?project=home%3Aelesiuta&package=picosnitch) for openSUSE Tumbleweed and derivatives <img src="https://cdn.simpleicons.org/opensuse" width="16" height="16">
-<details><summary>Details</summary>
-
-- `sudo zypper addrepo https://download.opensuse.org/repositories/home:elesiuta/openSUSE_Tumbleweed/home:elesiuta.repo`
-- `sudo zypper refresh`
-- `sudo zypper install picosnitch`
-</details>
-
-### [Copr](https://copr.fedorainfracloud.org/coprs/elesiuta/picosnitch/) for Fedora, Mageia, Mandriva, and derivatives <img src="https://cdn.simpleicons.org/fedora" width="16" height="16">
-<details><summary>Details</summary>
-
-- `sudo dnf copr enable elesiuta/picosnitch`
-- `sudo dnf install picosnitch`
-</details>
-
-### [Nixpkgs](https://search.nixos.org/packages?show=picosnitch) for Nix <img src="https://cdn.simpleicons.org/nixos" width="16" height="16">
-<details><summary>Details</summary>
-
-- install and enable using the [picosnitch service option](https://search.nixos.org/options?show=services.picosnitch.enable)
-  - add `services.picosnitch.enable = true;` to your Nix configuration file (typically `/etc/nixos/configuration.nix`)
-  - run `sudo nixos-rebuild switch`
-- workaround for "Failed to compile BPF module"
-  - `systemctl stop picosnitch`
-  - `sudo picosnitch start-no-daemon` then send SIGINT (ctrl + c)
-  - `systemctl start picosnitch`
-</details>
-
-### [PyPI](https://pypi.org/project/picosnitch/) for any Linux distribution with Python >= 3.8 <img src="https://cdn.simpleicons.org/python" width="16" height="16">
-<details><summary>Details</summary>
-
-- install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
-  - it should be called `python-bcc` or `python-bpfcc`
-- install picosnitch using [pip](https://pip.pypa.io/) or [pipx](https://pypa.github.io/pipx/)
-  - `pipx install "picosnitch[full]"`
-- create a service file for systemd to run picosnitch (recommended)
-  - `picosnitch systemd`
-- optional dependencies (will install from [PyPI](https://pypi.org/) with `[full]` if not already installed)
-  - for notifications: `dbus-python`, `python-dbus`, or `python3-dbus` (name depends on your distro and should be installed from their repo)
-  - for sql server: one of [psycopg](https://pypi.org/project/psycopg/), [pymysql](https://pypi.org/project/PyMySQL/), [mariadb](https://pypi.org/project/mariadb/), or [psycopg2](https://pypi.org/project/psycopg2/) (latter two not included with `[full]`)
-  - for VirusTotal: [requests](https://pypi.org/project/requests/)
-</details>
-
-### [GitHub](https://github.com/elesiuta/picosnitch) for installing from source <img src="https://cdn.simpleicons.org/linux" width="16" height="16">
-<details><summary>Details</summary>
-
-- clone the repo or download `picosnitch.py` and `setup.py`
-- install the [BPF Compiler Collection](https://github.com/iovisor/bcc/blob/master/INSTALL.md) python package for your distribution
-  - it should be called `python-bcc` or `python-bpfcc`
-- install [psutil](https://pypi.org/project/psutil/)
-- install `python-setuptools`
-- install picosnitch with `python setup.py install --user`
-- see other options with `python setup.py [build|install] --help`
-- you can also run the script `picosnitch.py` directly
-</details>
-
-# [Usage](#usage)
-- Running picosnitch
-  - enable/disable autostart on reboot with `systemctl enable|disable picosnitch`
-  - start/stop/restart with `systemctl start|stop|restart picosnitch`
-  - or if you don't use systemd `picosnitch start|stop|restart`
-- Web user interface for browsing past connections
-  - start with `picosnitch webui`
-  - visit [http://localhost:5100](http://localhost:5100) (you change this by setting the environment variables `HOST` and `PORT`)
-- Terminal user interface for browsing past connections
-  - start with `picosnitch view`
-  - `space/enter/f`: filter on entry `e`: exclude entry `backspace/F/E`: remove filter `h/H`: step through history (time offset) `t/T`: cycle time range `u/U`: cycle byte units `r`: refresh view `q`: quit
-- Show usage with `picosnitch help`
-
-# [Configuration](#configuration)
-- Config is stored in `~/.config/picosnitch/config.json`
-  - restart picosnitch if it is currently running for any changes to take effect
-
-```yaml
-{
-  "DB retention (days)": 30, # How many days to keep connection logs in snitch.db
-  "DB sql log": true, # Write connection logs to snitch.db (SQLite)
-  "DB sql server": {}, # Write connection logs to a MariaDB, MySQL, or PostgreSQL server
-  "DB text log": false, # Write connection logs to conn.log
-  "DB write limit (seconds)": 10, # Minimum time between connection log entries
-  # increasing it decreases disk writes by grouping traffic into larger time windows
-  # reducing time precision, decreasing database size, and increasing hash latency
-  "Dash scroll zoom": true, # Enable scroll zooming on plots
-  "Dash theme": "", # Select a theme name from https://bootswatch.com/
-  # requires installing https://pypi.org/project/dash-bootstrap-components/
-  # and https://pypi.org/project/dash-bootstrap-templates/ with pip or pipx
-  "Desktop notifications": true, # Try connecting to dbus to show notifications
-  "Every exe (not just conns)": false, # Check every running executable with picosnitch
-  # these are treated as "connections" with a port of -1
-  # this feature is experimental but should work fairly well, errors should be expected as
-  # picosnitch is unable to open file descriptors for some extremely short-lived processes
-  # if you just want logs (no hashes) to trace process hierarchy, see execsnoop or forkstat
-  "GeoIP lookup": true, # Annotate remote addresses with country code in the terminal UI
-  # uses the DB-IP Country Lite CSV (cached under ~/.cache/picosnitch, refreshed monthly)
-  "Log addresses": true, # Log remote addresses for each connection
-  "Log commands": true, # Log command line args for each executable
-  "Log ignore": [], # List of hashes (str), domains (str), IP subnets (str), or ports (int)
-  # will omit connections that match any of these from the connection log
-  # domains are in reverse domain name notation and will match all subdomains
-  # the process name, executable, and hash will still be recorded in record.json
-  "Log ports": true, # Log local and remote ports for each connection
-  "Perf ring buffer (pages)": 256, # Power of two number of pages for BPF program
-  # only change this if it is giving you errors (e.g. missed events)
-  # picosnitch opens a perf buffer for each event type, so this is multiplied by up to 18
-  "Set RLIMIT_NOFILE": null, # Set the maximum number of open file descriptors (int)
-  # it is used for caching process executables and hashes (typical system default is 1024)
-  # this is good enough for most people since caching is based on executable device + inode
-  # fanotify is used to detect if a cached executable is modified to trigger a hash update
-  "Set st_dev mask": null, # Mask device number for open file descriptors (int)
-  # set to 0 to disable verification if it is giving you errors (e.g. FD cache errors)
-  # defaults to 0 if a btrfs partition is detected, otherwise 0xffffffff
-  "VT API key": "", # API key for VirusTotal, leave blank to disable (str)
-  "VT file upload": false, # Upload file if hash not found, only hashes are used by default
-  "VT request limit (seconds)": 15 # Number of seconds between requests (free tier quota)
-}
+```sh
+picosnitch webui
+# http://localhost:5100  (override with PICOSNITCH_HOST / PICOSNITCH_PORT)
 ```
 
-# [Logging](#logging)
-- A log of seen executables is stored in `~/.config/picosnitch/exe.log`
-  - this is a history of your notifications
-- A record of seen executables is stored in `~/.config/picosnitch/record.json`
-  - this is used for determining whether to create a notification
-  - it contains known process name(s) by executable, executable(s) by process name, and sha256 hash(es) with VirusTotal results by executable
-- Enable `DB sql log` (default) to write the full connection log to `~/.config/picosnitch/snitch.db`
-  - this is used for `picosnitch webui`, `picosnitch tui`, or something like [DB Browser](https://sqlitebrowser.org/)
-  - note, connection times are based on when the group is processed, so they are accurate to within `DB write limit (seconds)` at best, and could be delayed if the previous group is slow to hash
-  - notifications are handled by a separate subprocess, so they are not subject to the same delays as the connection log
-- Use `DB sql server` to write the full connection log to a MariaDB, MySQL, or PostgreSQL server
-  - this is independent of `DB sql log` and is used for providing an [off-system copy to prevent tampering](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS) (use [GRANT](https://www.postgresql.org/docs/current/sql-grant.html) to assign privileges and see [limitations](#limitations) for other caveats)
-  - to configure, add the key `client` to `DB sql server` with value `mariadb`, `psycopg`, `psycopg2`, or `pymysql`, you can also optionally set `table_name`
-  - assign remaining connection parameters for [mariadb](https://mariadb-corporation.github.io/mariadb-connector-python/usage.html#connecting), [psycopg](https://www.psycopg.org/docs/module.html#psycopg2.connect), or [pymysql](https://pymysql.readthedocs.io/en/latest/modules/connections.html) to `DB sql server` as key/value pairs
-- Enable `DB text log` to write the full connection log to `~/.config/picosnitch/conn.log`
-  - this may be useful for watching with another program
-  - it contains the following fields, separated by commas (commas, newlines, and null characters are removed from values)
-  - `entry time, sent bytes, received bytes, executable path, process name, cmdline, sha256, parent executable, parent name, parent cmdline, parent sha256, user id, local port, remote port, local address, remote address, domain`
-- The error log is stored in `~/.config/picosnitch/error.log`
-  - errors will also trigger a notification and are usually caused by far too many or extremely short-lived processes/connections, or suspending your system while a new executable is being hashed
-  - while it is very unlikely for processes/connections to be missed (unless `Every exe (not just conns)` is enabled), picosnitch was designed such that it should still detect this and log an error giving you some indication of what happened
-  - for most people in most cases, this should raise suspicion that a program may be misbehaving
-  - a program should not be able to hide from picosnitch (either by omission or spoofing another program) without picosnitch reporting an error
-  - see [limitations](#limitations) below for other sources of errors
+---
 
-# [Limitations](#limitations)
-- Despite focusing on reliability and notable advantages over [existing tools](https://www.gcardone.net/2020-07-31-per-process-bandwidth-monitoring-on-Linux-with-bpftrace/#existing-tools-to-measure-bandwidth-usage-on-linux), picosnitch still has some limitations depending on its use case
-- When used as a security/auditing tool, a program with sufficient privileges might alter picosnitch or its logs, or employ alternative communication mechanisms not monitored by picosnitch and potentially invisible to the kernel, some mitigations include
-  - use `DB sql server` to maintain an [off-system copy of your logs](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS)
-  - cross-checking with a [standalone router/firewall](https://en.wikipedia.org/wiki/List_of_router_and_firewall_distributions) to ensure all communication is accounted for
-  - use [sandboxing](https://wiki.archlinux.org/title/Security#Sandboxing_applications) such as [flatpak](https://www.privacyguides.org/linux-desktop/sandboxing/#flatpak)
-- Detecting open sockets and identifying the process is very reliable with [BPF](https://ebpf.io/); however, the executable name and path could be ambiguous or spoofed if malicious, as a countermeasure, picosnitch hashes the executable to provide a reliable identifier
-  - only the process executable itself is hashed, leaving out shared libraries (e.g. LD_PRELOAD rootkits), extensions, or scripts which could become compromised
-    - some possible mitigations include using an [immutable OS](https://www.redhat.com/sysadmin/immutability-silverblue) or tools such as [AIDE](https://wiki.archlinux.org/title/AIDE), [fs-verity](https://www.kernel.org/doc/html/latest/filesystems/fsverity.html), [IMA/EVM](https://wiki.gentoo.org/wiki/Integrity_Measurement_Architecture), or [debsums (with caveats)](https://manpages.debian.org/unstable/debsums/debsums.1.en.html)
-  - for extremely short-lived processes, picosnitch may not be able to open a file descriptor in time in order to hash it (this is rare)
-  - the device and inode of the opened file descriptor are checked against what was reported by the BPF program to detect if the executable was replaced; however, BTRFS uses non-unique inodes, negating this protection (a negligible issue mentioned for completeness)
-  - if hashing the executable fails for any reason, the traffic will still be logged with all available information, accompanied by an error notification
-- A large influx of new processes or connections may lead to some missed log entries as picosnitch preserves system traffic latency rather than impeding it to catch up with processing event callbacks
-  - such incidents will be detected, logged as an error, and you will be notified
-  - you can mitigate this by increasing `Perf ring buffer (pages)`
-- In addition to bugs, please report any other limitations that may have been missed!
+## Terminal UI
+
+<video controls muted playsinline loop preload="metadata" width="100%"
+       src="https://github.com/elesiuta/picosnitch/releases/latest/download/tui.webm"
+       poster="https://github.com/elesiuta/picosnitch/releases/latest/download/tui-process-names.png"></video>
+
+A curses-based read-only view of the same database, useful over SSH or
+on headless boxes. Filter by executable, parent, command line, domain,
+address, or user; GeoIP country codes are shown next to remote
+addresses.
+
+```sh
+picosnitch tui
+```
+
+---
+
+## Live event feed
+
+<a href="https://github.com/elesiuta/picosnitch/releases/latest/download/top-default.png">
+  <img src="https://github.com/elesiuta/picosnitch/releases/latest/download/top-default.png"
+       alt="picosnitch top live feed" width="100%">
+</a>
+
+`picosnitch top` streams events directly from the running daemon:
+every new connection as it happens, with cumulative
+sent/received counters and per-row process detail. Requires root
+because it reads the daemon's local socket.
+
+```sh
+sudo picosnitch top
+```
+
+---
+
+## Install
+
+The recommended install is system-wide via
+[pipx](https://pipx.pypa.io/stable/how-to/install-pipx/)
+(requires pipx >= 1.5.0):
+
+```sh
+sudo pipx install picosnitch --global
+sudo picosnitch systemd
+sudo systemctl enable --now picosnitch
+```
+
+See [configuration](configuration.md) for the full TOML reference,
+[how it works](how-it-works.md) for the architecture overview, the
+[database schema](schema.md) if you want to query the SQLite log
+directly, and [more screenshots](screenshots.md) of every UI variant.
+For distribution-packaged builds, see
+[Repology](https://repology.org/project/picosnitch/versions).

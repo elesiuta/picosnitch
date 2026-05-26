@@ -7,9 +7,11 @@ on:
         description: "Artifact retention (1-90 days)"
         required: false
         default: "14"
+  release:
+    types: [created]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   screenshots:
@@ -48,6 +50,7 @@ jobs:
         run: ls -la docs/screenshots/out/
 
       - name: Upload screenshot artifacts
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
           name: picosnitch-screenshots
@@ -55,3 +58,30 @@ jobs:
           retention-days: ${{ github.event.inputs.retention_days }}
           if-no-files-found: error
 
+      - name: Attach screenshots to release
+        # Curated set of files referenced from README.md and docs/index.md.
+        # Update this list whenever the docs reference new/different files.
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            docs/screenshots/out/webui-overview-1d.png
+            docs/screenshots/out/webui-overview-1d-light.png
+            docs/screenshots/out/webui-by-domain-1d.png
+            docs/screenshots/out/webui-filter-web-content.png
+            docs/screenshots/out/webui-live.png
+            docs/screenshots/out/tui-domains.png
+            docs/screenshots/out/tui-executables.png
+            docs/screenshots/out/tui-process-names.png
+            docs/screenshots/out/tui-parent-names.png
+            docs/screenshots/out/tui-remote-addresses.png
+            docs/screenshots/out/tui-find.png
+            docs/screenshots/out/tui-live.png
+            docs/screenshots/out/top-default.png
+            docs/screenshots/out/top-sort-recv.png
+            docs/screenshots/out/top-paused.png
+            docs/screenshots/out/top-help.png
+            docs/screenshots/out/web_ui.webm
+            docs/screenshots/out/tui.webm
+            docs/screenshots/out/top.webm
+            docs/screenshots/out/terminal_ui.webm

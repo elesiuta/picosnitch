@@ -218,17 +218,16 @@ def run_secondary(
     if sql_kwargs := dict(config.database.remote):
         sql_client = sql_kwargs.pop("client", "no client error")
         conn_table = sql_kwargs.pop("connections_table", "connections")
-        exe_table = sql_kwargs.pop("executables_table", "executables")
         if sql_client not in ["mariadb", "psycopg", "psycopg2", "pymysql"]:
             q_error.put(f'unsupported database.remote "client": {sql_client}')
             sql_kwargs = {}
-        elif not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", conn_table) or not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", exe_table):
-            q_error.put(f"invalid remote table name: {conn_table!r} or {exe_table!r}")
+        elif not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", conn_table):
+            q_error.put(f"invalid remote table name: {conn_table!r}")
             sql_kwargs = {}
         else:
             sql = importlib.import_module(sql_client)
-            sql_insert_exe = sqlite_insert_exe.replace("?", "%s").replace("OR IGNORE ", "IGNORE ").replace("executables", exe_table)
-            sql_select_exe = sqlite_select_exe.replace("?", "%s").replace("executables", exe_table)
+            sql_insert_exe = sqlite_insert_exe.replace("?", "%s").replace("OR IGNORE ", "IGNORE ")
+            sql_select_exe = sqlite_select_exe.replace("?", "%s")
             sql_insert_dom = sqlite_insert_dom.replace("?", "%s").replace("OR IGNORE ", "IGNORE ")
             sql_select_dom = sqlite_select_dom.replace("?", "%s")
             sql_insert_addr = sqlite_insert_addr.replace("?", "%s").replace("OR IGNORE ", "IGNORE ")
