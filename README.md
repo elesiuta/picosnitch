@@ -54,7 +54,7 @@ sudo systemctl enable --now picosnitch
 
 - requires `pipx` >= 1.5.0 (this is when the `--global` flag was added); see [pipx installation](https://pipx.pypa.io/stable/how-to/install-pipx/) if you don't already have it
 - `sudo picosnitch systemd` writes `/usr/lib/systemd/system/picosnitch.service`
-- `picosnitch[sql]` adds optional MariaDB / MySQL / PostgreSQL drivers for [remote logging](#configuration)
+- install with `sudo pipx install 'picosnitch[sql]' --global` for optional MariaDB / MySQL / PostgreSQL drivers for [remote logging](#configuration)
 
 # [Usage](#usage)
 
@@ -66,7 +66,7 @@ sudo systemctl enable --now picosnitch
 - `picosnitch webui`: web UI for browsing past connections
   - visit [http://localhost:5100](http://localhost:5100); override with the `PICOSNITCH_HOST` / `PICOSNITCH_PORT` environment variables
 - `picosnitch tui`: terminal UI for browsing past connections
-- `sudo picosnitch top`: live event feed (requires root to read the daemon's event socket)
+- `sudo picosnitch top`: live event feed (requires root to read the daemon's event socket; starts and stops its own daemon if one isn't running)
 - `picosnitch status`: show daemon pid and systemd service state
 - `picosnitch help`: full usage
 
