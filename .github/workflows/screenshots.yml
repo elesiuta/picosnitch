@@ -67,7 +67,9 @@ jobs:
           files: |
             docs/screenshots/out/webui-overview-1d.png
             docs/screenshots/out/webui-overview-1d-light.png
+            docs/screenshots/out/webui-overview-1h.png
             docs/screenshots/out/webui-by-domain-1d.png
+            docs/screenshots/out/webui-by-exe-1d.png
             docs/screenshots/out/webui-filter-web-content.png
             docs/screenshots/out/webui-live.png
             docs/screenshots/out/tui-domains.png
