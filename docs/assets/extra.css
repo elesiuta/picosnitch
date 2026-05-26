@@ -55,3 +55,17 @@
   fill: #263238;
   stroke: #455a64;
 }
+
+/* Always show the drawer hamburger so the left nav can be hidden at any
+   window width. Upstream mkdocs-material hides it at >=76.25em because
+   the primary sidebar is rendered inline at that width; we keep it
+   visible and let the user toggle the sidebar via the existing
+   #__drawer checkbox. */
+@media screen and (min-width: 76.25em) {
+  .md-header__button.md-icon[for="__drawer"] {
+    display: inline-block;
+  }
+  #__drawer:checked ~ .md-container .md-sidebar--primary {
+    display: none;
+  }
+}

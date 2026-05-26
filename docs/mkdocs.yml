@@ -32,6 +32,7 @@ theme:
   features:
     - navigation.instant
     - navigation.tracking
+    - toc.integrate
     - content.code.copy
   palette:
     - media: "(prefers-color-scheme: light)"

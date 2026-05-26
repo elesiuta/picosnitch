@@ -75,6 +75,7 @@ The recommended install is system-wide via
 (requires pipx >= 1.5.0):
 
 ```sh
+sudo pipx ensurepath --global
 sudo pipx install picosnitch --global
 sudo picosnitch systemd
 sudo systemctl enable --now picosnitch

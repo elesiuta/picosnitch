@@ -20,7 +20,7 @@
   <tr>
     <td align="center" width="34%" valign="top">
       <a href="https://github.com/elesiuta/picosnitch/releases/latest/download/webui-by-exe-1d.png"><img src="https://github.com/elesiuta/picosnitch/releases/latest/download/webui-by-exe-1d.png" alt="picosnitch web UI: bandwidth grouped by executable with drill-down"></a>
-      <br><sub><b>picosnitch webui</b><br>bandwidth by executable, with drill-down</sub>
+      <br><sub><b>picosnitch webui</b><br>browse and chart past connections</sub>
     </td>
     <td align="center" width="33%" valign="top">
       <a href="https://github.com/elesiuta/picosnitch/releases/latest/download/tui-executables.png"><img src="https://github.com/elesiuta/picosnitch/releases/latest/download/tui-executables.png" alt="picosnitch terminal UI: bandwidth per executable"></a>
@@ -43,9 +43,10 @@
   <img align="right" hspace="20" vspace="6" src="https://repology.org/badge/vertical-allrepos/picosnitch.svg?exclude_unsupported=1&header=Packaging%20status" alt="Packaging status">
 </a>
 
-The recommended install is a system-wide [pipx](https://pipx.pypa.io/stable/how-to/install-pipx/) install. It works on every Linux distribution with Python >= 3.12 and a kernel new enough to run modern [libbpf](https://github.com/libbpf/libbpf) CO-RE programs (Linux 5.8+).
+The recommended install is a system-wide [pipx](https://pipx.pypa.io/stable/how-to/install-pipx/) install. It works on every Linux distribution with Python >= 3.12 and a kernel new enough to run modern [libbpf](https://github.com/libbpf/libbpf) CO-RE programs.
 
 ```sh
+sudo pipx ensurepath --global
 sudo pipx install picosnitch --global
 sudo picosnitch systemd
 sudo systemctl enable --now picosnitch

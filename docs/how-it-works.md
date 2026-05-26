@@ -31,8 +31,8 @@ out because it has to drop root to talk to the user's desktop bus.
 The UIs read the local SQLite database directly.
 
 ```mermaid
-%%{init: {"flowchart": {"useMaxWidth": false, "htmlLabels": true}, "themeVariables": {"fontSize": "10px"}} }%%
-flowchart LR
+%%{init: {"flowchart": {"useMaxWidth": true, "htmlLabels": true}, "themeVariables": {"fontSize": "14px"}} }%%
+flowchart TD
     subgraph K[Kernel]
         BPF["<b>BPF</b><br/>socket hooks for new<br/>TCP/UDP connections"]
         FAN["<b>fanotify</b><br/>watches for changes to<br/>known executables"]
@@ -94,10 +94,9 @@ what BPF reported to detect runtime replacement of the executable.
 Filesystems that reuse inodes across subvolumes (e.g. btrfs) defeat
 this check and are auto-detected at startup (`st_dev_mask = 0`).
 
-Grandparents matter because applications often spawn helpers to do
-their network I/O (for example, a browser tab spawning a network
-process), and the grandparent is usually the human-facing application
-the user actually launched.
+Parents and grandparents matter because applications often spawn
+helpers to do their network I/O, and the executable the user actually
+launched is somewhere up the ancestry chain.
 
 ## Storage
 
