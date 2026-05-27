@@ -18,7 +18,7 @@ Architecture: any
 Pre-Depends: dpkg (>= 1.16.1), python3 (>= 3.12), ${misc:Pre-Depends}
 Depends: ${python:Depends}, ${misc:Depends}, libbpf1
 Recommends: libnotify-bin
-Suggests: pipx, python3-psycopg, python3-pymysql
+Suggests: python3-psycopg, python3-pymysql
 Description: picosnitch
  Monitor network traffic per executable using BPF
 

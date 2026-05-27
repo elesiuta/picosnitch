@@ -16,12 +16,15 @@ BuildRequires:  libbpf-devel
 Requires:       python3 >= 3.12
 Requires:       libbpf
 Recommends:     libnotify
-Suggests:       pipx
 
 %if 0%{?fedora}
 BuildRequires:  systemd-rpm-macros
 BuildRequires:  systemd-units
 BuildRequires:  util-linux-core
+%endif
+
+%if 0%{?suse_version}
+%define pythons python3
 %endif
 
 %description
@@ -37,6 +40,9 @@ Monitors your bandwidth, breaking down traffic by executable, hash, parent, doma
 
 %install
 %pyproject_install
+%if 0%{?fedora}
+%pyproject_save_files picosnitch
+%endif
 mkdir -vp %{buildroot}%{_unitdir}
 install -D -m 644 debian/picosnitch.service %{buildroot}%{_unitdir}/%{name}.service
 
@@ -49,13 +55,21 @@ install -D -m 644 debian/picosnitch.service %{buildroot}%{_unitdir}/%{name}.serv
 %postun
 %systemd_postun_with_restart %{name}.service
 
+%if 0%{?fedora}
+%files -n picosnitch -f %{pyproject_files}
+%license LICENSE
+%doc README.md
+/usr/bin/picosnitch
+%{_unitdir}/%{name}.service
+%else
 %files -n picosnitch
 %license LICENSE
 %doc README.md
-%{python3_sitelib}/picosnitch/
-%{python3_sitelib}/picosnitch-*.dist-info/
+%{python3_sitearch}/picosnitch/
+%{python3_sitearch}/picosnitch-*.dist-info/
 /usr/bin/picosnitch
 %{_unitdir}/%{name}.service
+%endif
 
 %changelog
 * Wed May 27 2026 Eric Lesiuta <elesiuta@gmail.com> - 2.0.1-1
