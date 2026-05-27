@@ -4,6 +4,7 @@
 import atexit
 import importlib
 import logging
+import multiprocessing
 import os
 import re
 import sqlite3
@@ -124,6 +125,7 @@ def start_picosnitch() -> int:
     if not sys.platform.startswith("linux"):
         logging.error("Did not detect a supported operating system")
         return 1
+    multiprocessing.set_start_method("fork", force=True)
     pid_file = RUN_DIR / "picosnitch.pid"
 
     class PicoDaemon(Daemon):

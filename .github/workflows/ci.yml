@@ -27,17 +27,18 @@ jobs:
     uses: ./.github/workflows/build.yml
 
   test:
-    name: Tests (${{ matrix.platform }}, requires root/BPF)
+    name: Tests (${{ matrix.platform.name }}, py${{ matrix.python-version }}, requires root/BPF)
     needs: build
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.platform.runner }}
     strategy:
       fail-fast: false
       matrix:
-        include:
+        python-version: ["3.12", "3.13", "3.14"]
+        platform:
           - runner: ubuntu-latest
-            platform: manylinux_2_34_x86_64
+            name: manylinux_2_34_x86_64
           - runner: ubuntu-24.04-arm
-            platform: manylinux_2_34_aarch64
+            name: manylinux_2_34_aarch64
     steps:
       - uses: actions/checkout@v6
         with:
@@ -49,13 +50,13 @@ jobs:
           sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v8
         with:
-          name: wheel-${{ matrix.platform }}
+          name: wheel-${{ matrix.platform.name }}
           path: dist
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
       - name: Install runtime dependencies
         # libbpf1 provides libbpf.so for picosnitch's ctypes wrapper.
         # curl/wget are exercised by the tests as short-lived processes.

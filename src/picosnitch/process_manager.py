@@ -3,7 +3,6 @@
 
 import collections.abc
 import multiprocessing
-import multiprocessing.connection
 import os
 
 
