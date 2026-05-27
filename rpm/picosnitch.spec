@@ -4,7 +4,7 @@ Release:        1%{?dist}
 License:        GPL-3.0-or-later
 Summary:        Monitor network traffic per executable using BPF
 Url:            https://github.com/elesiuta/picosnitch
-Source:         https://github.com/elesiuta/picosnitch/releases/download/v%{version}/picosnitch.tar.gz
+Source:         https://github.com/elesiuta/picosnitch/archive/refs/tags/v%{version}.tar.gz#/%{name}-%{version}.tar.gz
 BuildRequires:  python3-devel >= 3.12
 BuildRequires:  python3-hatchling
 BuildRequires:  python3-pip
@@ -30,7 +30,7 @@ Monitors your bandwidth, breaking down traffic by executable, hash, parent, doma
 %global debug_package %{nil}
 
 %prep
-%setup -c -q -n %{name}
+%autosetup -n %{name}-%{version}
 
 %build
 %pyproject_wheel

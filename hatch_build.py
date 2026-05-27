@@ -52,11 +52,30 @@ class BPFBuildHook(BuildHookInterface):
             register(bpf_obj)
             return
 
-        # Generate vmlinux.h if needed
+        # Determine target architecture
+        arch_map = {"x86_64": "x86", "aarch64": "arm64"}
+        bpf_target = arch_map[arch]
+
+        # Select vmlinux.h with this precedence:
+        #   1. An existing src/picosnitch/bpf/vmlinux.h
+        #   2. Our vendored per-arch header
+        #   3. bpftool BTF dump from the running kernel
         vmlinux_h = os.path.join(bpf_src_dir, "vmlinux.h")
-        if not os.path.exists(vmlinux_h):
+        vendored_vmlinux = os.path.join(bpf_src_dir, f"vmlinux_{bpf_target}.h")
+        if os.path.exists(vmlinux_h):
+            pass
+        elif os.path.exists(vendored_vmlinux):
+            import shutil
+
+            shutil.copyfile(vendored_vmlinux, vmlinux_h)
+        else:
             if not os.path.exists("/sys/kernel/btf/vmlinux"):
-                raise RuntimeError("Cannot compile BPF: /sys/kernel/btf/vmlinux not found.\nEither provide a pre-compiled bpf/picosnitch.bpf.o or build on a kernel with CONFIG_DEBUG_INFO_BTF=y")
+                raise RuntimeError(
+                    f"Cannot compile BPF: no vendored vmlinux_{bpf_target}.h and "
+                    "/sys/kernel/btf/vmlinux not available.\n"
+                    "Either provide a pre-compiled bpf/picosnitch.bpf.o or build "
+                    "on a kernel with CONFIG_DEBUG_INFO_BTF=y"
+                )
             result = subprocess.run(
                 ["bpftool", "btf", "dump", "file", "/sys/kernel/btf/vmlinux", "format", "c"],
                 capture_output=True,
@@ -65,10 +84,6 @@ class BPFBuildHook(BuildHookInterface):
             )
             with open(vmlinux_h, "w") as f:
                 f.write(result.stdout)
-
-        # Determine target architecture
-        arch_map = {"x86_64": "x86", "aarch64": "arm64"}
-        bpf_target = arch_map[arch]
 
         # Compile
         subprocess.run(

@@ -20,9 +20,7 @@ dependencies = []
 
 [project.optional-dependencies]
 sql = ["psycopg[binary]", "pymysql"]
-all = [
-    "picosnitch[sql]"
-]
+all = ["picosnitch[sql]"]
 
 [project.scripts]
 picosnitch = "picosnitch.cli:start_picosnitch"
@@ -37,9 +35,11 @@ include = [
     "/README.md",
     "/LICENSE",
 ]
+exclude = ["src/picosnitch/bpf/vmlinux*.h"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/picosnitch"]
+exclude = ["src/picosnitch/bpf/vmlinux*.h"]
 
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "hatch_build.py"
