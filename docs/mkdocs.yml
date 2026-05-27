@@ -75,6 +75,10 @@ markdown_extensions:
   - toc:
       permalink: true
 
+plugins:
+  - search
+  - glightbox
+
 extra_css:
   - assets/extra.css
 
