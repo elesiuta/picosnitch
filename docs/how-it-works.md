@@ -27,8 +27,8 @@ events into per-executable records, and the **secondary** writer is
 the only process that touches the database. Two helpers
 (**fuse**, **virustotal**) are isolated so a slow hash or a flaky
 API call cannot back up the hot path, and **notifications** is split
-out because it has to drop root to talk to the user's desktop bus.
-The UIs read the local SQLite database directly.
+out because it has to drop root to send toasts as the desktop user
+via `notify-send`. The UIs read the local SQLite database directly.
 
 ```mermaid
 %%{init: {"flowchart": {"useMaxWidth": true, "htmlLabels": true}, "themeVariables": {"fontSize": "14px"}} }%%

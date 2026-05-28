@@ -111,7 +111,7 @@ ignore_sha256 = []            # list of executable sha256 hashes
 
 [desktop]
 user = ""                     # username to send notifications to; defaults to $SUDO_UID
-notifications = true          # try connecting to dbus to show desktop notifications
+notifications = true          # show desktop notifications via notify-send (libnotify)
 geoip_lookup = true           # annotate remote addresses with a country code in the TUI/webui
                               # uses the DB-IP Country Lite CSV cached under /var/cache/picosnitch
 
