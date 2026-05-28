@@ -52,16 +52,16 @@ class BPFBuildHook(BuildHookInterface):
             register(bpf_obj)
             return
 
-        # Determine target architecture
-        arch_map = {"x86_64": "x86", "aarch64": "arm64"}
-        bpf_target = arch_map[arch]
+        # Kernel-style target arch name (matches arch/* in the kernel tree and
+        # libbpf's __TARGET_ARCH_* macro from bpf_tracing.h).
+        bpf_target_arch = {"x86_64": "x86", "aarch64": "arm64"}[arch]
 
         # Select vmlinux.h with this precedence:
         #   1. An existing src/picosnitch/bpf/vmlinux.h
         #   2. Our vendored per-arch header
         #   3. bpftool BTF dump from the running kernel
         vmlinux_h = os.path.join(bpf_src_dir, "vmlinux.h")
-        vendored_vmlinux = os.path.join(bpf_src_dir, f"vmlinux_{bpf_target}.h")
+        vendored_vmlinux = os.path.join(bpf_src_dir, f"vmlinux_{bpf_target_arch}.h")
         if os.path.exists(vmlinux_h):
             pass
         elif os.path.exists(vendored_vmlinux):
@@ -71,7 +71,7 @@ class BPFBuildHook(BuildHookInterface):
         else:
             if not os.path.exists("/sys/kernel/btf/vmlinux"):
                 raise RuntimeError(
-                    f"Cannot compile BPF: no vendored vmlinux_{bpf_target}.h and "
+                    f"Cannot compile BPF: no vendored vmlinux_{bpf_target_arch}.h and "
                     "/sys/kernel/btf/vmlinux not available.\n"
                     "Either provide a pre-compiled bpf/picosnitch.bpf.o or build "
                     "on a kernel with CONFIG_DEBUG_INFO_BTF=y"
@@ -93,7 +93,7 @@ class BPFBuildHook(BuildHookInterface):
                 "-O2",
                 "-target",
                 "bpf",
-                f"-D__TARGET_ARCH_{bpf_target}",
+                f"-D__TARGET_ARCH_{bpf_target_arch}",
                 "-Wall",
                 "-Werror",
                 # Anonymous forward decls inside structs in libbpf's curated vmlinux.h

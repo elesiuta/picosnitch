@@ -34,8 +34,8 @@ include = [
     "/hatch_build.py",
     "/README.md",
     "/LICENSE",
+    "/debian/picosnitch.service",
 ]
-exclude = ["src/picosnitch/bpf/vmlinux*.h"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/picosnitch"]

@@ -118,11 +118,9 @@ def compile_bpf(output_path: str | None = None, arch: str | None = None) -> str:
     if arch is None:
         arch = platform.machine()
 
-    arch_to_bpf_target = {
-        "x86_64": "x86",
-        "aarch64": "arm64",
-    }
-    bpf_target_arch = arch_to_bpf_target.get(arch, arch)
+    # Kernel-style target arch name (matches arch/* in the kernel tree and
+    # libbpf's __TARGET_ARCH_* macro from bpf_tracing.h).
+    bpf_target_arch = {"x86_64": "x86", "aarch64": "arm64"}.get(arch, arch)
 
     bpf_src_dir = Path(__file__).resolve().parent / "bpf"
     bpf_src = bpf_src_dir / "picosnitch.bpf.c"
