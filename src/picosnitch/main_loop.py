@@ -107,14 +107,17 @@ def run_main_loop(config: Config, state: State) -> int:
     # set signals
     subprocesses = [p_monitor, p_fuse, p_virustotal, p_primary, p_secondary, p_notifications]
     shutdown_event = threading.Event()
-
+    resume_event = threading.Event()
     signal.signal(signal.SIGINT, lambda signum, frame: shutdown_event.set())
     signal.signal(signal.SIGTERM, lambda signum, frame: shutdown_event.set())
+    signal.signal(signal.SIGUSR1, lambda signum, frame: resume_event.set())
     # watch subprocesses
     suspend_check_last = time.time()
     try:
         while not shutdown_event.is_set():
-            time.sleep(5)
+            resume_event.wait(timeout=5)
+            if shutdown_event.is_set():
+                break
             if not all(p.is_alive() for p in subprocesses):
                 dead = " ".join([p.name for p in subprocesses if not p.is_alive()])
                 q_error.put(f"picosnitch subprocess died, attempting restart, terminate by running `picosnitch stop` ({dead})")
@@ -127,7 +130,9 @@ def run_main_loop(config: Config, state: State) -> int:
                 q_error.put("picosnitch memory usage exceeded 4096 MB, attempting restart")
                 break
             suspend_check_now = time.time()
-            if suspend_check_now - suspend_check_last > 20:
+            if resume_event.is_set() or suspend_check_now - suspend_check_last > 20:
+                resume_event.clear()
+                logging.info("restarting picosnitch monitor after resuming from suspend")
                 p_monitor.q_in.put("terminate")
                 p_monitor.terminate()
                 p_monitor.q_in.get()
