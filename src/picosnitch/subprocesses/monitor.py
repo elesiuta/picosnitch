@@ -33,6 +33,30 @@ def _read_proc_comm(pid: int) -> str:
         return ""
 
 
+def _classify_inode_fallback(st_dev: int, st_ino: int, exe: str) -> str:
+    """classify a resolved path before it is stored in dev_ino_fallback, which is
+    keyed by (dev, ino) alone and reused for later events that have no comm.
+
+    realpath collapses symlink aliases to one canonical file (busybox ->
+    /bin/busybox, python -> python3.13) with st_nlink == 1, which is what the
+    kernel reports for live procs anyway. hardlink multi-call binaries (uutils)
+    have st_nlink > 1 and no canonical name, so return a '<multi-call:dev,ino>'
+    sentinel rather than claim an arbitrary hardlink. inode re-verified after
+    realpath so a name is never attributed unless dev+ino still match."""
+    if not exe or exe.startswith("<multi-call:"):
+        return exe
+    try:
+        canonical = os.path.realpath(exe)
+        stat = os.stat(canonical)
+    except OSError:
+        return exe
+    if (stat.st_dev & ST_DEV_MASK) != st_dev or stat.st_ino != st_ino:
+        return exe
+    if stat.st_nlink > 1:
+        return f"<multi-call:dev={st_dev},ino={st_ino}>"
+    return canonical
+
+
 def _read_proc_status_uid(pid: int) -> int:
     """Return the effective UID for `pid` from /proc/[pid]/status.
 
@@ -254,6 +278,25 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     # to a single inode; the kernel distinguishes them per-process via
     # /proc/PID/exe but the inode alone is ambiguous.
     ino_path_cache: dict[str, str] = {}
+    # last-resort fallback keyed only by (dev, ino), used when the live
+    # readlink and the (dev, ino, comm) lookup both miss (e.g. BPF reports a
+    # worker-thread comm like `tokio-rt-worker` matching no binary). value is
+    # classified once by _classify_inode_fallback(): a canonical path, or a
+    # '<multi-call:dev,ino>' sentinel for hardlink multi-call binaries.
+    dev_ino_fallback: dict[str, str] = {}
+    multi_call_reported: set[str] = set()
+
+    def _record_inode_fallback(sig: str, st_dev: int, st_ino: int, exe: str) -> None:
+        """classify and memoize the (dev, ino) fallback name the first time an inode
+        is resolved (O(1), so multi-call binaries with many names don't trigger
+        rescans). emits one q_error per hardlink multi-call inode when first seen."""
+        if not exe or exe.startswith("<multi-call:") or sig in dev_ino_fallback:
+            return
+        label = _classify_inode_fallback(st_dev, st_ino, exe)
+        dev_ino_fallback[sig] = label
+        if label.startswith("<multi-call:") and sig not in multi_call_reported:
+            multi_call_reported.add(sig)
+            q_error.put(f"monitor.get_fd: hardlink multi-call inode dev={st_dev} ino={st_ino} (e.g. {exe}), fallback reports {label!r} when /proc is gone")
 
     # helper to find executable by comm name and inode when /proc/PID/exe is unavailable
     def _find_exe_by_inode(comm: str, st_dev: int, st_ino: int) -> str:
@@ -270,7 +313,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             except Exception:
                 pass
         # Try common system directories
-        for prefix in ("/usr/bin", "/usr/sbin", "/bin", "/sbin", "/usr/local/bin", "/usr/local/sbin"):
+        for prefix in ("/usr/bin", "/usr/sbin", "/bin", "/sbin", "/usr/local/bin", "/usr/local/sbin", "/usr/libexec"):
             candidate = os.path.join(prefix, comm)
             try:
                 stat = os.stat(candidate)
@@ -279,6 +322,21 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             except Exception:
                 continue
         return ""
+
+    def _read_tgid_comm(pid: int) -> str:
+        """Return the thread group leader's comm from /proc/<pid>/comm.
+
+        BPF reports task->comm of the *current task*, which for worker
+        threads is the thread name set via prctl(PR_SET_NAME) (e.g.
+        `tokio-rt-worker`, `libuv-worker`, `sshd-session`) rather than
+        the binary name. Reading /proc/<tgid>/comm gives us the leader's
+        comm, which usually matches the binary's basename and lets
+        _find_exe_by_inode() resolve it on disk."""
+        try:
+            with open(f"/proc/{pid}/comm", "r") as f:
+                return f.read().strip()
+        except OSError:
+            return ""
 
     # function for getting an existing or opening a new file descriptor based on st_dev and st_ino
     def get_fd(st_dev: int, st_ino: int, pid: int, port: int, comm: str = "") -> tuple[int, int, int, str, str]:
@@ -297,6 +355,26 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             pass
         # per-(dev, ino, comm) fallback key for when /proc is gone
         comm_sig = f"{sig} {comm}"
+
+        def _resolve_when_proc_gone() -> str:
+            """best-effort exe resolution when the /proc/PID/exe readlink failed.
+
+            comm only locates a candidate; _find_exe_by_inode verifies its
+            (dev, ino) against the event inode, so at worst comm names another
+            hardlink of the same inode (same bytes, same hash).
+            with no comm match, fall back to dev_ino_fallback (sentinel for
+            hardlink multi-call inodes)."""
+            candidate = ino_path_cache.get(comm_sig, "")
+            if not candidate and comm:
+                candidate = _find_exe_by_inode(comm, st_dev, st_ino)
+            if not candidate:
+                leader_comm = _read_tgid_comm(pid)
+                if leader_comm and leader_comm != comm:
+                    candidate = _find_exe_by_inode(leader_comm, st_dev, st_ino)
+            # an inode-verified candidate names a hardlink of the exact event
+            # inode, trust it; otherwise use the comm-less fallback
+            return candidate or dev_ino_fallback.get(sig, "")
+
         try:
             # check if it is in the cache and move it to the most recent position
             fd_dict.move_to_end(sig)
@@ -308,16 +386,16 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                 fd_dict[f"tmp{sig}"] = (0,)
                 fd_dict.move_to_end(f"tmp{sig}", last=False)
                 raise Exception("previous attempt failed, probably due to process terminating too quickly, try again")
-            # cache hit: prefer the per-PID exe, then per-(ino, comm) cache,
-            # then resolve by comm name on disk, finally the fd_dict's
-            # last-seen exe as a final fallback
-            exe = proc_exe or ino_path_cache.get(comm_sig, "")
-            if not exe and comm:
-                exe = _find_exe_by_inode(comm, st_dev, st_ino)
-            if not exe:
-                exe = cached_exe
-            if exe:
+            # cache hit: prefer the per-PID exe (kernel-authoritative for
+            # multi-call binaries), then the staged fallback chain, finally
+            # the fd_dict's last-seen exe.
+            exe = proc_exe or _resolve_when_proc_gone() or cached_exe
+            # only cache non-empty, non-sentinel resolutions; an empty value
+            # would poison ino_path_cache for a (dev, ino, comm) tuple whose
+            # first event was a dead process, masking later live lookups
+            if exe and not exe.startswith("<multi-call:"):
                 ino_path_cache[comm_sig] = exe
+                _record_inode_fallback(sig, st_dev, st_ino, exe)
         except Exception:
             # open a new file descriptor and pop off the oldest one
             # watch it with fanotify, and also cache the apparent executable path with it
@@ -327,15 +405,8 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                 fd_path = f"/proc/{self_pid}/fd/{fd}"
             except Exception:
                 fd, fd_path = 0, ""
-            exe = proc_exe
-            # fallback: if /proc/PID/exe is gone, resolve exe from per-(ino, comm)
-            # cache, then by comm name search on disk
-            if not exe:
-                if comm_sig in ino_path_cache:
-                    exe = ino_path_cache[comm_sig]
-                elif comm:
-                    exe = _find_exe_by_inode(comm, st_dev, st_ino)
-            if not fd and exe:
+            exe = proc_exe or _resolve_when_proc_gone()
+            if not fd and exe and not exe.startswith("<multi-call:"):
                 try:
                     fd = os.open(exe, os.O_RDONLY)
                     # verify the inode still matches before caching
@@ -347,16 +418,18 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                         fd, fd_path = 0, ""
                 except Exception:
                     fd, fd_path = 0, ""
-            # cache resolved exe path by (ino, comm) for future lookups
-            if exe:
+            # cache resolved exe for future lookups (skip empty and sentinel,
+            # see cache-hit branch above)
+            if exe and not exe.startswith("<multi-call:"):
                 ino_path_cache[comm_sig] = exe
+                _record_inode_fallback(sig, st_dev, st_ino, exe)
             if fd and (st_dev, st_ino) != get_fstat(fd):
                 if EVERY_EXE or port != -1:
-                    q_error.put(f"Exe inode changed for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino}) before FD could be opened, using port: {port}")
+                    q_error.put(f"monitor.get_fd: exe inode changed for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino}) before FD could be opened, using port: {port}")
                 st_dev, st_ino = get_fstat(fd)
                 sig = f"{st_dev} {st_ino}"
                 if EVERY_EXE or port != -1:
-                    q_error.put(f"New inode for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino} exe: {exe})")
+                    q_error.put(f"monitor.get_fd: new inode for (pid: {pid} fd: {fd} dev: {st_dev} ino: {st_ino} exe: {exe})")
             fd_dict[sig] = (fd, fd_path, exe)
             try:
                 if fd_old := fd_dict.popitem(last=False)[1][0]:
