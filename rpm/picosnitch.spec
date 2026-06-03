@@ -1,5 +1,5 @@
 Name:           picosnitch
-Version:        2.0.2
+Version:        2.0.3
 Release:        1%{?dist}
 License:        GPL-3.0-or-later
 Summary:        Monitor network traffic per executable using BPF
@@ -71,6 +71,6 @@ install -D -m 644 debian/picosnitch.service %{buildroot}%{_unitdir}/%{name}.serv
 %endif
 
 %changelog
-* Wed May 27 2026 Eric Lesiuta <elesiuta@gmail.com> - 2.0.2-1
+* Wed Jun 3 2026 Eric Lesiuta <elesiuta@gmail.com> - 2.0.3-1
 - see releases on github for changes
 
