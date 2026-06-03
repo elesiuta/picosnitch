@@ -337,10 +337,10 @@ int BPF_KRETPROBE(exec_entry, long ret)
 }
 
 // Network bandwidth probes
-static __always_inline int trace_sendrecv(void *ctx, struct socket *sock, int retval, int is_send)
+static __always_inline int trace_sendrecv(void *ctx, struct sock *sk, int retval, int is_send)
 {
     // Skip if error (negative) or invalid
-    if (retval <= 0 || !sock)
+    if (retval <= 0 || !sk)
         return 0;
 
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
@@ -427,10 +427,6 @@ static __always_inline int trace_sendrecv(void *ctx, struct socket *sock, int re
         }
     }
 
-    struct sock *sk = BPF_CORE_READ(sock, sk);
-    if (!sk)
-        return 0;
-
     __u16 address_family = BPF_CORE_READ(sk, __sk_common.skc_family);
 
     if (address_family == AF_INET) {
@@ -500,37 +496,29 @@ static __always_inline int trace_sendrecv(void *ctx, struct socket *sock, int re
     return 0;
 }
 
-SEC("fexit/sock_sendmsg")
-int BPF_PROG(sock_sendmsg_ret, struct socket *sock, struct msghdr *msg, int ret)
+// send: hook inet_sendmsg / inet6_sendmsg, the per-family sendmsg dispatch.
+// one hook per family covers tcp, udp, raw and icmp sends plus write()/writev()
+// without double counting. takes a struct socket *, so sk is derived like recv.
+SEC("fexit/inet_sendmsg")
+int BPF_PROG(inet_sendmsg_ret, struct socket *sock, struct msghdr *msg, size_t size, int ret)
 {
-    return trace_sendrecv(ctx, sock, ret, 1);
+    struct sock *sk = BPF_CORE_READ(sock, sk);
+    return trace_sendrecv(ctx, sk, ret, 1);
 }
 
+SEC("fexit/inet6_sendmsg")
+int BPF_PROG(inet6_sendmsg_ret, struct socket *sock, struct msghdr *msg, size_t size, int ret)
+{
+    struct sock *sk = BPF_CORE_READ(sock, sk);
+    return trace_sendrecv(ctx, sk, ret, 1);
+}
+
+// recv: hook the generic sock_recvmsg (socket, msg, flags).
 SEC("fexit/sock_recvmsg")
 int BPF_PROG(sock_recvmsg_ret, struct socket *sock, struct msghdr *msg, int flags, int ret)
 {
-    return trace_sendrecv(ctx, sock, ret, 0);
-}
-
-// On modern kernels, write()/writev() on a socket fd takes the path
-// vfs_write -> sock_write_iter -> __sock_sendmsg, bypassing sock_sendmsg.
-// Attach to sock_write_iter so we still record bytes sent via the write path
-// (e.g. bash's `echo >&3` to /dev/tcp, or `cat file > /dev/tcp/...`).
-// __sock_sendmsg itself is `static inline` and not directly traceable.
-// sendmsg/sendto syscalls go via sock_sendmsg (not sock_write_iter), so the
-// two probes are disjoint and do not double-count.
-SEC("fexit/sock_write_iter")
-int BPF_PROG(sock_write_iter_ret, struct kiocb *iocb, struct iov_iter *from, long ret)
-{
-    if (ret <= 0 || !iocb)
-        return 0;
-    struct file *file = BPF_CORE_READ(iocb, ki_filp);
-    if (!file)
-        return 0;
-    struct socket *sock = (struct socket *)BPF_CORE_READ(file, private_data);
-    if (!sock)
-        return 0;
-    return trace_sendrecv(ctx, sock, (int)ret, 1);
+    struct sock *sk = BPF_CORE_READ(sock, sk);
+    return trace_sendrecv(ctx, sk, ret, 0);
 }
 
 char LICENSE[] SEC("license") = "GPL";

@@ -537,21 +537,20 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         use_getaddrinfo_uprobe = True
     except Exception as e:
         q_error.put(f"BPF.attach_uprobe() failed for getaddrinfo: {e}, falling back to only using reverse DNS lookup")
-    # Attach fexit programs for network monitoring
+    # attach fexit network hooks: inet_sendmsg/inet6_sendmsg for send,
+    # sock_recvmsg for recv
     try:
-        b.bpf_obj.attach_trace("sock_sendmsg_ret")
+        b.bpf_obj.attach_trace("inet_sendmsg_ret")
         b.bpf_obj.attach_trace("sock_recvmsg_ret")
     except Exception as e:
         q_error.put(f"Failed to attach network monitoring programs: {e}")
         raise
-    # On modern kernels, write()/writev() on a socket fd bypass sock_sendmsg
-    # (sock_write_iter -> __sock_sendmsg). Attach an extra probe so writes via
-    # the write path are still recorded. This is best-effort: fall back to
-    # warning if the kernel does not expose sock_write_iter.
+    # inet6_sendmsg is best-effort: absent on kernels built without IPv6, a
+    # missing hook only drops IPv6 send bytes
     try:
-        b.bpf_obj.attach_trace("sock_write_iter_ret")
+        b.bpf_obj.attach_trace("inet6_sendmsg_ret")
     except Exception as e:
-        q_error.put(f"BPF.attach_trace() failed for sock_write_iter: {e}, send bytes via write()/writev() on socket fds will not be recorded")
+        q_error.put(f"BPF.attach_trace() failed for inet6_sendmsg: {e}, IPv6 send bytes will not be recorded")
 
     # callbacks for bpf events, read event and put into a pipe for run_primary
     def queue_lost(event, *args):
