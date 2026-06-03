@@ -54,7 +54,10 @@ try:
             if len(_parts) >= 3 and _parts[2] == "btrfs":
                 st_dev_mask = 0
                 if not (CONFIG_DIR / "config.toml").exists():
-                    logging.warning("running picosnitch on systems with btrfs is not fully supported due to dev number strangeness and non-unique inodes (this is still fine for most use cases)")
+                    logging.warning(
+                        "running picosnitch on btrfs weakens exe name resolution due to per-subvolume device numbers and inodes that aren't unique across subvolumes "
+                        "(this is still fine for most use cases)"
+                    )
                 break
     file_path = CONFIG_DIR / "config.toml"
     with open(file_path, "rb") as toml_file:

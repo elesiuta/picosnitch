@@ -141,7 +141,7 @@ def start_picosnitch() -> int:
         Monitor your system for applications that make network connections, track their
         bandwidth, verify hashes, and receive notifications.
 
-        picosnitch comes with ABSOLUTELY NO WARRANTY. This is free software, and you
+        Picosnitch comes with ABSOLUTELY NO WARRANTY. This is free software, and you
         are welcome to redistribute it under certain conditions. See version 3 of the
         GNU General Public License for details.
 
@@ -152,6 +152,7 @@ def start_picosnitch() -> int:
         data: {DATA_DIR}
         logs: {LOG_DIR}
         cache: {CACHE_DIR}
+        run: {RUN_DIR}
 
         usage:
             picosnitch webui|tui|top|status|version|help
@@ -168,9 +169,9 @@ def start_picosnitch() -> int:
                         |_____|____|--> start/stop/restart daemon
 
             systemctl enable|disable|start|stop|restart|status picosnitch
-                    |      |       |     |    |       |--> show status with systemd
-                    |      |       |_____|____|--> start/stop/restart picosnitch
-                    |______|--> enable/disable autostart on reboot
+                       |      |       |     |    |       |--> show status with systemd
+                       |      |       |_____|____|--> start/stop/restart picosnitch
+                       |______|--> enable/disable autostart on reboot
 
         * if systemctl isn't working, recreate the service with `sudo picosnitch systemd`
         * if you don't use systemd, you can use `sudo picosnitch start|stop|restart`
