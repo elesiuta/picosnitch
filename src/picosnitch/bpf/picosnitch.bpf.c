@@ -426,7 +426,9 @@ static __always_inline int fill_conn_ancestry(struct conn_val_t *val, __u32 uid)
 // conn_stats4/6 maps (see the map definitions for the design rationale).
 // The expensive ancestry walk runs only when a connection is first seen;
 // subsequent packets are a lookup plus two atomic adds.
-static __always_inline int trace_sendrecv(void *ctx, struct sock *sk, int retval, int is_send)
+// msg is the sendmsg/recvmsg header; for unconnected udp the peer is in
+// msg_name rather than the sock, so dport/daddr fall back to it.
+static __always_inline int trace_sendrecv(void *ctx, struct sock *sk, struct msghdr *msg, int retval, int is_send)
 {
     // Skip if error (negative) or invalid
     if (retval <= 0 || !sk)
@@ -449,6 +451,20 @@ static __always_inline int trace_sendrecv(void *ctx, struct sock *sk, int retval
         key.lport = lport;
         key.dport = dport;
         key.protocol = protocol;
+
+        // unconnected udp: peer is in msg_name, not the sock
+        if (key.dport == 0 && msg) {
+            void *name = BPF_CORE_READ(msg, msg_name);
+            int namelen = BPF_CORE_READ(msg, msg_namelen);
+            if (name && namelen >= (int)sizeof(struct sockaddr_in)) {
+                struct sockaddr_in sin = {};
+                bpf_probe_read_kernel(&sin, sizeof(sin), name);
+                if (sin.sin_family == AF_INET) {
+                    key.daddr = sin.sin_addr.s_addr;
+                    key.dport = __builtin_bswap16(sin.sin_port);
+                }
+            }
+        }
 
         struct conn_val_t *val = bpf_map_lookup_elem(&conn_stats4, &key);
         if (!val) {
@@ -480,6 +496,20 @@ static __always_inline int trace_sendrecv(void *ctx, struct sock *sk, int retval
         key.dport = dport;
         key.protocol = protocol;
 
+        // unconnected udp: peer is in msg_name, not the sock
+        if (key.dport == 0 && msg) {
+            void *name = BPF_CORE_READ(msg, msg_name);
+            int namelen = BPF_CORE_READ(msg, msg_namelen);
+            if (name && namelen >= (int)sizeof(struct sockaddr_in6)) {
+                struct sockaddr_in6 sin6 = {};
+                bpf_probe_read_kernel(&sin6, sizeof(sin6), name);
+                if (sin6.sin6_family == AF_INET6) {
+                    __builtin_memcpy(&key.daddr, &sin6.sin6_addr, sizeof(key.daddr));
+                    key.dport = __builtin_bswap16(sin6.sin6_port);
+                }
+            }
+        }
+
         struct conn_val_t *val = bpf_map_lookup_elem(&conn_stats6, &key);
         if (!val) {
             struct conn_val_t newval = {};
@@ -509,14 +539,14 @@ SEC("fexit/inet_sendmsg")
 int BPF_PROG(inet_sendmsg_ret, struct socket *sock, struct msghdr *msg, size_t size, int ret)
 {
     struct sock *sk = BPF_CORE_READ(sock, sk);
-    return trace_sendrecv(ctx, sk, ret, 1);
+    return trace_sendrecv(ctx, sk, msg, ret, 1);
 }
 
 SEC("fexit/inet6_sendmsg")
 int BPF_PROG(inet6_sendmsg_ret, struct socket *sock, struct msghdr *msg, size_t size, int ret)
 {
     struct sock *sk = BPF_CORE_READ(sock, sk);
-    return trace_sendrecv(ctx, sk, ret, 1);
+    return trace_sendrecv(ctx, sk, msg, ret, 1);
 }
 
 // recv: hook the generic sock_recvmsg (socket, msg, flags).
@@ -524,7 +554,7 @@ SEC("fexit/sock_recvmsg")
 int BPF_PROG(sock_recvmsg_ret, struct socket *sock, struct msghdr *msg, int flags, int ret)
 {
     struct sock *sk = BPF_CORE_READ(sock, sk);
-    return trace_sendrecv(ctx, sk, ret, 0);
+    return trace_sendrecv(ctx, sk, msg, ret, 0);
 }
 
 char LICENSE[] SEC("license") = "GPL";
