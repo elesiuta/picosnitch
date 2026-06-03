@@ -7,7 +7,6 @@ name = "picosnitch"
 dynamic = ["version"]
 requires-python = ">=3.12"
 description = "Monitor network traffic per executable using BPF"
-urls = { "Homepage" = "https://github.com/elesiuta/picosnitch" }
 readme = "README.md"
 license = "GPL-3.0-or-later"
 classifiers = [
@@ -16,7 +15,6 @@ classifiers = [
     "Topic :: System :: Networking :: Monitoring",
     "Topic :: System :: Monitoring",
 ]
-dependencies = []
 
 [project.optional-dependencies]
 sql = ["psycopg[binary]", "pymysql"]
@@ -24,6 +22,11 @@ all = ["picosnitch[sql]"]
 
 [project.scripts]
 picosnitch = "picosnitch.cli:start_picosnitch"
+
+[project.urls]
+Homepage = "https://github.com/elesiuta/picosnitch"
+Documentation = "https://elesiuta.github.io/picosnitch/"
+Repository = "https://github.com/elesiuta/picosnitch"
 
 [tool.hatch.version]
 path = "src/picosnitch/__init__.py"
