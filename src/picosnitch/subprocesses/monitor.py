@@ -554,7 +554,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
 
     # callbacks for bpf events, read event and put into a pipe for run_primary
     def queue_lost(event, *args):
-        q_error.put(f"BPF callbacks not processing fast enough, missed {event} event, try increasing 'Perf ring buffer (pages)' (power of two) if this continues")
+        q_error.put(f"BPF callbacks not processing fast enough, missed {event} event, try increasing [monitoring].perf_ring_buffer_pages (power of two) if this continues")
 
     def resolve_grandparent(event) -> tuple[int, int, int, str, str, str, str]:
         """resolve grandparent proc info, returning all-empty/zero values when

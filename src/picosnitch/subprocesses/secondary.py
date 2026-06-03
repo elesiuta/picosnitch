@@ -46,7 +46,7 @@ def resolve_hash(
         # fallback on trying to read directly (if still alive) if fd_cache fails, probable causes include:
         # system suspends in the middle of hashing (since cache is reset)
         # process too short lived to open fd or stat in time (then fallback will fail too)
-        # too many executables on system (see Set RLIMIT_NOFILE)
+        # too many executables on system (see [monitoring].rlimit_nofile)
         sha_fd_error = sha256
         sha256 = get_sha256_pid(proc["pid"], proc["dev"], proc["ino"])
         if sha256.startswith("!"):
