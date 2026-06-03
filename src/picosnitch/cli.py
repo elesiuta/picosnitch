@@ -207,7 +207,7 @@ def start_picosnitch() -> int:
         ReadWritePaths={DATA_DIR} {LOG_DIR} {RUN_DIR} {CACHE_DIR}
         PrivateTmp=yes
         NoNewPrivileges=yes
-        CapabilityBoundingSet=CAP_SYS_ADMIN CAP_BPF CAP_PERFMON CAP_NET_ADMIN CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+        CapabilityBoundingSet=CAP_BPF CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_NET_ADMIN CAP_PERFMON CAP_SETGID CAP_SETUID CAP_SYS_ADMIN CAP_SYS_PTRACE
         ProtectKernelModules=yes
         ProtectKernelLogs=yes
         ProtectControlGroups=yes
