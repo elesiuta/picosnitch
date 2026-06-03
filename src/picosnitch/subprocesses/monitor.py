@@ -258,6 +258,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     event_pipe_0, event_pipe_1, event_pipe_2, event_pipe_3, event_pipe_4 = event_pipes
     EVERY_EXE: typing.Final[bool] = config.monitoring.every_exe
     PAGE_CNT: typing.Final[int] = config.monitoring.perf_ring_buffer_pages
+    CONN_MAP_MAX: typing.Final[int] = config.monitoring.conn_map_max_entries
     # fanotify (for watching executables for modification)
     libc = ctypes.CDLL(ctypes.util.find_library("c"))
     _FAN_MARK_ADD = 0x1
@@ -522,7 +523,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         raise
     try:
         bpf_obj_path = find_bpf_object()
-        b = BPF(obj_file=bpf_obj_path)
+        b = BPF(obj_file=bpf_obj_path, map_max_entries={"conn_stats4": CONN_MAP_MAX, "conn_stats6": CONN_MAP_MAX})
         b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
     except Exception as e:
         q_error.put("Init BPF %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
@@ -588,6 +589,10 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             except Exception as e:
                 q_error.put("BPF drain %s %s%s on line %s" % (map_name, type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
                 continue
+            # an lru map evicts oldest entries silently when full, so a drain at
+            # near capacity means connections may have been dropped before drain
+            if len(entries) >= CONN_MAP_MAX * 9 // 10:
+                q_error.put(f"{map_name} near capacity ({len(entries)}/{CONN_MAP_MAX}), connections may have been evicted, try increasing [monitoring].conn_map_max_entries")
             for key, val in entries:
                 st_dev, st_ino, pid, fd, exe = get_fd(val.dev, val.ino, key.pid, key.dport, val.comm.decode())
                 pst_dev, pst_ino, ppid, pfd, pexe = get_fd(val.pdev, val.pino, val.ppid, -1, val.pcomm.decode())

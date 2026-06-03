@@ -153,6 +153,7 @@ struct {
 // Per-connection byte accumulators, drained periodically by userspace.
 // LRU so the map self-bounds under pathological connection churn; with a
 // sub-second drain interval eviction should never trigger in practice.
+// max_entries is resized at load from [monitoring].conn_map_max_entries.
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 65536);

@@ -48,6 +48,7 @@ class DesktopConfig:
 class MonitoringConfig:
     every_exe: bool = False
     perf_ring_buffer_pages: int = 256
+    conn_map_max_entries: int = 65536
     rlimit_nofile: int | None = None
     st_dev_mask: int | None = None
 

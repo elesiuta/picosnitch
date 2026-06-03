@@ -473,6 +473,9 @@ class LibBPF:
         self.lib.bpf_map__fd.argtypes = [ctypes.c_void_p]
         self.lib.bpf_map__fd.restype = ctypes.c_int
 
+        self.lib.bpf_map__set_max_entries.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        self.lib.bpf_map__set_max_entries.restype = ctypes.c_int
+
         # Generic map element operations (used for in-kernel aggregation drain)
         self.lib.bpf_map_get_next_key.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
         self.lib.bpf_map_get_next_key.restype = ctypes.c_int
@@ -586,8 +589,12 @@ class BPFObject:
         self._perf_buffers = []
         self._callbacks = []  # Must keep references to prevent garbage collection
 
-    def load(self) -> "BPFObject":
-        """Load the BPF object file into the kernel."""
+    def load(self, map_max_entries: dict[str, int] | None = None) -> "BPFObject":
+        """Load the BPF object file into the kernel.
+
+        map_max_entries resizes named maps after open but before load, so the
+        kernel allocates the requested size.
+        """
         if not os.path.exists(self.obj_path):
             raise FileNotFoundError(f"BPF object file not found: {self.obj_path}")
 
@@ -596,6 +603,17 @@ class BPFObject:
         if not self.obj:
             err = ctypes.get_errno()
             raise RuntimeError(f"Failed to open BPF object {self.obj_path}: {os.strerror(err) if err else 'unknown error'}")
+
+        for name, max_entries in (map_max_entries or {}).items():
+            map_obj = self.libbpf.lib.bpf_object__find_map_by_name(self.obj, name.encode())
+            if not map_obj:
+                self.libbpf.lib.bpf_object__close(self.obj)
+                self.obj = None
+                raise RuntimeError(f"BPF map '{name}' not found in object")
+            if self.libbpf.lib.bpf_map__set_max_entries(map_obj, max_entries) != 0:
+                self.libbpf.lib.bpf_object__close(self.obj)
+                self.obj = None
+                raise RuntimeError(f"Failed to set max_entries={max_entries} on map '{name}'")
 
         # Load into kernel
         ret = self.libbpf.lib.bpf_object__load(self.obj)
@@ -808,7 +826,7 @@ class BPF:
     This is the primary interface for picosnitch to interact with BPF.
     """
 
-    def __init__(self, src_file: str | None = None, text: str | None = None, obj_file: str | None = None):
+    def __init__(self, src_file: str | None = None, text: str | None = None, obj_file: str | None = None, map_max_entries: dict[str, int] | None = None):
         """
         Initialize and load a BPF program.
 
@@ -816,6 +834,7 @@ class BPF:
             src_file: Not supported (BCC compatibility) - must use pre-compiled
             text: Not supported (BCC compatibility) - must use pre-compiled
             obj_file: Path to compiled .bpf.o file (required)
+            map_max_entries: optional map name -> max_entries to resize before load
         """
         if text is not None or src_file is not None:
             raise RuntimeError("Runtime BPF compilation not supported. Use obj_file= with a pre-compiled .bpf.o file.")
@@ -825,7 +844,7 @@ class BPF:
 
         self.obj_file = obj_file
         self.bpf_obj = BPFObject(obj_file)
-        self.bpf_obj.load()
+        self.bpf_obj.load(map_max_entries)
 
     def attach_kprobe(self, event: str, fn_name: str):
         """Attach a kprobe to a kernel function."""

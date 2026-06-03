@@ -120,8 +120,11 @@ every_exe = false             # check every running executable, not just ones th
                               # these are treated as "connections" with a port of -1
                               # experimental; expect occasional errors for short-lived processes
                               # if you only want process logs (no hashes), see execsnoop / forkstat
-perf_ring_buffer_pages = 256  # power of two number of pages per BPF perf buffer
+perf_ring_buffer_pages = 256  # power of two pages for the exec and dns perf buffers
+                              # network traffic is aggregated in-kernel, it does not use these
                               # only change this if you are seeing missed-event errors
+conn_map_max_entries = 65536  # size of the in-kernel per-connection aggregation map
+                              # only raise this if you see near-capacity eviction warnings
 # rlimit_nofile = 65536       # optional int; raises RLIMIT_NOFILE for the daemon
                               # picosnitch caches one file descriptor per (device, inode);
                               # set this if you see "Too many open files" errors
@@ -167,4 +170,4 @@ Entries in `error.log` are usually triggered by an unusually large burst of new 
 - Detecting open sockets and the originating process is reliable via BPF, but the executable path and name could be ambiguous or spoofed. As a countermeasure picosnitch hashes the executable itself; only the process executable is hashed, so shared libraries, scripts, and runtime extensions are not covered by the hash.
 - The device and inode of the opened file descriptor are checked against what the BPF program reported to detect runtime replacement of the executable. Filesystems that reuse inodes across subvolumes (e.g. btrfs) defeat this check and are auto-detected at startup (`st_dev_mask = 0`).
 - For extremely short-lived processes, picosnitch may not be able to open a file descriptor in time to hash the executable. The connection is still logged with everything else picosnitch has, along with an entry in `error.log`.
-- A large influx of new processes or connections can cause missed log entries, since picosnitch preserves system traffic latency rather than blocking to catch up. Such incidents are detected, logged, and notified, and can be mitigated by raising `[monitoring].perf_ring_buffer_pages`.
+- A large influx of new processes can cause missed log entries, since picosnitch preserves system traffic latency rather than blocking to catch up. Such incidents are detected, logged, and notified, and can be mitigated by raising `[monitoring].perf_ring_buffer_pages`. A burst of new connections instead fills the in-kernel aggregation map, mitigated by raising `[monitoring].conn_map_max_entries`.
