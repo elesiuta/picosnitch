@@ -23,6 +23,9 @@ digraph G {
             "picosnitch__bpf_wrapper__BPFMap" [label="BPFMap", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__BPFObject" [label="BPFObject", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__BpfUprobeOpts" [label="BpfUprobeOpts", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            "picosnitch__bpf_wrapper__ConnKey4" [label="ConnKey4", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            "picosnitch__bpf_wrapper__ConnKey6" [label="ConnKey6", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            "picosnitch__bpf_wrapper__ConnVal" [label="ConnVal", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__DNSEvent" [label="DNSEvent", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__ExecEvent" [label="ExecEvent", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__LibBPF" [label="LibBPF", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
@@ -48,6 +51,7 @@ digraph G {
                 "picosnitch__bpf_wrapper__BPF__attach_uprobe" [label="attach_uprobe", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPF__attach_uretprobe" [label="attach_uretprobe", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPF__cleanup" [label="cleanup", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
+                "picosnitch__bpf_wrapper__BPF__drain_map" [label="drain_map", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPF__get_syscall_fnname" [label="get_syscall_fnname", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPF__perf_buffer_poll" [label="perf_buffer_poll", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
             }
@@ -71,6 +75,7 @@ digraph G {
                 "picosnitch__bpf_wrapper__BPFObject__attach_trace" [label="attach_trace", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject__attach_uprobe" [label="attach_uprobe", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject__cleanup" [label="cleanup", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
+                "picosnitch__bpf_wrapper__BPFObject__drain_map" [label="drain_map", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject__get_map" [label="get_map", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject__get_map_fd" [label="get_map_fd", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject__get_program" [label="get_program", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
@@ -158,15 +163,12 @@ digraph G {
                 "picosnitch__subprocesses__monitor__run_monitor___find_exe_by_inodeX" [label="_find_exe_by_inode", style="filled", fillcolor="#32ff50b2", fontcolor="#000000", group="5"];
                 "picosnitch__subprocesses__monitor__run_monitor___read_tgid_comm" [label="_read_tgid_comm", style="filled", fillcolor="#32ff50b2", fontcolor="#000000", group="5"];
                 "picosnitch__subprocesses__monitor__run_monitor___record_inodeX_fallback" [label="_record_inode_fallback", style="filled", fillcolor="#32ff50b2", fontcolor="#000000", group="5"];
+                "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" [label="drain_conn_maps", style="filled", fillcolor="#32ff50b2", fontcolor="#000000", group="5"];
                 "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" [label="get_cmdline", style="filled", fillcolor="#32ff50b2", fontcolor="#000000", group="5"];
                 "picosnitch__subprocesses__monitor__run_monitor__get_fd" [label="get_fd", style="filled", fillcolor="#32ff50b2", fontcolor="#000000", group="5"];
                 "picosnitch__subprocesses__monitor__run_monitor__queue_dns_event" [label="queue_dns_event", style="filled", fillcolor="#32ff50b2", fontcolor="#000000", group="5"];
                 "picosnitch__subprocesses__monitor__run_monitor__queue_exec_event" [label="queue_exec_event", style="filled", fillcolor="#32ff50b2", fontcolor="#000000", group="5"];
                 "picosnitch__subprocesses__monitor__run_monitor__queue_lost" [label="queue_lost", style="filled", fillcolor="#32ff50b2", fontcolor="#000000", group="5"];
-                "picosnitch__subprocesses__monitor__run_monitor__queue_recvv4_event" [label="queue_recvv4_event", style="filled", fillcolor="#32ff50b2", fontcolor="#000000", group="5"];
-                "picosnitch__subprocesses__monitor__run_monitor__queue_recvv6_event" [label="queue_recvv6_event", style="filled", fillcolor="#32ff50b2", fontcolor="#000000", group="5"];
-                "picosnitch__subprocesses__monitor__run_monitor__queue_sendv4_event" [label="queue_sendv4_event", style="filled", fillcolor="#32ff50b2", fontcolor="#000000", group="5"];
-                "picosnitch__subprocesses__monitor__run_monitor__queue_sendv6_event" [label="queue_sendv6_event", style="filled", fillcolor="#32ff50b2", fontcolor="#000000", group="5"];
                 "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" [label="resolve_grandparent", style="filled", fillcolor="#32ff50b2", fontcolor="#000000", group="5"];
             }
         }
@@ -258,6 +260,9 @@ digraph G {
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__BPFMap" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__BPFObject" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__BpfUprobeOpts" [style="dashed",  color="#ffffff00"];
+        "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__ConnKey4" [style="dashed",  color="#ffffff00"];
+        "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__ConnKey6" [style="dashed",  color="#ffffff00"];
+        "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__ConnVal" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__DNSEvent" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__ExecEvent" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__LibBPF" [style="dashed",  color="#ffffff00"];
@@ -280,6 +285,7 @@ digraph G {
         "picosnitch__bpf_wrapper__BPF" -> "picosnitch__bpf_wrapper__BPF__attach_uprobe" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPF" -> "picosnitch__bpf_wrapper__BPF__attach_uretprobe" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPF" -> "picosnitch__bpf_wrapper__BPF__cleanup" [style="dashed",  color="#ffffff00"];
+        "picosnitch__bpf_wrapper__BPF" -> "picosnitch__bpf_wrapper__BPF__drain_map" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPF" -> "picosnitch__bpf_wrapper__BPF__get_syscall_fnname" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPF" -> "picosnitch__bpf_wrapper__BPF__perf_buffer_poll" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFMap" -> "picosnitch__bpf_wrapper__BPFMap____init__" [style="dashed",  color="#ffffff00"];
@@ -304,6 +310,7 @@ digraph G {
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__attach_trace" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__attach_uprobe" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__cleanup" [style="dashed",  color="#ffffff00"];
+        "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__drain_map" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__get_map" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__get_map_fd" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__get_program" [style="dashed",  color="#ffffff00"];
@@ -332,6 +339,7 @@ digraph G {
         "picosnitch__bpf_wrapper__BPFObject__attach_uprobe" -> "picosnitch__bpf_wrapper__LibBPF____init__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__cleanup" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__cleanup" -> "picosnitch__bpf_wrapper__BPFObject____init__" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__BPFObject__drain_map" -> "picosnitch__bpf_wrapper__BPFObject__get_map_fd" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__get_map" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__get_map_fd" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__get_map_fd" -> "picosnitch__bpf_wrapper__BPFObject__get_map" [style="solid",  color="#000000"];
@@ -353,6 +361,7 @@ digraph G {
         "picosnitch__bpf_wrapper__BPF__attach_uretprobe" -> "picosnitch__bpf_wrapper__BPFObject__attach_uprobe" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF__attach_uretprobe" -> "picosnitch__bpf_wrapper__BPF___resolve_library" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF__cleanup" -> "picosnitch__bpf_wrapper__BPFObject__cleanup" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__BPF__drain_map" -> "picosnitch__bpf_wrapper__BPFObject__drain_map" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF__get_syscall_fnname" -> "picosnitch__bpf_wrapper__BPFObject____enter__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF__get_syscall_fnname" -> "picosnitch__bpf_wrapper__BPFObject____exit__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF__get_syscall_fnname" -> "picosnitch__bpf_wrapper__BPF____enter__" [style="solid",  color="#000000"];
@@ -461,6 +470,9 @@ digraph G {
         "picosnitch__subprocesses__fuse__run_fuse" -> "picosnitch__utils__resolve_group" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__fuse__run_fuse" -> "picosnitch__utils__resolve_owner" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__BPF" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__ConnKey4" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__ConnKey6" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__ConnVal" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__check_bpf_requirements" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__find_bpf_object" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__subprocesses__monitor___classify_inodeX_fallback" [style="dashed",  color="#ffffff00"];
@@ -520,6 +532,8 @@ digraph G {
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor___find_exe_by_inodeX" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor___read_tgid_comm" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor___record_inodeX_fallback" [style="dashed",  color="#ffffff00"];
+        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" [style="dashed",  color="#ffffff00"];
+        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__get_fd" [style="dashed",  color="#ffffff00"];
@@ -530,20 +544,19 @@ digraph G {
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__queue_exec_event" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__queue_lost" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__queue_lost" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__queue_recvv4_event" [style="dashed",  color="#ffffff00"];
-        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__queue_recvv4_event" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__queue_recvv6_event" [style="dashed",  color="#ffffff00"];
-        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__queue_recvv6_event" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__queue_sendv4_event" [style="dashed",  color="#ffffff00"];
-        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__queue_sendv4_event" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__queue_sendv6_event" [style="dashed",  color="#ffffff00"];
-        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__queue_sendv6_event" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__monitor__run_monitor___read_tgid_comm" -> "picosnitch__bpf_wrapper__BPFObject____enter__" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor___read_tgid_comm" -> "picosnitch__bpf_wrapper__BPFObject____exit__" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor___read_tgid_comm" -> "picosnitch__bpf_wrapper__BPF____enter__" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor___read_tgid_comm" -> "picosnitch__bpf_wrapper__BPF____exit__" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor___record_inodeX_fallback" -> "picosnitch__subprocesses__monitor___classify_inodeX_fallback" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" -> "picosnitch__bpf_wrapper__BPF__drain_map" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" -> "picosnitch__bpf_wrapper__ConnKey4" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" -> "picosnitch__bpf_wrapper__ConnKey6" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" -> "picosnitch__bpf_wrapper__ConnVal" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" -> "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" -> "picosnitch__subprocesses__monitor__run_monitor__get_fd" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" -> "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" -> "picosnitch__bpf_wrapper__BPFObject____enter__" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" -> "picosnitch__bpf_wrapper__BPFObject____exit__" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" -> "picosnitch__bpf_wrapper__BPF____enter__" [style="solid",  color="#000000"];
@@ -557,22 +570,6 @@ digraph G {
         "picosnitch__subprocesses__monitor__run_monitor__queue_exec_event" -> "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__queue_exec_event" -> "picosnitch__subprocesses__monitor__run_monitor__get_fd" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__queue_exec_event" -> "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_recvv4_event" -> "picosnitch__bpf_wrapper__BPF" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_recvv4_event" -> "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_recvv4_event" -> "picosnitch__subprocesses__monitor__run_monitor__get_fd" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_recvv4_event" -> "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_recvv6_event" -> "picosnitch__bpf_wrapper__BPF" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_recvv6_event" -> "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_recvv6_event" -> "picosnitch__subprocesses__monitor__run_monitor__get_fd" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_recvv6_event" -> "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_sendv4_event" -> "picosnitch__bpf_wrapper__BPF" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_sendv4_event" -> "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_sendv4_event" -> "picosnitch__subprocesses__monitor__run_monitor__get_fd" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_sendv4_event" -> "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_sendv6_event" -> "picosnitch__bpf_wrapper__BPF" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_sendv6_event" -> "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_sendv6_event" -> "picosnitch__subprocesses__monitor__run_monitor__get_fd" [style="solid",  color="#000000"];
-        "picosnitch__subprocesses__monitor__run_monitor__queue_sendv6_event" -> "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" -> "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" -> "picosnitch__subprocesses__monitor__run_monitor__get_fd" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__notifications" -> "picosnitch__subprocesses__notifications___send_notification" [style="dashed",  color="#ffffff00"];

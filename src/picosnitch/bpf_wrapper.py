@@ -301,6 +301,66 @@ class DNSEvent(ctypes.Structure):
     ]
 
 
+# Per-connection aggregation maps. Key/value layouts must match the
+# conn_key4_t / conn_key6_t / conn_val_t structs in picosnitch.bpf.c exactly.
+class ConnKey4(ctypes.Structure):
+    """Key for the conn_stats4 map (IPv4 connection identity)."""
+
+    _pack_ = 1
+    _fields_ = [
+        ("pid", ctypes.c_uint32),
+        ("netns", ctypes.c_uint32),
+        ("saddr", ctypes.c_uint32),
+        ("daddr", ctypes.c_uint32),
+        ("lport", ctypes.c_uint16),
+        ("dport", ctypes.c_uint16),
+        ("protocol", ctypes.c_uint16),
+        ("_pad", ctypes.c_uint16),
+    ]
+
+
+class ConnKey6(ctypes.Structure):
+    """Key for the conn_stats6 map (IPv6 connection identity)."""
+
+    _pack_ = 1
+    _fields_ = [
+        ("pid", ctypes.c_uint32),
+        ("netns", ctypes.c_uint32),
+        ("saddr", ctypes.c_ubyte * 16),
+        ("daddr", ctypes.c_ubyte * 16),
+        ("lport", ctypes.c_uint16),
+        ("dport", ctypes.c_uint16),
+        ("protocol", ctypes.c_uint16),
+        ("_pad", ctypes.c_uint16),
+    ]
+
+
+class ConnVal(ctypes.Structure):
+    """Value for both conn_stats4 and conn_stats6 (ancestry + accumulators).
+
+    Not packed: mirrors the naturally-aligned conn_val_t in the BPF program
+    (the 64-bit counters are updated with atomic adds and require alignment)."""
+
+    _fields_ = [
+        ("comm", ctypes.c_char * 16),
+        ("pcomm", ctypes.c_char * 16),
+        ("gpcomm", ctypes.c_char * 16),
+        ("ino", ctypes.c_uint64),
+        ("pino", ctypes.c_uint64),
+        ("gpino", ctypes.c_uint64),
+        ("send_bytes", ctypes.c_uint64),
+        ("recv_bytes", ctypes.c_uint64),
+        ("send_pkts", ctypes.c_uint64),
+        ("recv_pkts", ctypes.c_uint64),
+        ("ppid", ctypes.c_uint32),
+        ("gppid", ctypes.c_uint32),
+        ("uid", ctypes.c_uint32),
+        ("dev", ctypes.c_uint32),
+        ("pdev", ctypes.c_uint32),
+        ("gpdev", ctypes.c_uint32),
+    ]
+
+
 # Callback function types for perf buffers
 # void (*sample_cb)(void *ctx, int cpu, void *data, __u32 size)
 PERF_SAMPLE_CB = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32)
@@ -412,6 +472,16 @@ class LibBPF:
 
         self.lib.bpf_map__fd.argtypes = [ctypes.c_void_p]
         self.lib.bpf_map__fd.restype = ctypes.c_int
+
+        # Generic map element operations (used for in-kernel aggregation drain)
+        self.lib.bpf_map_get_next_key.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
+        self.lib.bpf_map_get_next_key.restype = ctypes.c_int
+
+        self.lib.bpf_map_lookup_and_delete_elem.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
+        self.lib.bpf_map_lookup_and_delete_elem.restype = ctypes.c_int
+
+        self.lib.bpf_map_delete_elem.argtypes = [ctypes.c_int, ctypes.c_void_p]
+        self.lib.bpf_map_delete_elem.restype = ctypes.c_int
 
         # Perf buffer operations
         self.lib.perf_buffer__new.argtypes = [
@@ -560,6 +630,36 @@ class BPFObject:
         if name not in self._map_fds:
             self.get_map(name)
         return self._map_fds[name]
+
+    def drain_map(self, name: str, key_type, val_type) -> list:
+        """Atomically drain all entries from a hash map.
+
+        Snapshots the current keys via bpf_map_get_next_key, then removes each
+        with bpf_map_lookup_and_delete_elem (atomic per entry, so in-flight
+        atomic adds in the kernel are never lost). Returns a list of
+        (key, value) ctypes instances.
+        """
+        fd = self.get_map_fd(name)
+        keys: list[bytes] = []
+        cur_key = None
+        next_key = key_type()
+        while True:
+            cur_ptr = ctypes.byref(cur_key) if cur_key is not None else None
+            ret = self.libbpf.lib.bpf_map_get_next_key(fd, cur_ptr, ctypes.byref(next_key))
+            if ret != 0:
+                break
+            kbytes = bytes(memoryview(next_key))
+            keys.append(kbytes)
+            cur_key = key_type.from_buffer_copy(kbytes)
+
+        results = []
+        for kbytes in keys:
+            key = key_type.from_buffer_copy(kbytes)
+            val = val_type()
+            ret = self.libbpf.lib.bpf_map_lookup_and_delete_elem(fd, ctypes.byref(key), ctypes.byref(val))
+            if ret == 0:
+                results.append((key, val))
+        return results
 
     def attach_kprobe(self, prog_name: str, retprobe: bool, fn_name: str):
         """Attach a kprobe/kretprobe program."""
@@ -781,6 +881,10 @@ class BPF:
     def perf_buffer_poll(self, timeout: int = 100) -> int:
         """Poll all perf buffers for events."""
         return self.bpf_obj.poll_perf_buffers(timeout)
+
+    def drain_map(self, name: str, key_type, val_type) -> list:
+        """Atomically drain all entries from a hash map (see BPFObject.drain_map)."""
+        return self.bpf_obj.drain_map(name, key_type, val_type)
 
     def cleanup(self):
         """Clean up all BPF resources."""

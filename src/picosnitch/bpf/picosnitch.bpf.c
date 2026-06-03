@@ -51,51 +51,57 @@ struct exec_event_t {
     __u32 gpdev;
 } __attribute__((packed));
 
-struct sendrecv_event_t {
-    char comm[TASK_COMM_LEN];
-    char pcomm[TASK_COMM_LEN];
-    char gpcomm[TASK_COMM_LEN];
-    __u64 ino;
-    __u64 pino;
-    __u64 gpino;
+// Per-connection aggregation: instead of one perf event per sendmsg/recvmsg,
+// sum send/recv bytes and packets in a BPF hash map keyed by connection.
+// userspace drains the map on a fixed interval with bpf_map_lookup_and_delete_elem
+// (atomic per entry, no in-flight loss) and emits one event per connection, so
+// the per-packet event rate and ancestry walk collapse to once per connection.
+// v4 and v6 use separate maps to keep keys compact; the value layout is shared.
+struct conn_key4_t {
     __u32 pid;
-    __u32 ppid;
-    __u32 gppid;
-    __u32 uid;
-    __u32 dev;
-    __u32 pdev;
-    __u32 gpdev;
-    __u32 bytes;
-    __u32 daddr;
-    __u32 saddr;
     __u32 netns;
-    __u16 dport;
+    __u32 saddr;
+    __u32 daddr;
     __u16 lport;
+    __u16 dport;
     __u16 protocol;
+    __u16 _pad;
 } __attribute__((packed));
 
-struct sendrecv6_event_t {
+struct conn_key6_t {
+    __u32 pid;
+    __u32 netns;
+    unsigned __int128 saddr;
+    unsigned __int128 daddr;
+    __u16 lport;
+    __u16 dport;
+    __u16 protocol;
+    __u16 _pad;
+} __attribute__((packed));
+
+// conn_val_t is deliberately NOT packed: the 64-bit counters are updated with
+// atomic adds, which require natural 8-byte alignment. Field order (char
+// arrays, then u64s, then u32s) yields a 128-byte struct with no internal
+// padding, so userspace can mirror it without packing either.
+struct conn_val_t {
     char comm[TASK_COMM_LEN];
     char pcomm[TASK_COMM_LEN];
     char gpcomm[TASK_COMM_LEN];
-    unsigned __int128 daddr;
-    unsigned __int128 saddr;
     __u64 ino;
     __u64 pino;
     __u64 gpino;
-    __u32 pid;
+    __u64 send_bytes;
+    __u64 recv_bytes;
+    __u64 send_pkts;
+    __u64 recv_pkts;
     __u32 ppid;
     __u32 gppid;
     __u32 uid;
     __u32 dev;
     __u32 pdev;
     __u32 gpdev;
-    __u32 bytes;
-    __u32 netns;
-    __u16 dport;
-    __u16 lport;
-    __u16 protocol;
-} __attribute__((packed));
+};
+
 
 // CO-RE compat for possible_net_t: on kernels built with CONFIG_NET_NS=n
 // (or when BTF deduplication drops the field) `possible_net_t` has no
@@ -144,29 +150,22 @@ struct {
     __uint(value_size, sizeof(__u32));
 } exec_events SEC(".maps");
 
+// Per-connection byte accumulators, drained periodically by userspace.
+// LRU so the map self-bounds under pathological connection churn; with a
+// sub-second drain interval eviction should never trigger in practice.
 struct {
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-    __uint(key_size, sizeof(__u32));
-    __uint(value_size, sizeof(__u32));
-} sendmsg_events SEC(".maps");
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct conn_key4_t);
+    __type(value, struct conn_val_t);
+} conn_stats4 SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-    __uint(key_size, sizeof(__u32));
-    __uint(value_size, sizeof(__u32));
-} recvmsg_events SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-    __uint(key_size, sizeof(__u32));
-    __uint(value_size, sizeof(__u32));
-} sendmsg6_events SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-    __uint(key_size, sizeof(__u32));
-    __uint(value_size, sizeof(__u32));
-} recvmsg6_events SEC(".maps");
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct conn_key6_t);
+    __type(value, struct conn_val_t);
+} conn_stats6 SEC(".maps");
 
 // Convert kernel dev_t format (major << 20 | minor) to glibc format
 // that Python's os.stat() returns
@@ -336,49 +335,44 @@ int BPF_KRETPROBE(exec_entry, long ret)
     return 0;
 }
 
-// Network bandwidth probes
-static __always_inline int trace_sendrecv(void *ctx, struct sock *sk, int retval, int is_send)
+// Resolve process ancestry (exe inode/dev + comm for self, parent,
+// grandparent) into a conn_val_t. Returns 0 on success, -1 if the calling
+// task's own exe cannot be resolved (matching the original per-event
+// behaviour of skipping such events). Runs only when a connection is first
+// inserted into the stats map, not on every packet.
+static __always_inline int fill_conn_ancestry(struct conn_val_t *val, __u32 uid)
 {
-    // Skip if error (negative) or invalid
-    if (retval <= 0 || !sk)
-        return 0;
-
-    __u32 pid = bpf_get_current_pid_tgid() >> 32;
-    __u32 uid = bpf_get_current_uid_gid();
-
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (!task)
-        return 0;
-
+        return -1;
     struct task_struct *parent = BPF_CORE_READ(task, parent);
     if (!parent)
-        return 0;
+        return -1;
 
-    __u32 ppid = BPF_CORE_READ(parent, tgid);
+    val->uid = uid;
+    val->ppid = BPF_CORE_READ(parent, tgid);
 
-    // Get task exe info with null checks
+    // Self exe info (required)
     struct mm_struct *mm = BPF_CORE_READ(task, mm);
     if (!mm)
-        return 0;
+        return -1;
     struct file *exe_file = BPF_CORE_READ(mm, exe_file);
     if (!exe_file)
-        return 0;
+        return -1;
     struct path exe_path = BPF_CORE_READ(exe_file, f_path);
     struct dentry *exe_dentry = BPF_CORE_READ(&exe_path, dentry);
     if (!exe_dentry)
-        return 0;
+        return -1;
     struct inode *exe_inode = BPF_CORE_READ(exe_dentry, d_inode);
     if (!exe_inode)
-        return 0;
-    __u64 ino = BPF_CORE_READ(exe_inode, i_ino);
+        return -1;
+    val->ino = BPF_CORE_READ(exe_inode, i_ino);
     struct super_block *exe_sb = BPF_CORE_READ(exe_inode, i_sb);
     if (!exe_sb)
-        return 0;
-    __u32 dev = kernel_to_glibc_dev(BPF_CORE_READ(exe_sb, s_dev));
+        return -1;
+    val->dev = kernel_to_glibc_dev(BPF_CORE_READ(exe_sb, s_dev));
 
-    // Get parent exe info with null checks (default to 0 if unavailable)
-    __u64 pino = 0;
-    __u32 pdev = 0;
+    // Parent exe info (default to 0 if unavailable)
     mm = BPF_CORE_READ(parent, mm);
     if (mm) {
         exe_file = BPF_CORE_READ(mm, exe_file);
@@ -388,25 +382,21 @@ static __always_inline int trace_sendrecv(void *ctx, struct sock *sk, int retval
             if (exe_dentry) {
                 exe_inode = BPF_CORE_READ(exe_dentry, d_inode);
                 if (exe_inode) {
-                    pino = BPF_CORE_READ(exe_inode, i_ino);
+                    val->pino = BPF_CORE_READ(exe_inode, i_ino);
                     exe_sb = BPF_CORE_READ(exe_inode, i_sb);
                     if (exe_sb) {
-                        pdev = kernel_to_glibc_dev(BPF_CORE_READ(exe_sb, s_dev));
+                        val->pdev = kernel_to_glibc_dev(BPF_CORE_READ(exe_sb, s_dev));
                     }
                 }
             }
         }
     }
 
-    // Get grandparent info (default to 0 if unavailable)
-    __u32 gppid = 0;
-    __u64 gpino = 0;
-    __u32 gpdev = 0;
-    char gpcomm[TASK_COMM_LEN] = {};
+    // Grandparent info (default to 0 if unavailable)
     struct task_struct *grandparent = BPF_CORE_READ(parent, parent);
     if (grandparent) {
-        gppid = BPF_CORE_READ(grandparent, tgid);
-        bpf_probe_read_kernel_str(&gpcomm, sizeof(gpcomm), BPF_CORE_READ(grandparent, comm));
+        val->gppid = BPF_CORE_READ(grandparent, tgid);
+        bpf_probe_read_kernel_str(&val->gpcomm, sizeof(val->gpcomm), BPF_CORE_READ(grandparent, comm));
         mm = BPF_CORE_READ(grandparent, mm);
         if (mm) {
             exe_file = BPF_CORE_READ(mm, exe_file);
@@ -416,10 +406,10 @@ static __always_inline int trace_sendrecv(void *ctx, struct sock *sk, int retval
                 if (exe_dentry) {
                     exe_inode = BPF_CORE_READ(exe_dentry, d_inode);
                     if (exe_inode) {
-                        gpino = BPF_CORE_READ(exe_inode, i_ino);
+                        val->gpino = BPF_CORE_READ(exe_inode, i_ino);
                         exe_sb = BPF_CORE_READ(exe_inode, i_sb);
                         if (exe_sb) {
-                            gpdev = kernel_to_glibc_dev(BPF_CORE_READ(exe_sb, s_dev));
+                            val->gpdev = kernel_to_glibc_dev(BPF_CORE_READ(exe_sb, s_dev));
                         }
                     }
                 }
@@ -427,70 +417,86 @@ static __always_inline int trace_sendrecv(void *ctx, struct sock *sk, int retval
         }
     }
 
+    bpf_get_current_comm(&val->comm, sizeof(val->comm));
+    bpf_probe_read_kernel_str(&val->pcomm, sizeof(val->pcomm), BPF_CORE_READ(parent, comm));
+    return 0;
+}
+
+// Network bandwidth probes. Bytes are accumulated per connection in the
+// conn_stats4/6 maps (see the map definitions for the design rationale).
+// The expensive ancestry walk runs only when a connection is first seen;
+// subsequent packets are a lookup plus two atomic adds.
+static __always_inline int trace_sendrecv(void *ctx, struct sock *sk, int retval, int is_send)
+{
+    // Skip if error (negative) or invalid
+    if (retval <= 0 || !sk)
+        return 0;
+
     __u16 address_family = BPF_CORE_READ(sk, __sk_common.skc_family);
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u32 uid = bpf_get_current_uid_gid();
+    __u32 netns = read_netns(sk);
+    __u16 dport = __builtin_bswap16(BPF_CORE_READ(sk, __sk_common.skc_dport));
+    __u16 lport = BPF_CORE_READ(sk, __sk_common.skc_num);
+    __u16 protocol = BPF_CORE_READ(sk, sk_protocol);
 
     if (address_family == AF_INET) {
-        struct sendrecv_event_t data = {};
-        data.pid = pid;
-        data.ppid = ppid;
-        data.gppid = gppid;
-        data.uid = uid;
-        data.dev = dev;
-        data.pdev = pdev;
-        data.gpdev = gpdev;
-        data.ino = ino;
-        data.pino = pino;
-        data.gpino = gpino;
-        data.bytes = retval;
+        struct conn_key4_t key = {};
+        key.pid = pid;
+        key.netns = netns;
+        key.saddr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
+        key.daddr = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+        key.lport = lport;
+        key.dport = dport;
+        key.protocol = protocol;
 
-        bpf_get_current_comm(&data.comm, sizeof(data.comm));
-        bpf_probe_read_kernel_str(&data.pcomm, sizeof(data.pcomm), BPF_CORE_READ(parent, comm));
-        __builtin_memcpy(&data.gpcomm, &gpcomm, sizeof(data.gpcomm));
-        data.daddr = BPF_CORE_READ(sk, __sk_common.skc_daddr);
-        data.saddr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
-        data.dport = BPF_CORE_READ(sk, __sk_common.skc_dport);
-        data.lport = BPF_CORE_READ(sk, __sk_common.skc_num);
-        data.dport = __builtin_bswap16(data.dport);
-        data.protocol = BPF_CORE_READ(sk, sk_protocol);
-        data.netns = read_netns(sk);
-
-        if (is_send)
-            bpf_perf_event_output(ctx, &sendmsg_events, BPF_F_CURRENT_CPU, &data, sizeof(data));
-        else
-            bpf_perf_event_output(ctx, &recvmsg_events, BPF_F_CURRENT_CPU, &data, sizeof(data));
+        struct conn_val_t *val = bpf_map_lookup_elem(&conn_stats4, &key);
+        if (!val) {
+            struct conn_val_t newval = {};
+            if (fill_conn_ancestry(&newval, uid) != 0)
+                return 0;
+            bpf_map_update_elem(&conn_stats4, &key, &newval, BPF_NOEXIST);
+            val = bpf_map_lookup_elem(&conn_stats4, &key);
+            if (!val)
+                return 0;
+        }
+        if (is_send) {
+            __sync_fetch_and_add(&val->send_bytes, (__u64)retval);
+            __sync_fetch_and_add(&val->send_pkts, 1);
+        } else {
+            __sync_fetch_and_add(&val->recv_bytes, (__u64)retval);
+            __sync_fetch_and_add(&val->recv_pkts, 1);
+        }
     }
     else if (address_family == AF_INET6) {
-        struct sendrecv6_event_t data = {};
-        data.pid = pid;
-        data.ppid = ppid;
-        data.gppid = gppid;
-        data.uid = uid;
-        data.dev = dev;
-        data.pdev = pdev;
-        data.gpdev = gpdev;
-        data.ino = ino;
-        data.pino = pino;
-        data.gpino = gpino;
-        data.bytes = retval;
-
-        bpf_get_current_comm(&data.comm, sizeof(data.comm));
-        bpf_probe_read_kernel_str(&data.pcomm, sizeof(data.pcomm), BPF_CORE_READ(parent, comm));
-        __builtin_memcpy(&data.gpcomm, &gpcomm, sizeof(data.gpcomm));
-        // Read IPv6 addresses using CO-RE with temporary variables to avoid packed alignment issues
-        struct in6_addr temp_daddr = BPF_CORE_READ(sk, __sk_common.skc_v6_daddr);
+        struct conn_key6_t key = {};
+        key.pid = pid;
+        key.netns = netns;
         struct in6_addr temp_saddr = BPF_CORE_READ(sk, __sk_common.skc_v6_rcv_saddr);
-        __builtin_memcpy(&data.daddr, &temp_daddr, sizeof(data.daddr));
-        __builtin_memcpy(&data.saddr, &temp_saddr, sizeof(data.saddr));
-        data.dport = BPF_CORE_READ(sk, __sk_common.skc_dport);
-        data.lport = BPF_CORE_READ(sk, __sk_common.skc_num);
-        data.dport = __builtin_bswap16(data.dport);
-        data.protocol = BPF_CORE_READ(sk, sk_protocol);
-        data.netns = read_netns(sk);
+        struct in6_addr temp_daddr = BPF_CORE_READ(sk, __sk_common.skc_v6_daddr);
+        __builtin_memcpy(&key.saddr, &temp_saddr, sizeof(key.saddr));
+        __builtin_memcpy(&key.daddr, &temp_daddr, sizeof(key.daddr));
+        key.lport = lport;
+        key.dport = dport;
+        key.protocol = protocol;
 
-        if (is_send)
-            bpf_perf_event_output(ctx, &sendmsg6_events, BPF_F_CURRENT_CPU, &data, sizeof(data));
-        else
-            bpf_perf_event_output(ctx, &recvmsg6_events, BPF_F_CURRENT_CPU, &data, sizeof(data));
+        struct conn_val_t *val = bpf_map_lookup_elem(&conn_stats6, &key);
+        if (!val) {
+            struct conn_val_t newval = {};
+            if (fill_conn_ancestry(&newval, uid) != 0)
+                return 0;
+            bpf_map_update_elem(&conn_stats6, &key, &newval, BPF_NOEXIST);
+            val = bpf_map_lookup_elem(&conn_stats6, &key);
+            if (!val)
+                return 0;
+        }
+        if (is_send) {
+            __sync_fetch_and_add(&val->send_bytes, (__u64)retval);
+            __sync_fetch_and_add(&val->send_pkts, 1);
+        } else {
+            __sync_fetch_and_add(&val->recv_bytes, (__u64)retval);
+            __sync_fetch_and_add(&val->recv_pkts, 1);
+        }
     }
 
     return 0;

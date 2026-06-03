@@ -19,7 +19,7 @@ import sys
 import time
 import typing
 
-from picosnitch.bpf_wrapper import BPF, check_bpf_requirements, find_bpf_object
+from picosnitch.bpf_wrapper import BPF, ConnKey4, ConnKey6, ConnVal, check_bpf_requirements, find_bpf_object
 from picosnitch.config import Config
 from picosnitch.constants import FD_CACHE, PID_CACHE, ST_DEV_MASK
 from picosnitch.utils import get_fstat
@@ -571,197 +571,74 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         gpcmd = get_cmdline(event.gppid)
         return gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm
 
-    def queue_sendv4_event(cpu, data, size):
-        event = b["sendmsg_events"].event(data)
-        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
-        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
-        gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(event)
-        cmd = get_cmdline(event.pid)
-        pcmd = get_cmdline(event.ppid)
-        laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
-        raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
-        event_pipe_0.send_bytes(
-            pickle.dumps(
-                {
-                    "pid": pid,
-                    "name": event.comm.decode(),
-                    "fd": fd,
-                    "dev": st_dev,
-                    "ino": st_ino,
-                    "exe": exe,
-                    "cmdline": cmd,
-                    "ppid": ppid,
-                    "pname": event.pcomm.decode(),
-                    "pfd": pfd,
-                    "pdev": pst_dev,
-                    "pino": pst_ino,
-                    "pexe": pexe,
-                    "pcmdline": pcmd,
-                    "gppid": gppid,
-                    "gpname": gpcomm,
-                    "gpfd": gpfd,
-                    "gpdev": gpst_dev,
-                    "gpino": gpst_ino,
-                    "gpexe": gpexe,
-                    "gpcmdline": gpcmd,
-                    "uid": event.uid,
-                    "send": event.bytes,
-                    "recv": 0,
-                    "family": socket.AF_INET,
-                    "protocol": int(event.protocol),
-                    "lport": event.lport,
-                    "rport": event.dport,
-                    "laddr": laddr,
-                    "raddr": raddr,
-                    "domain": domain_dict[raddr],
-                    "netns": int(event.netns),
-                }
-            )
-        )
+    def drain_conn_maps():
+        """drain the per-connection aggregation maps.
 
-    def queue_sendv6_event(cpu, data, size):
-        event = b["sendmsg6_events"].event(data)
-        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
-        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
-        gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(event)
-        cmd = get_cmdline(event.pid)
-        pcmd = get_cmdline(event.ppid)
-        laddr = socket.inet_ntop(socket.AF_INET6, bytes(event.saddr)[:16])
-        raddr = socket.inet_ntop(socket.AF_INET6, bytes(event.daddr)[:16])
-        event_pipe_1.send_bytes(
-            pickle.dumps(
-                {
-                    "pid": pid,
-                    "name": event.comm.decode(),
-                    "fd": fd,
-                    "dev": st_dev,
-                    "ino": st_ino,
-                    "exe": exe,
-                    "cmdline": cmd,
-                    "ppid": ppid,
-                    "pname": event.pcomm.decode(),
-                    "pfd": pfd,
-                    "pdev": pst_dev,
-                    "pino": pst_ino,
-                    "pexe": pexe,
-                    "pcmdline": pcmd,
-                    "gppid": gppid,
-                    "gpname": gpcomm,
-                    "gpfd": gpfd,
-                    "gpdev": gpst_dev,
-                    "gpino": gpst_ino,
-                    "gpexe": gpexe,
-                    "gpcmdline": gpcmd,
-                    "uid": event.uid,
-                    "send": event.bytes,
-                    "recv": 0,
-                    "family": socket.AF_INET6,
-                    "protocol": int(event.protocol),
-                    "lport": event.lport,
-                    "rport": event.dport,
-                    "laddr": laddr,
-                    "raddr": raddr,
-                    "domain": domain_dict[raddr],
-                    "netns": int(event.netns),
-                }
-            )
-        )
-
-    def queue_recvv4_event(cpu, data, size):
-        event = b["recvmsg_events"].event(data)
-        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
-        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
-        gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(event)
-        cmd = get_cmdline(event.pid)
-        pcmd = get_cmdline(event.ppid)
-        laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.saddr))
-        raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
-        event_pipe_2.send_bytes(
-            pickle.dumps(
-                {
-                    "pid": pid,
-                    "name": event.comm.decode(),
-                    "fd": fd,
-                    "dev": st_dev,
-                    "ino": st_ino,
-                    "exe": exe,
-                    "cmdline": cmd,
-                    "ppid": ppid,
-                    "pname": event.pcomm.decode(),
-                    "pfd": pfd,
-                    "pdev": pst_dev,
-                    "pino": pst_ino,
-                    "pexe": pexe,
-                    "pcmdline": pcmd,
-                    "gppid": gppid,
-                    "gpname": gpcomm,
-                    "gpfd": gpfd,
-                    "gpdev": gpst_dev,
-                    "gpino": gpst_ino,
-                    "gpexe": gpexe,
-                    "gpcmdline": gpcmd,
-                    "uid": event.uid,
-                    "send": 0,
-                    "recv": event.bytes,
-                    "family": socket.AF_INET,
-                    "protocol": int(event.protocol),
-                    "lport": event.lport,
-                    "rport": event.dport,
-                    "laddr": laddr,
-                    "raddr": raddr,
-                    "domain": domain_dict[raddr],
-                    "netns": int(event.netns),
-                }
-            )
-        )
-
-    def queue_recvv6_event(cpu, data, size):
-        event = b["recvmsg6_events"].event(data)
-        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.dport, event.comm.decode())
-        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
-        gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(event)
-        cmd = get_cmdline(event.pid)
-        pcmd = get_cmdline(event.ppid)
-        laddr = socket.inet_ntop(socket.AF_INET6, bytes(event.saddr)[:16])
-        raddr = socket.inet_ntop(socket.AF_INET6, bytes(event.daddr)[:16])
-        event_pipe_3.send_bytes(
-            pickle.dumps(
-                {
-                    "pid": pid,
-                    "name": event.comm.decode(),
-                    "fd": fd,
-                    "dev": st_dev,
-                    "ino": st_ino,
-                    "exe": exe,
-                    "cmdline": cmd,
-                    "ppid": ppid,
-                    "pname": event.pcomm.decode(),
-                    "pfd": pfd,
-                    "pdev": pst_dev,
-                    "pino": pst_ino,
-                    "pexe": pexe,
-                    "pcmdline": pcmd,
-                    "gppid": gppid,
-                    "gpname": gpcomm,
-                    "gpfd": gpfd,
-                    "gpdev": gpst_dev,
-                    "gpino": gpst_ino,
-                    "gpexe": gpexe,
-                    "gpcmdline": gpcmd,
-                    "uid": event.uid,
-                    "send": 0,
-                    "recv": event.bytes,
-                    "family": socket.AF_INET6,
-                    "protocol": int(event.protocol),
-                    "lport": event.lport,
-                    "rport": event.dport,
-                    "laddr": laddr,
-                    "raddr": raddr,
-                    "domain": domain_dict[raddr],
-                    "netns": int(event.netns),
-                }
-            )
-        )
+        bytes and packets are summed in-kernel per connection in the
+        conn_stats4/conn_stats6 LRU hash maps, so process-ancestry resolution
+        and pickling run once per connection per drain interval rather than per
+        packet. each entry carries the send and recv totals as one event. ipv4
+        goes to event_pipe_0, ipv6 to event_pipe_1."""
+        for map_name, key_type, family, pipe in (
+            ("conn_stats4", ConnKey4, socket.AF_INET, event_pipe_0),
+            ("conn_stats6", ConnKey6, socket.AF_INET6, event_pipe_1),
+        ):
+            try:
+                entries = b.drain_map(map_name, key_type, ConnVal)
+            except Exception as e:
+                q_error.put("BPF drain %s %s%s on line %s" % (map_name, type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
+                continue
+            for key, val in entries:
+                st_dev, st_ino, pid, fd, exe = get_fd(val.dev, val.ino, key.pid, key.dport, val.comm.decode())
+                pst_dev, pst_ino, ppid, pfd, pexe = get_fd(val.pdev, val.pino, val.ppid, -1, val.pcomm.decode())
+                gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(val)
+                cmd = get_cmdline(key.pid)
+                pcmd = get_cmdline(val.ppid)
+                if family == socket.AF_INET:
+                    laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", key.saddr))
+                    raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", key.daddr))
+                else:
+                    laddr = socket.inet_ntop(socket.AF_INET6, bytes(key.saddr)[:16])
+                    raddr = socket.inet_ntop(socket.AF_INET6, bytes(key.daddr)[:16])
+                pipe.send_bytes(
+                    pickle.dumps(
+                        {
+                            "pid": pid,
+                            "name": val.comm.decode(),
+                            "fd": fd,
+                            "dev": st_dev,
+                            "ino": st_ino,
+                            "exe": exe,
+                            "cmdline": cmd,
+                            "ppid": ppid,
+                            "pname": val.pcomm.decode(),
+                            "pfd": pfd,
+                            "pdev": pst_dev,
+                            "pino": pst_ino,
+                            "pexe": pexe,
+                            "pcmdline": pcmd,
+                            "gppid": gppid,
+                            "gpname": gpcomm,
+                            "gpfd": gpfd,
+                            "gpdev": gpst_dev,
+                            "gpino": gpst_ino,
+                            "gpexe": gpexe,
+                            "gpcmdline": gpcmd,
+                            "uid": val.uid,
+                            "send": int(val.send_bytes),
+                            "recv": int(val.recv_bytes),
+                            "pkts": int(val.send_pkts) + int(val.recv_pkts),
+                            "family": family,
+                            "protocol": int(key.protocol),
+                            "lport": key.lport,
+                            "rport": key.dport,
+                            "laddr": laddr,
+                            "raddr": raddr,
+                            "domain": domain_dict[raddr],
+                            "netns": int(key.netns),
+                        }
+                    )
+                )
 
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
@@ -822,15 +699,22 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("exec", *args))
     if use_getaddrinfo_uprobe:
         b["dns_events"].open_perf_buffer(queue_dns_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("dns", *args))
-    b["sendmsg_events"].open_perf_buffer(queue_sendv4_event, page_cnt=PAGE_CNT * 4, lost_cb=lambda *args: queue_lost("sendv4", *args))
-    b["sendmsg6_events"].open_perf_buffer(queue_sendv6_event, page_cnt=PAGE_CNT * 4, lost_cb=lambda *args: queue_lost("sendv6", *args))
-    b["recvmsg_events"].open_perf_buffer(queue_recvv4_event, page_cnt=PAGE_CNT * 4, lost_cb=lambda *args: queue_lost("recvv4", *args))
-    b["recvmsg6_events"].open_perf_buffer(queue_recvv6_event, page_cnt=PAGE_CNT * 4, lost_cb=lambda *args: queue_lost("recvv6", *args))
-    # main loop
+    # main loop: poll the exec/dns perf buffers on a short timeout so DNS/exec
+    # context stays fresh, and drain the in-kernel connection aggregation maps
+    # on a fixed interval. Bandwidth is accumulated in-kernel between drains, so
+    # the userspace cost scales with the number of active connections per
+    # interval rather than the packet rate.
+    drain_interval = 1.0
+    next_drain = time.monotonic() + drain_interval
     while True:
         if not parent_process.is_alive() or not q_in.empty():
+            drain_conn_maps()
             return 0
         try:
-            b.perf_buffer_poll(timeout=1000)
+            b.perf_buffer_poll(timeout=200)
+            now = time.monotonic()
+            if now >= next_drain:
+                drain_conn_maps()
+                next_drain = now + drain_interval
         except Exception as e:
             q_error.put("BPF %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))

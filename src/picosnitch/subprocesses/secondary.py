@@ -162,9 +162,9 @@ def build_log_entries(
         if event in traffic_counter:
             traffic_counter[event][0] += proc["send"]
             traffic_counter[event][1] += proc["recv"]
-            traffic_counter[event][2] += 1
+            traffic_counter[event][2] += proc.get("pkts", 1)
         else:
-            traffic_counter[event] = [proc["send"], proc["recv"], 1]
+            traffic_counter[event] = [proc["send"], proc["recv"], proc.get("pkts", 1)]
     return [(datetime_now, send, recv, n_events, *event) for event, (send, recv, n_events) in traffic_counter.items()]
 
 
