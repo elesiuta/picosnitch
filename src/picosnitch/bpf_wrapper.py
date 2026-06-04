@@ -406,9 +406,9 @@ class LibBPF:
                     break
 
         if not libbpf_path:
-            raise RuntimeError(
-                "libbpf shared library not found!\n\npicosnitch requires libbpf to load BPF programs." + _get_install_instructions() + "\nFor more information: https://github.com/libbpf/libbpf"
-            )
+            # Final fallback: let the dynamic loader resolve the soname via its
+            # standard search (DT_RUNPATH, LD_LIBRARY_PATH, ldconfig cache).
+            libbpf_path = "libbpf.so.1"
 
         try:
             self.lib = ctypes.CDLL(libbpf_path)
