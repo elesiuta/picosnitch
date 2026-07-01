@@ -550,10 +550,15 @@ int BPF_PROG(inet6_sendmsg_ret, struct socket *sock, struct msghdr *msg, size_t 
     return trace_sendrecv(ctx, sk, msg, ret, 1);
 }
 
-// recv: hook the generic sock_recvmsg (socket, msg, flags).
-SEC("fexit/sock_recvmsg")
-int BPF_PROG(sock_recvmsg_ret, struct socket *sock, struct msghdr *msg, int flags, int ret)
-{
+// recv: hook inet_recvmsg / inet6_recvmsg, the per-family sendmsg dispatch.
+SEC("fexit/inet_recvmsg")
+int BPF_PROG(inet_recvmsg_ret, struct socket *sock, struct msghdr *msg, size_t size, int flags, int ret) {
+    struct sock *sk = BPF_CORE_READ(sock, sk);
+    return trace_sendrecv(ctx, sk, msg, ret, 0);
+}
+
+SEC("fexit/inet6_recvmsg")
+int BPF_PROG(inet6_recvmsg_ret, struct socket *sock, struct msghdr *msg, size_t size, int flags, int ret) {
     struct sock *sk = BPF_CORE_READ(sock, sk);
     return trace_sendrecv(ctx, sk, msg, ret, 0);
 }
