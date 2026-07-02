@@ -217,6 +217,7 @@ class ExecEvent(ctypes.Structure):
     """Event from exec_events perf buffer"""
 
     _pack_ = 1
+    _layout_ = "ms"  # keep the historical _pack_ layout explicit (required from py3.19; ignored <3.14)
     _fields_ = [
         ("comm", ctypes.c_char * 16),
         ("pcomm", ctypes.c_char * 16),
@@ -238,6 +239,7 @@ class SendRecvEvent(ctypes.Structure):
     """Event from sendmsg_events/recvmsg_events perf buffers (IPv4)"""
 
     _pack_ = 1
+    _layout_ = "ms"  # keep the historical _pack_ layout explicit (required from py3.19; ignored <3.14)
     _fields_ = [
         ("comm", ctypes.c_char * 16),
         ("pcomm", ctypes.c_char * 16),
@@ -266,6 +268,7 @@ class SendRecv6Event(ctypes.Structure):
     """Event from sendmsg6_events/recvmsg6_events perf buffers (IPv6)"""
 
     _pack_ = 1
+    _layout_ = "ms"  # keep the historical _pack_ layout explicit (required from py3.19; ignored <3.14)
     _fields_ = [
         ("comm", ctypes.c_char * 16),
         ("pcomm", ctypes.c_char * 16),
@@ -294,6 +297,7 @@ class DNSEvent(ctypes.Structure):
     """Event from dns_events perf buffer"""
 
     _pack_ = 1
+    _layout_ = "ms"  # keep the historical _pack_ layout explicit (required from py3.19; ignored <3.14)
     _fields_ = [
         ("host", ctypes.c_char * 80),
         ("daddr", ctypes.c_uint32),
@@ -308,6 +312,7 @@ class ConnKey4(ctypes.Structure):
     """Key for the conn_stats4 map (IPv4 connection identity)."""
 
     _pack_ = 1
+    _layout_ = "ms"  # keep the historical _pack_ layout explicit (required from py3.19; ignored <3.14)
     _fields_ = [
         ("pid", ctypes.c_uint32),
         ("netns", ctypes.c_uint32),
@@ -324,6 +329,7 @@ class ConnKey6(ctypes.Structure):
     """Key for the conn_stats6 map (IPv6 connection identity)."""
 
     _pack_ = 1
+    _layout_ = "ms"  # keep the historical _pack_ layout explicit (required from py3.19; ignored <3.14)
     _fields_ = [
         ("pid", ctypes.c_uint32),
         ("netns", ctypes.c_uint32),
