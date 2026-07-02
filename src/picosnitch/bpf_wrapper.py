@@ -298,6 +298,7 @@ class DNSEvent(ctypes.Structure):
         ("host", ctypes.c_char * 80),
         ("daddr", ctypes.c_uint32),
         ("daddr6", ctypes.c_ubyte * 16),  # 128-bit IPv6 address as bytes
+        ("family", ctypes.c_uint16),  # AF_INET/AF_INET6, distinguishes v4 0.0.0.0 from v6 ::
     ]
 
 
@@ -444,6 +445,9 @@ class LibBPF:
         self.lib.bpf_program__fd.argtypes = [ctypes.c_void_p]
         self.lib.bpf_program__fd.restype = ctypes.c_int
 
+        self.lib.bpf_program__set_autoload.argtypes = [ctypes.c_void_p, ctypes.c_bool]
+        self.lib.bpf_program__set_autoload.restype = ctypes.c_int
+
         # Program attachment - generic auto-attach (for fentry/fexit/tracepoint)
         self.lib.bpf_program__attach.argtypes = [ctypes.c_void_p]
         self.lib.bpf_program__attach.restype = ctypes.c_void_p
@@ -485,6 +489,9 @@ class LibBPF:
 
         self.lib.bpf_map_delete_elem.argtypes = [ctypes.c_int, ctypes.c_void_p]
         self.lib.bpf_map_delete_elem.restype = ctypes.c_int
+
+        self.lib.bpf_map_update_elem.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint64]
+        self.lib.bpf_map_update_elem.restype = ctypes.c_int
 
         # Perf buffer operations
         self.lib.perf_buffer__new.argtypes = [
@@ -589,7 +596,7 @@ class BPFObject:
         self._perf_buffers = []
         self._callbacks = []  # Must keep references to prevent garbage collection
 
-    def load(self, map_max_entries: dict[str, int] | None = None) -> "BPFObject":
+    def load(self, map_max_entries: dict[str, int] | None = None, disabled_programs: set[str] | None = None) -> "BPFObject":
         """Load the BPF object file into the kernel.
 
         map_max_entries resizes named maps after open but before load, so the
@@ -614,6 +621,13 @@ class BPFObject:
                 self.libbpf.lib.bpf_object__close(self.obj)
                 self.obj = None
                 raise RuntimeError(f"Failed to set max_entries={max_entries} on map '{name}'")
+
+        for name in disabled_programs or set():
+            prog = self.libbpf.lib.bpf_object__find_program_by_name(self.obj, name.encode())
+            if prog and self.libbpf.lib.bpf_program__set_autoload(prog, False) != 0:
+                self.libbpf.lib.bpf_object__close(self.obj)
+                self.obj = None
+                raise RuntimeError(f"Failed to disable autoload for BPF program '{name}'")
 
         # Load into kernel
         ret = self.libbpf.lib.bpf_object__load(self.obj)
@@ -648,6 +662,18 @@ class BPFObject:
         if name not in self._map_fds:
             self.get_map(name)
         return self._map_fds[name]
+
+    def set_global(self, section: str, data: bytes) -> None:
+        """Write a global variable section map (e.g. ".data.io_zcrx") after load.
+
+        Global data sections are single-element array maps keyed by 0; data must
+        be the full section image. Call between load and attach so a program
+        never runs with an unset global."""
+        fd = self.get_map_fd(section)
+        key = ctypes.c_uint32(0)
+        buf = ctypes.create_string_buffer(data, len(data))
+        if self.libbpf.lib.bpf_map_update_elem(fd, ctypes.byref(key), buf, 0) != 0:
+            raise RuntimeError(f"Failed to update BPF global section '{section}'")
 
     def drain_map(self, name: str, key_type, val_type) -> list:
         """Atomically drain all entries from a hash map.
@@ -826,7 +852,14 @@ class BPF:
     This is the primary interface for picosnitch to interact with BPF.
     """
 
-    def __init__(self, src_file: str | None = None, text: str | None = None, obj_file: str | None = None, map_max_entries: dict[str, int] | None = None):
+    def __init__(
+        self,
+        src_file: str | None = None,
+        text: str | None = None,
+        obj_file: str | None = None,
+        map_max_entries: dict[str, int] | None = None,
+        disabled_programs: set[str] | None = None,
+    ):
         """
         Initialize and load a BPF program.
 
@@ -844,7 +877,7 @@ class BPF:
 
         self.obj_file = obj_file
         self.bpf_obj = BPFObject(obj_file)
-        self.bpf_obj.load(map_max_entries)
+        self.bpf_obj.load(map_max_entries, disabled_programs)
 
     def attach_kprobe(self, event: str, fn_name: str):
         """Attach a kprobe to a kernel function."""
@@ -951,3 +984,21 @@ class BPF:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.cleanup()
         return False
+
+
+def kernel_symbol_addrs(names: set[str]) -> dict[str, int] | None:
+    """Addresses of names found in /proc/kallsyms (single pass), or None if kallsyms can't
+    be read -- callers then assume present rather than disabling a probe they can't check.
+    A zeroed address (kptr_restrict hiding it from this uid) counts as not found."""
+    try:
+        found: dict[str, int] = {}
+        with open("/proc/kallsyms", "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                fields = line.split(maxsplit=3)
+                if len(fields) >= 3 and fields[2] in names and int(fields[0], 16) != 0:
+                    found[fields[2]] = int(fields[0], 16)
+                    if len(found) == len(names):
+                        break
+        return found
+    except OSError:
+        return None

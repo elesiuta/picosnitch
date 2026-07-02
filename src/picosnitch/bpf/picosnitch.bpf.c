@@ -11,6 +11,8 @@
 #define TASK_COMM_LEN 16
 #define AF_INET 2
 #define AF_INET6 10
+#define MSG_PEEK 2         // recv flag: data left in queue, recounted on the real recv
+#define MSG_ERRQUEUE 0x2000  // recv flag: reads the error queue, not received data
 
 // DNS structures
 struct addrinfo {
@@ -33,6 +35,7 @@ struct dns_event_t {
     char host[80];
     __u32 daddr;
     unsigned __int128 daddr6;
+    __u16 family;  // AF_INET/AF_INET6: distinguishes a v4 0.0.0.0 from a v6 ::
 } __attribute__((packed));
 
 struct exec_event_t {
@@ -224,12 +227,14 @@ int BPF_URETPROBE(dns_return)
             struct sockaddr_in *daddr;
             bpf_probe_read(&daddr, sizeof(daddr), &address->ai_addr);
             bpf_probe_read(&data.daddr, sizeof(data.daddr), &daddr->sin_addr.s_addr);
+            data.family = AF_INET;
             bpf_perf_event_output(ctx, &dns_events, BPF_F_CURRENT_CPU, &data, sizeof(data));
         }
         else if (address_family == AF_INET6) {
             struct sockaddr_in6 *daddr6;
             bpf_probe_read(&daddr6, sizeof(daddr6), &address->ai_addr);
             bpf_probe_read(&data.daddr6, sizeof(data.daddr6), &daddr6->sin6_addr.in6_u.u6_addr32);
+            data.family = AF_INET6;
             bpf_perf_event_output(ctx, &dns_events, BPF_F_CURRENT_CPU, &data, sizeof(data));
         }
 
@@ -550,17 +555,67 @@ int BPF_PROG(inet6_sendmsg_ret, struct socket *sock, struct msghdr *msg, size_t 
     return trace_sendrecv(ctx, sk, msg, ret, 1);
 }
 
-// recv: hook inet_recvmsg / inet6_recvmsg, the per-family sendmsg dispatch.
+// recv: hook inet_recvmsg / inet6_recvmsg, the per-family recvmsg dispatch.
 SEC("fexit/inet_recvmsg")
 int BPF_PROG(inet_recvmsg_ret, struct socket *sock, struct msghdr *msg, size_t size, int flags, int ret) {
+    if (flags & (MSG_PEEK | MSG_ERRQUEUE))  // don't double count peeks or count errqueue reads
+        return 0;
     struct sock *sk = BPF_CORE_READ(sock, sk);
     return trace_sendrecv(ctx, sk, msg, ret, 0);
 }
 
 SEC("fexit/inet6_recvmsg")
 int BPF_PROG(inet6_recvmsg_ret, struct socket *sock, struct msghdr *msg, size_t size, int flags, int ret) {
+    if (flags & (MSG_PEEK | MSG_ERRQUEUE))
+        return 0;
     struct sock *sk = BPF_CORE_READ(sock, sk);
     return trace_sendrecv(ctx, sk, msg, ret, 0);
+}
+
+// recv: also hook sock_common_recvmsg -- the recvmsg proto_ops slot for af_inet6
+// raw sockets (and l2tp-over-ip, dccp), which skip inet6_recvmsg. disjoint from
+// the inet hooks (tcp/udp/icmp/raw-v4/mptcp use inet_recvmsg) so no double
+// counting; non-inet families that share this slot hit the family filter.
+SEC("fexit/sock_common_recvmsg")
+int BPF_PROG(sock_common_recvmsg_ret, struct socket *sock, struct msghdr *msg, size_t size, int flags, int ret) {
+    if (flags & (MSG_PEEK | MSG_ERRQUEUE))
+        return 0;
+    struct sock *sk = BPF_CORE_READ(sock, sk);
+    return trace_sendrecv(ctx, sk, msg, ret, 0);
+}
+
+// recv via splice()/sendfile() from a tcp socket: tcp_splice_read moves bytes to a
+// pipe without a recvmsg, so the recvmsg hooks never fire. ret is bytes moved;
+// disjoint from those hooks (normal recv never calls it) so no double counting.
+SEC("fexit/tcp_splice_read")
+int BPF_PROG(tcp_splice_read_ret, struct socket *sock, void *ppos, void *pipe, size_t len, unsigned int flags, long ret) {
+    struct sock *sk = BPF_CORE_READ(sock, sk);
+    return trace_sendrecv(ctx, sk, 0, ret, 0);
+}
+
+SEC("fexit/mptcp_splice_read")
+int BPF_PROG(mptcp_splice_read_ret, struct socket *sock, void *ppos, void *pipe, size_t len, unsigned int flags, long ret) {
+    struct sock *sk = BPF_CORE_READ(sock, sk);
+    return trace_sendrecv(ctx, sk, 0, ret, 0);
+}
+
+// recv via io_uring zero-copy (IORING_OP_RECV_ZC): io_zcrx_recv -> tcp_read_sock, bypassing
+// recvmsg and the splice hooks. tcp_read_sock is the exported 3-arg wrapper (sk is the low-level
+// sock); ret is bytes read. tcp_read_sock is also every proto_ops->read_sock: in-kernel readers
+// (kTLS copy-mode ciphertext -- recounted as plaintext at inet_recvmsg -- strparser/kcm/espintcp
+// in softirq with a borrowed current, nvme-tcp/iscsi kworkers) reach it too, so count only calls
+// whose recv_actor is io_uring's io_zcrx_recv_skb. Userspace writes its kallsyms address after
+// load, before attach (0 = count nothing); if the symbol is absent the program stays disabled.
+volatile __u64 io_zcrx_actor SEC(".data.io_zcrx") = 0;
+
+SEC("fexit/tcp_read_sock")
+int BPF_PROG(tcp_read_sock_ret, struct sock *sk, void *desc, void *recv_actor, int ret) {
+    // recv_actor is a function pointer (FUNC_PROTO), which BTF ctx access refuses to
+    // load directly; bpf_get_func_arg reads the raw argument value instead
+    __u64 actor;
+    if (bpf_get_func_arg(ctx, 2, &actor) || actor != io_zcrx_actor)
+        return 0;
+    return trace_sendrecv(ctx, sk, 0, ret, 0);
 }
 
 char LICENSE[] SEC("license") = "GPL";

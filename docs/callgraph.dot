@@ -38,6 +38,7 @@ digraph G {
             "picosnitch__bpf_wrapper__check_bpf_requirements" [label="check_bpf_requirements", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__compile_bpf" [label="compile_bpf", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__find_bpf_object" [label="find_bpf_object", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            "picosnitch__bpf_wrapper__kernel_symbol_addrs" [label="kernel_symbol_addrs", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             subgraph "cluster_picosnitch__bpf_wrapper__BPF" {
 
                 graph [style="filled,rounded", fillcolor="#80808018", label="picosnitch.bpf_wrapper.BPF"];
@@ -81,6 +82,7 @@ digraph G {
                 "picosnitch__bpf_wrapper__BPFObject__get_program" [label="get_program", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject__load" [label="load", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject__poll_perf_buffers" [label="poll_perf_buffers", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
+                "picosnitch__bpf_wrapper__BPFObject__set_global" [label="set_global", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
             }
             subgraph "cluster_picosnitch__bpf_wrapper__LibBPF" {
 
@@ -275,6 +277,7 @@ digraph G {
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__check_bpf_requirements" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__compile_bpf" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__find_bpf_object" [style="dashed",  color="#ffffff00"];
+        "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__kernel_symbol_addrs" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPF" -> "picosnitch__bpf_wrapper__BPF____enter__" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPF" -> "picosnitch__bpf_wrapper__BPF____exit__" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPF" -> "picosnitch__bpf_wrapper__BPF____getitem__" [style="dashed",  color="#ffffff00"];
@@ -316,6 +319,7 @@ digraph G {
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__get_program" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__load" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__poll_perf_buffers" [style="dashed",  color="#ffffff00"];
+        "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__set_global" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject____exit__" -> "picosnitch__bpf_wrapper__BPFObject__cleanup" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject____getitem__" -> "picosnitch__bpf_wrapper__BPFMap" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject____getitem__" -> "picosnitch__bpf_wrapper__BPFMap____init__" [style="solid",  color="#000000"];
@@ -346,6 +350,7 @@ digraph G {
         "picosnitch__bpf_wrapper__BPFObject__get_program" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__load" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__poll_perf_buffers" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__BPFObject__set_global" -> "picosnitch__bpf_wrapper__BPFObject__get_map_fd" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF____exit__" -> "picosnitch__bpf_wrapper__BPF__cleanup" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF____getitem__" -> "picosnitch__bpf_wrapper__BPFMap" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF____getitem__" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
@@ -393,6 +398,10 @@ digraph G {
         "picosnitch__bpf_wrapper__compile_bpf" -> "picosnitch__bpf_wrapper__BPF____enter__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__compile_bpf" -> "picosnitch__bpf_wrapper__BPF____exit__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__find_bpf_object" -> "picosnitch__bpf_wrapper__compile_bpf" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__kernel_symbol_addrs" -> "picosnitch__bpf_wrapper__BPFObject____enter__" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__kernel_symbol_addrs" -> "picosnitch__bpf_wrapper__BPFObject____exit__" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__kernel_symbol_addrs" -> "picosnitch__bpf_wrapper__BPF____enter__" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__kernel_symbol_addrs" -> "picosnitch__bpf_wrapper__BPF____exit__" [style="solid",  color="#000000"];
         "picosnitch__live_feed" -> "picosnitch__live_feed__LiveFeedPublisher" [style="dashed",  color="#ffffff00"];
         "picosnitch__live_feed" -> "picosnitch__live_feed__LiveFeedSubscriber" [style="dashed",  color="#ffffff00"];
         "picosnitch__live_feed__LiveFeedPublisher" -> "picosnitch__live_feed__LiveFeedPublisher____init__" [style="dashed",  color="#ffffff00"];
@@ -475,6 +484,7 @@ digraph G {
         "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__ConnVal" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__check_bpf_requirements" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__find_bpf_object" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__kernel_symbol_addrs" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__subprocesses__monitor___classify_inodeX_fallback" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__subprocesses__monitor___initial_family_for" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__subprocesses__monitor___parse_proc_net_addr" [style="dashed",  color="#ffffff00"];
@@ -515,6 +525,7 @@ digraph G {
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__bpf_wrapper__BPFObject____enter__" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__bpf_wrapper__BPFObject____exit__" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__bpf_wrapper__BPFObject__attach_trace" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__bpf_wrapper__BPFObject__set_global" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__bpf_wrapper__BPF____enter__" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__bpf_wrapper__BPF____exit__" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__bpf_wrapper__BPF____init__" [style="solid",  color="#000000"];
@@ -525,6 +536,7 @@ digraph G {
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__bpf_wrapper__BPF__perf_buffer_poll" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__bpf_wrapper__check_bpf_requirements" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__bpf_wrapper__find_bpf_object" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__bpf_wrapper__kernel_symbol_addrs" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor___initial_family_for" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor___read_netns_inodeX" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor___read_proc_comm" [style="solid",  color="#000000"];

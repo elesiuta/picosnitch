@@ -371,6 +371,67 @@ class TestDatabaseIntegrity:
             assert content.count("Exe inode changed") == 0, "Should not have inode changed errors"
 
 
+class TestSpliceRecvAccounting:
+    """recv via splice() bypasses recvmsg, so only the tcp_splice_read hook sees it; the
+    recorded bytes must match what was spliced exactly once (0 means the hook is missing,
+    ~2x means another hook double counted the same bytes)."""
+
+    def test_splice_recv_bytes_exact(self, picosnitch_session):
+        total = 4 * 1024 * 1024
+        port = 42813  # fixed server port so the receiver's connection row is queryable by rport
+        script = f"""
+import os, socket, threading
+total, port = {total}, {port}
+srv = socket.socket()
+srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(("127.0.0.1", port))
+srv.listen(1)
+def send():
+    c, _ = srv.accept()
+    sent = 0
+    while sent < total:
+        sent += c.send(b"A" * min(65536, total - sent))
+    c.shutdown(socket.SHUT_WR)
+    c.close()
+t = threading.Thread(target=send)
+t.start()
+s = socket.create_connection(("127.0.0.1", port))
+r, w = os.pipe()
+devnull = os.open(os.devnull, os.O_WRONLY)
+got = 0
+while n := os.splice(s.fileno(), w, 65536):
+    left = n
+    while left:
+        left -= os.splice(r, devnull, left)
+    got += n
+s.close()
+t.join()
+assert got == total, got
+"""
+        subprocess.run([PYTHON_EXE, "-c", script], check=True, timeout=60)
+
+        def spliced_recv_rows() -> list:
+            return query_db(
+                "SELECT c.send, c.recv FROM connections c JOIN addresses a ON c.raddr_id = a.id WHERE c.rport = ? AND a.addr = '127.0.0.1'",
+                (port,),
+            )
+
+        deadline = time.time() + (DB_WRITE_LIMIT + TRAFFIC_WAIT) * 3
+        rows = []
+        while time.time() < deadline:
+            time.sleep(2)
+            rows = spliced_recv_rows()
+            if sum(recv for _, recv in rows) >= total:
+                break
+        assert rows, "spliced recv connection was not recorded at all (tcp_splice_read hook missing?)"
+        # wait out one more write cycle so a straddled flush (or double-counted rows still in
+        # flight) can't hide bytes from the final tally
+        time.sleep(DB_WRITE_LIMIT + 2)
+        rows = spliced_recv_rows()
+        recv_total = sum(recv for _, recv in rows)
+        assert recv_total == total, f"spliced recv bytes {recv_total} != {total} transferred (2x means double counting), rows: {rows}"
+
+
 class TestGrandparentTracking:
     """Tests for grandparent process tracking."""
 

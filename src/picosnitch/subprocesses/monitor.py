@@ -19,7 +19,7 @@ import sys
 import time
 import typing
 
-from picosnitch.bpf_wrapper import BPF, ConnKey4, ConnKey6, ConnVal, check_bpf_requirements, find_bpf_object
+from picosnitch.bpf_wrapper import BPF, ConnKey4, ConnKey6, ConnVal, check_bpf_requirements, find_bpf_object, kernel_symbol_addrs
 from picosnitch.config import Config
 from picosnitch.constants import FD_CACHE, PID_CACHE, ST_DEV_MASK
 from picosnitch.utils import get_fstat
@@ -523,7 +523,26 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         raise
     try:
         bpf_obj_path = find_bpf_object()
-        b = BPF(obj_file=bpf_obj_path, map_max_entries={"conn_stats4": CONN_MAP_MAX, "conn_stats6": CONN_MAP_MAX})
+        optional_trace_targets = {
+            "inet6_sendmsg_ret": "inet6_sendmsg",
+            "inet6_recvmsg_ret": "inet6_recvmsg",
+            "tcp_splice_read_ret": "tcp_splice_read",
+            "mptcp_splice_read_ret": "mptcp_splice_read",
+            # tcp_read_sock covers io_uring zero-copy recv (IORING_OP_RECV_ZC), but it is also
+            # every proto_ops->read_sock: kTLS copy-mode, strparser (kcm/espintcp), nvme-tcp etc.
+            # reach it too, double counting or misattributing bytes. So the BPF program counts
+            # only calls whose recv_actor is io_zcrx_recv_skb (the actor io_uring passes) and
+            # needs its address; without the symbol the program stays disabled
+            "tcp_read_sock_ret": "io_zcrx_recv_skb",
+        }
+        syms = kernel_symbol_addrs(set(optional_trace_targets.values()))
+        # None (kallsyms unreadable) -> assume present and let the load try; a fexit prog
+        # whose target symbol is absent would otherwise fail the whole bpf object load.
+        # tcp_read_sock_ret is the exception: its actor filter needs the address, so it
+        # is disabled rather than left counting nothing (or worse, everything)
+        disabled_traces = {"tcp_read_sock_ret"} if syms is None else {prog for prog, target in optional_trace_targets.items() if target not in syms}
+        io_zcrx_actor = 0 if syms is None else syms.get("io_zcrx_recv_skb", 0)
+        b = BPF(obj_file=bpf_obj_path, map_max_entries={"conn_stats4": CONN_MAP_MAX, "conn_stats6": CONN_MAP_MAX}, disabled_programs=disabled_traces)
         b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
     except Exception as e:
         q_error.put("Init BPF %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
@@ -538,20 +557,51 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         use_getaddrinfo_uprobe = True
     except Exception as e:
         q_error.put(f"BPF.attach_uprobe() failed for getaddrinfo: {e}, falling back to only using reverse DNS lookup")
-    # attach fexit network hooks: inet_sendmsg for send, inet_recvmsg for recv
+    # attach fexit network hooks: inet_sendmsg for send, inet_recvmsg for recv;
+    # sock_common_recvmsg covers af_inet6 raw / l2tp / dccp recv (not inet6_recvmsg)
     try:
         b.bpf_obj.attach_trace("inet_sendmsg_ret")
         b.bpf_obj.attach_trace("inet_recvmsg_ret")
+        b.bpf_obj.attach_trace("sock_common_recvmsg_ret")
     except Exception as e:
         q_error.put(f"Failed to attach network monitoring programs: {e}")
         raise
-    # inet6_sendmsg and inet6_recvmsg are best-effort: absent on kernels
-    # built without IPv6, a missing hook only drops IPv6 send bytes
-    try:
-        b.bpf_obj.attach_trace("inet6_sendmsg_ret")
-        b.bpf_obj.attach_trace("inet6_recvmsg_ret")
-    except Exception as e:
-        q_error.put(f"BPF.attach_trace() failed for inet6 probes: {e}, IPv6 traffic will not be recorded")
+    # inet6_sendmsg and inet6_recvmsg are best-effort: absent on kernels built
+    # without IPv6, a missing hook only drops IPv6 send/recv bytes. attach each
+    # independently so one failing does not skip the other.
+    for prog, target, msg in (
+        ("inet6_sendmsg_ret", "inet6_sendmsg", "IPv6 send bytes"),
+        ("inet6_recvmsg_ret", "inet6_recvmsg", "IPv6 recv bytes"),
+    ):
+        if prog in disabled_traces:
+            q_error.put(f"BPF.attach_trace() skipped for {target}: kernel symbol not found, {msg} will not be recorded")
+            continue
+        try:
+            b.bpf_obj.attach_trace(prog)
+        except Exception as e:
+            q_error.put(f"BPF.attach_trace() failed for {target}: {e}, {msg} will not be recorded")
+    # tcp/mptcp splice_read: recv via splice()/sendfile() bypasses recvmsg. best-effort,
+    # one hook covers v4+v6; a missing hook only drops spliced recv bytes
+    for prog, target in (("tcp_splice_read_ret", "tcp_splice_read"), ("mptcp_splice_read_ret", "mptcp_splice_read")):
+        if prog in disabled_traces:
+            q_error.put(f"BPF.attach_trace() skipped for {target}: kernel symbol not found, spliced recv bytes will not be recorded")
+            continue
+        try:
+            b.bpf_obj.attach_trace(prog)
+        except Exception as e:
+            q_error.put(f"BPF.attach_trace() failed for {prog}: {e}, spliced recv bytes will not be recorded")
+    # tcp_read_sock: recv via io_uring zero-copy (IORING_OP_RECV_ZC). only enabled when
+    # io_zcrx_recv_skb is present (see optional_trace_targets); its address must be written
+    # before attach so the actor filter never counts other read_sock users. a missing/disabled
+    # hook only drops io_uring zcrx recv
+    if "tcp_read_sock_ret" in disabled_traces:
+        q_error.put("BPF.attach_trace() skipped for tcp_read_sock: io_uring zcrx not present, io_uring zero-copy recv bytes will not be recorded")
+    else:
+        try:
+            b.bpf_obj.set_global(".data.io_zcrx", struct.pack("<Q", io_zcrx_actor))
+            b.bpf_obj.attach_trace("tcp_read_sock_ret")
+        except Exception as e:
+            q_error.put(f"BPF.attach_trace() failed for tcp_read_sock_ret: {e}, io_uring zero-copy recv bytes will not be recorded")
 
     # callbacks for bpf events, read event and put into a pipe for run_primary
     def queue_lost(event, *args):
@@ -691,7 +741,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
 
     def queue_dns_event(cpu, data, size):
         event = b["dns_events"].event(data)
-        if event.daddr:
+        if event.family == socket.AF_INET:
             ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
         else:
             ip = socket.inet_ntop(socket.AF_INET6, bytes(event.daddr6))
