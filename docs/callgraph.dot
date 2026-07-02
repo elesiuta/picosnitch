@@ -179,6 +179,7 @@ digraph G {
 
             graph [style="filled,rounded", fillcolor="#80808018", label="picosnitch.subprocesses.notifications"];
             "picosnitch__subprocesses__notifications___send_notification" [label="_send_notification", style="filled", fillcolor="#65ffa3b2", fontcolor="#000000", group="6"];
+            "picosnitch__subprocesses__notifications___set_desktop_session_env" [label="_set_desktop_session_env", style="filled", fillcolor="#65ffa3b2", fontcolor="#000000", group="6"];
             "picosnitch__subprocesses__notifications__run_notifications" [label="run_notifications", style="filled", fillcolor="#65ffa3b2", fontcolor="#000000", group="6"];
         }
         subgraph "cluster_picosnitch__subprocesses__primary" {
@@ -601,8 +602,10 @@ digraph G {
         "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" -> "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" -> "picosnitch__subprocesses__monitor__run_monitor__get_fd" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__notifications" -> "picosnitch__subprocesses__notifications___send_notification" [style="dashed",  color="#ffffff00"];
+        "picosnitch__subprocesses__notifications" -> "picosnitch__subprocesses__notifications___set_desktop_session_env" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__notifications" -> "picosnitch__subprocesses__notifications__run_notifications" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__notifications__run_notifications" -> "picosnitch__subprocesses__notifications___send_notification" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__notifications__run_notifications" -> "picosnitch__subprocesses__notifications___set_desktop_session_env" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__notifications__run_notifications" -> "picosnitch__utils__drop_root_permanent" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__notifications__run_notifications" -> "picosnitch__utils__resolve_group" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__notifications__run_notifications" -> "picosnitch__utils__resolve_owner" [style="solid",  color="#000000"];

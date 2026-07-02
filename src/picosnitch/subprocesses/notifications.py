@@ -4,11 +4,29 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import pwd
 import queue
 import shutil
 import subprocess
 
 from picosnitch.config import Config
+
+
+def _set_desktop_session_env(uid: int) -> None:
+    """point notify-send at the target user's D-Bus session bus
+
+    After dropping to desktop.user, the inherited env still holds root's (or no)
+    XDG_RUNTIME_DIR / DBUS_SESSION_BUS_ADDRESS, so notify-send can't reach the
+    user's session bus and every notification fails. Set the systemd-logind
+    standard paths for that uid; without a running session at /run/user/<uid>
+    notify-send still fails, but that is the user's login state, not our env.
+    """
+    os.environ["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+    os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
+    try:
+        os.environ["HOME"] = pwd.getpwuid(uid).pw_dir
+    except KeyError:
+        pass
 
 
 def _send_notification(msg: str) -> subprocess.CompletedProcess:
@@ -41,6 +59,7 @@ def run_notifications(config: Config, fan_fd: int, q_error: multiprocessing.Queu
         uid = resolve_owner(config.desktop.user)
         gid = resolve_group(config.desktop.user)
         drop_root_permanent(uid, gid)
+        _set_desktop_session_env(uid)
     # fan_fd is inherited via fork() but this subprocess never uses it;
     # closing it prevents leaking a privileged fanotify handle into a
     # dropped-privilege security domain.
