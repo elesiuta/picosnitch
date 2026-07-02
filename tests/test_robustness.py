@@ -100,9 +100,10 @@ def test_maintain_database_quarantines_corrupt(tmp_path):
     def fresh(version=DB_VERSION):
         db.unlink(missing_ok=True)
         con = sqlite3.connect(db)
-        con.execute("CREATE TABLE connections (contime INTEGER, domain_id INTEGER, laddr_id INTEGER, raddr_id INTEGER)")
+        con.execute("CREATE TABLE connections (contime INTEGER, domain_id INTEGER, laddr_id INTEGER, raddr_id INTEGER, exe_id INTEGER, pexe_id INTEGER, gpexe_id INTEGER)")
         con.execute("CREATE TABLE domains (id INTEGER)")
         con.execute("CREATE TABLE addresses (id INTEGER)")
+        con.execute("CREATE TABLE executables (id INTEGER)")
         con.execute(f"PRAGMA user_version = {version}")
         con.commit()
         con.close()
@@ -142,6 +143,47 @@ def test_maintain_database_quarantines_corrupt(tmp_path):
     with pytest.raises(SystemExit):
         maintain_database(db, 365)
     assert bad.exists() and not db.exists()
+
+
+def test_maintain_database_purges_orphans(tmp_path):
+    """after connections age out, the reference tables (executables/domains/addresses)
+    must shed rows no live connection points at, while referenced rows and the id=0
+    sentinel survive -- otherwise executables grows unbounded with argv cardinality."""
+    import sqlite3
+    import time
+
+    from picosnitch.constants import DB_VERSION, SCHEMA_ADDRESSES, SCHEMA_CONNECTIONS, SCHEMA_DOMAINS, SCHEMA_EXECUTABLES
+    from picosnitch.subprocesses.secondary import maintain_database
+
+    db = tmp_path / "picosnitch.db"
+    con = sqlite3.connect(db)
+    con.execute(f"CREATE TABLE executables ({SCHEMA_EXECUTABLES}) STRICT")
+    con.execute(f"CREATE TABLE domains ({SCHEMA_DOMAINS}) STRICT")
+    con.execute(f"CREATE TABLE addresses ({SCHEMA_ADDRESSES}) STRICT")
+    con.execute(f"CREATE TABLE connections ({SCHEMA_CONNECTIONS}) STRICT")
+    for t in ("executables", "domains", "addresses"):
+        col = "exe, name, cmdline, sha256" if t == "executables" else ("domain" if t == "domains" else "addr")
+        vals = "'', '', '', ''" if t == "executables" else "''"
+        con.execute(f"INSERT INTO {t}(id, {col}) VALUES (0, {vals})")  # sentinel
+    # id 1 = referenced by a live connection; id 2 = orphan (no connection points at it)
+    con.execute("INSERT INTO executables(id, exe, name, cmdline, sha256) VALUES (1, '/bin/live', 'live', 'live', 'a')")
+    con.execute("INSERT INTO executables(id, exe, name, cmdline, sha256) VALUES (2, '/bin/orphan', 'orphan', 'orphan --token-999', 'b')")
+    con.execute("INSERT INTO domains(id, domain) VALUES (1, 'live.example'), (2, 'orphan.example')")
+    con.execute("INSERT INTO addresses(id, addr) VALUES (1, '10.0.0.1'), (2, '10.0.0.2')")
+    now = int(time.time())
+    # one live connection referencing exe 1 / domain 1 / addr 1 (as laddr AND raddr)
+    con.execute(f"INSERT INTO connections VALUES ({now}, 0, 0, 1, 1, 1, 1, 0, 2, 6, 0, 443, 1, 1, 1, 0)")
+    con.execute(f"PRAGMA user_version = {DB_VERSION}")
+    con.commit()
+    con.close()
+
+    maintain_database(db, 365)
+
+    con = sqlite3.connect(db)
+    assert sorted(r[0] for r in con.execute("SELECT id FROM executables")) == [0, 1]  # orphan 2 purged, sentinel + live kept
+    assert sorted(r[0] for r in con.execute("SELECT id FROM domains")) == [0, 1]
+    assert sorted(r[0] for r in con.execute("SELECT id FROM addresses")) == [0, 1]
+    con.close()
 
 
 def test_db_is_corrupt(tmp_path):

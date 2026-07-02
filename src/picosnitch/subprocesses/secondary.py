@@ -40,6 +40,10 @@ def maintain_database(file_path: Path, retention_days: int) -> None:
         cur.execute("DELETE FROM connections WHERE contime < ?", (retention_cutoff,))
         cur.execute("DELETE FROM domains WHERE id != 0 AND id NOT IN (SELECT DISTINCT domain_id FROM connections)")
         cur.execute("DELETE FROM addresses WHERE id != 0 AND id NOT IN (SELECT DISTINCT laddr_id FROM connections UNION SELECT DISTINCT raddr_id FROM connections)")
+        # executables interns (exe, name, cmdline, sha256); a new cmdline is a new row, so a high
+        # argv cardinality (per-invocation tokens) grows it unbounded without this. purge orphans
+        # like domains/addresses above, keeping it consistent with the connection retention window
+        cur.execute("DELETE FROM executables WHERE id != 0 AND id NOT IN (SELECT exe_id FROM connections UNION SELECT pexe_id FROM connections UNION SELECT gpexe_id FROM connections)")
         con.commit()
         con.close()
     except sqlite3.DatabaseError as e:
