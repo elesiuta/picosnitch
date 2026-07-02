@@ -24,11 +24,13 @@ path is unchanged.
 Picosnitch runs as a small fleet of cooperating processes. The
 **monitor** owns the kernel hooks, the **primary** loop turns raw BPF
 events into per-executable records, and the **secondary** writer is
-the only process that touches the database. Two helpers
+the only process that touches the local database. Two helpers
 (**fuse**, **virustotal**) are isolated so a slow hash or a flaky
 API call cannot back up the hot path, and **notifications** is split
 out because it has to drop root to send toasts as the desktop user
-via `notify-send`. The UIs read the local SQLite database directly.
+via `notify-send`. The optional **remote sql** writer runs
+unprivileged so its third-party database driver is never imported by
+a root process. The UIs read the local SQLite database directly.
 
 ```mermaid
 %%{init: {"flowchart": {"useMaxWidth": true, "htmlLabels": true}, "themeVariables": {"fontSize": "14px"}} }%%
@@ -40,11 +42,12 @@ flowchart TD
 
     MON["<b>monitor</b><br/>drains BPF perf buffer,<br/>forwards fanotify fd"]
     PRI["<b>primary</b><br/>resolves exe / parent identity,<br/>caches one fd per dev,ino,<br/>publishes live feed"]
-    SEC["<b>secondary</b><br/>hashes executables (sha256),<br/>batches inserts,<br/>enforces retention_days,<br/>fans out to remote DB"]
+    SEC["<b>secondary</b><br/>hashes executables (sha256),<br/>batches inserts,<br/>enforces retention_days"]
 
     FUSE["<b>fuse reader</b><br/>fallback hasher for files<br/>only readable as user<br/>(FUSE / AppImage)"]
     VT["<b>virustotal</b><br/>optional VT API client"]
     NOTIFY["<b>notify</b><br/>desktop toasts<br/>via notify-send"]
+    RSQL["<b>remote sql</b><br/>optional remote DB writer,<br/>runs unprivileged"]
 
     LIVE([live feed socket])
     SQL[("<b>local SQLite</b><br/>connections, executables,<br/>domains, addresses")]
@@ -63,7 +66,8 @@ flowchart TD
     SEC <-- sha256 request / reply --> FUSE
     SEC <-- hash lookup / verdict --> VT
     SEC -- write --> SQL
-    SEC -- write --> REMOTE
+    SEC -- entry batches --> RSQL
+    RSQL -- write --> REMOTE
 
     LIVE -- live feed --> TOP
     SQL -. read-only .-> TUI
@@ -72,11 +76,11 @@ flowchart TD
     LIVE -. live tab .-> WEB
 ```
 
-The primary loop never blocks on disk or network I/O: if SQLite or
-the remote server is slow, the secondary writer absorbs the backlog
-and only that subprocess feels the back-pressure. If the BPF perf
-buffer overflows, the event is logged to `error.log` and surfaced as
-a desktop notification rather than silently dropped.
+The primary loop never blocks on disk or network I/O: if SQLite is
+slow, the secondary writer absorbs the backlog; if the remote server
+is slow, only the remote sql writer feels the back-pressure. If the
+BPF perf buffer overflows, the event is logged to `error.log` and
+surfaced as a desktop notification rather than silently dropped.
 
 ## Executable identity
 

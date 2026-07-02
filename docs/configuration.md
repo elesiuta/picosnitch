@@ -35,6 +35,9 @@ sudo pipx install 'picosnitch[sql]' --global
 Picosnitch only ever issues `INSERT` against the remote (no retention,
 no garbage collection), so it is intended as an
 [off-system copy of your logs](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS).
+The remote writer runs in an unprivileged subprocess (`[desktop].user`
+if set, otherwise `nobody`), so the database driver is never imported
+by a root process.
 Grant the daemon's database user `INSERT` only to prevent an adversary
 on the monitored host from deleting picosnitch's off-system logs.
 

@@ -20,6 +20,7 @@ from picosnitch.subprocesses.fuse import run_fuse
 from picosnitch.subprocesses.monitor import run_monitor
 from picosnitch.subprocesses.notifications import run_notifications
 from picosnitch.subprocesses.primary import run_primary
+from picosnitch.subprocesses.remote_sql import run_remote_sql
 from picosnitch.subprocesses.secondary import run_secondary
 from picosnitch.subprocesses.virustotal import run_virustotal
 from picosnitch.types import State
@@ -79,6 +80,15 @@ def run_main_loop(config: Config, state: State) -> int:
             q_error,
         ),
     )
+    p_remote_sql = ProcessManager(
+        name="snitchremotesql",
+        target=run_remote_sql,
+        init_args=(
+            config,
+            fan_fd,
+            q_error,
+        ),
+    )
     p_primary = ProcessManager(
         name="snitchprimary",
         target=run_primary,
@@ -102,11 +112,12 @@ def run_main_loop(config: Config, state: State) -> int:
             p_virustotal,
             secondary_recv_pipe,
             p_primary.q_in,
+            p_remote_sql.q_in,
             q_error,
         ),
     )
     # set signals
-    subprocesses = [p_monitor, p_fuse, p_virustotal, p_primary, p_secondary, p_notifications]
+    subprocesses = [p_monitor, p_fuse, p_virustotal, p_remote_sql, p_primary, p_secondary, p_notifications]
     shutdown_event = threading.Event()
     resume_event = threading.Event()
     signal.signal(signal.SIGINT, lambda signum, frame: shutdown_event.set())

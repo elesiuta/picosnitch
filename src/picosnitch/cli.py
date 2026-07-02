@@ -2,7 +2,7 @@
 # Copyright (C) 2020 Eric Lesiuta
 
 import atexit
-import importlib
+import importlib.util
 import logging
 import multiprocessing
 import os
@@ -72,6 +72,26 @@ def check_database() -> int:
             con.close()
     if user_version != DB_VERSION:
         logging.error(f"Unsupported database version {user_version}, expected {DB_VERSION}")
+        return 1
+    return 0
+
+
+def check_remote_config(remote: dict) -> int:
+    """validate [database.remote] without importing the driver (third-party code never runs
+    as root -- the unprivileged remote_sql subprocess imports it), return exit code on failure"""
+    sql_kwargs = dict(remote)
+    if not sql_kwargs:
+        return 0
+    sql_client = sql_kwargs.pop("client", "no client error")
+    conn_table = sql_kwargs.pop("connections_table", "connections")
+    if sql_client not in ["mariadb", "psycopg", "psycopg2", "pymysql"]:
+        logging.error(f'unsupported database.remote "client": {sql_client}')
+        return 1
+    if not isinstance(conn_table, str) or not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", conn_table):
+        logging.error(f"invalid remote table name: {conn_table!r}")
+        return 1
+    if importlib.util.find_spec(sql_client) is None:
+        logging.error(f'database.remote "client" {sql_client} is not installed, install it or picosnitch[sql]')
         return 1
     return 0
 
@@ -334,6 +354,8 @@ def start_picosnitch() -> int:
         init_dirs_and_config()
         if err := check_database():
             return err
+        if err := check_remote_config(load_config().database.remote):
+            return err
         # offer systemctl for start/restart
         if cmd in ("start", "restart"):
             if Path("/usr/lib/systemd/system/picosnitch.service").exists() or Path("/etc/systemd/system/picosnitch.service").exists():
@@ -370,34 +392,6 @@ def start_picosnitch() -> int:
                         if confirm.lower().startswith("y"):
                             subprocess.run(["systemctl", cmd, "picosnitch"])
                             return 0
-        # optional remote database
-        config = load_config()
-        if sql_kwargs := dict(config.database.remote):
-            sql_client = sql_kwargs.pop("client", "no client error")
-            conn_table = sql_kwargs.pop("connections_table", "connections")
-            if sql_client not in ["mariadb", "psycopg", "psycopg2", "pymysql"]:
-                logging.error(f'unsupported database.remote "client": {sql_client}')
-                return 1
-            if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", conn_table):
-                logging.error(f"invalid remote table name: {conn_table!r}")
-                return 1
-            sql = importlib.import_module(sql_client)
-            try:
-                con = sql.connect(**sql_kwargs)
-                cur = con.cursor()
-                remote_exe_schema = SCHEMA_EXECUTABLES.replace("INTEGER PRIMARY KEY", "INTEGER PRIMARY KEY AUTO_INCREMENT").replace(
-                    "UNIQUE(exe, name, cmdline, sha256)", "UNIQUE(exe(255), name(255), cmdline(255), sha256(64))"
-                )
-                remote_dom_schema = SCHEMA_DOMAINS.replace("INTEGER PRIMARY KEY", "INTEGER PRIMARY KEY AUTO_INCREMENT").replace("domain TEXT NOT NULL UNIQUE", "domain VARCHAR(255) NOT NULL UNIQUE")
-                remote_addr_schema = SCHEMA_ADDRESSES.replace("INTEGER PRIMARY KEY", "INTEGER PRIMARY KEY AUTO_INCREMENT").replace("addr TEXT NOT NULL UNIQUE", "addr VARCHAR(64) NOT NULL UNIQUE")
-                cur.execute(f"CREATE TABLE IF NOT EXISTS executables ({remote_exe_schema})")
-                cur.execute(f"CREATE TABLE IF NOT EXISTS domains ({remote_dom_schema})")
-                cur.execute(f"CREATE TABLE IF NOT EXISTS addresses ({remote_addr_schema})")
-                cur.execute(f"CREATE TABLE IF NOT EXISTS {conn_table} ({SCHEMA_CONNECTIONS})")
-                con.commit()
-                con.close()
-            except Exception as e:
-                logging.warning(f"{type(e).__name__}{e.args} on line {e.__traceback__.tb_lineno if e.__traceback__ else '?'}")
         apply_data_permissions(CONFIG_DIR, DATA_DIR, LOG_DIR, CACHE_DIR)
         # log warnings/errors to the existing error.log so failures in the
         # forked daemon (where stderr is /dev/null) are still visible.

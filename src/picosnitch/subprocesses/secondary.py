@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import collections
-import importlib
 import ipaddress
 import logging
 import multiprocessing
 import multiprocessing.connection
 import pickle
-import re
 import shlex
 import sqlite3
 import sys
@@ -211,6 +209,7 @@ def run_secondary(
     p_virustotal: ProcessManager,
     secondary_pipe: multiprocessing.connection.Connection,
     q_primary_in: multiprocessing.Queue[bytes],
+    q_remote_sql: multiprocessing.Queue[bytes],
     q_error: multiprocessing.Queue[str],
     _q_in: multiprocessing.Queue,
     _q_out: multiprocessing.Queue,
@@ -238,27 +237,8 @@ def run_secondary(
     addr_id_cache: dict[str, int] = {"": 0}
     if config.database.enabled:
         maintain_database(file_path, config.database.retention_days)
-    if sql_kwargs := dict(config.database.remote):
-        sql_client = sql_kwargs.pop("client", "no client error")
-        conn_table = sql_kwargs.pop("connections_table", "connections")
-        if sql_client not in ["mariadb", "psycopg", "psycopg2", "pymysql"]:
-            q_error.put(f'unsupported database.remote "client": {sql_client}')
-            sql_kwargs = {}
-        elif not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", conn_table):
-            q_error.put(f"invalid remote table name: {conn_table!r}")
-            sql_kwargs = {}
-        else:
-            sql = importlib.import_module(sql_client)
-            sql_insert_exe = sqlite_insert_exe.replace("?", "%s").replace("OR IGNORE ", "IGNORE ")
-            sql_select_exe = sqlite_select_exe.replace("?", "%s")
-            sql_insert_dom = sqlite_insert_dom.replace("?", "%s").replace("OR IGNORE ", "IGNORE ")
-            sql_select_dom = sqlite_select_dom.replace("?", "%s")
-            sql_insert_addr = sqlite_insert_addr.replace("?", "%s").replace("OR IGNORE ", "IGNORE ")
-            sql_select_addr = sqlite_select_addr.replace("?", "%s")
-            sql_insert_conn = sqlite_insert_conn.replace("?", "%s").replace("connections", conn_table)
-            if not any(k in sql_kwargs for k in ("ssl", "ssl_context", "sslmode", "ssl_mode")):
-                q_error.put("warning: remote database connection has no SSL/TLS parameters configured")
-    log_destinations = int(bool(config.database.enabled)) + int(bool(sql_kwargs)) + int(bool(config.database.text_log))
+    # remote logging is handed off to the remote_sql subprocess, not a destination here
+    log_destinations = int(bool(config.database.enabled)) + int(bool(config.database.text_log))
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
     # get network address and mask for ignored IP subnets
@@ -340,7 +320,11 @@ def run_secondary(
             # process connection data
             if time.time() - last_write > config.database.write_limit_seconds and (transaction or new_processes):
                 current_write = time.time()
-                transaction += build_log_entries(config, state, fan_mod_cnt, new_processes, p_fuse, p_virustotal.q_in, q_primary_in, q_error, ignored_networks)
+                new_entries = build_log_entries(config, state, fan_mod_cnt, new_processes, p_fuse, p_virustotal.q_in, q_primary_in, q_error, ignored_networks)
+                if config.database.remote and new_entries:
+                    # new entries only: the retries below are local, resending would duplicate remote rows
+                    q_remote_sql.put(pickle.dumps(new_entries))
+                transaction += new_entries
                 new_processes = []
                 transaction_success = False
                 try:
@@ -361,37 +345,6 @@ def run_secondary(
                         transaction_success = True
                 except Exception as e:
                     q_error.put("SQLite execute %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?", len(transaction)))
-                try:
-                    if sql_kwargs:
-                        con = sql.connect(**sql_kwargs)
-                        with con.cursor() as cur:
-                            conn_rows = []
-                            for contime, send, recv, n_events, exe_key, pexe_key, gpexe_key, uid, family, protocol, lport, rport, laddr, raddr, domain, netns in transaction:
-                                cur.execute(sql_insert_exe, exe_key)
-                                cur.execute(sql_select_exe, exe_key)
-                                exe_id = cur.fetchone()[0]
-                                cur.execute(sql_insert_exe, pexe_key)
-                                cur.execute(sql_select_exe, pexe_key)
-                                pexe_id = cur.fetchone()[0]
-                                cur.execute(sql_insert_exe, gpexe_key)
-                                cur.execute(sql_select_exe, gpexe_key)
-                                gpexe_id = cur.fetchone()[0]
-                                cur.execute(sql_insert_addr, (laddr,))
-                                cur.execute(sql_select_addr, (laddr,))
-                                laddr_id = cur.fetchone()[0]
-                                cur.execute(sql_insert_addr, (raddr,))
-                                cur.execute(sql_select_addr, (raddr,))
-                                raddr_id = cur.fetchone()[0]
-                                cur.execute(sql_insert_dom, (domain,))
-                                cur.execute(sql_select_dom, (domain,))
-                                domain_id = cur.fetchone()[0]
-                                conn_rows.append((contime, send, recv, n_events, exe_id, pexe_id, gpexe_id, uid, family, protocol, lport, rport, laddr_id, raddr_id, domain_id, netns))
-                            cur.executemany(sql_insert_conn, conn_rows)
-                        con.commit()
-                        con.close()
-                        transaction_success = True
-                except Exception as e:
-                    q_error.put("SQL server execute %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?", len(transaction)))
                 try:
                     if config.database.text_log:
                         with safe_log_open(text_path) as text_file:
