@@ -146,8 +146,8 @@ def load_state() -> State:
             state_record = json.load(json_file)
         for key in ["Executables", "Names", "Parent Executables", "Parent Names", "Grandparent Executables", "Grandparent Names", "SHA256"]:
             if key in state_record:
-                data[key] = state_record[key]  # ty: ignore[invalid-key]
-            if not isinstance(data[key], dict):  # ty: ignore[invalid-key]
+                data[key] = state_record[key]  # ty: ignore[invalid-assignment]
+            if not isinstance(data[key], dict):
                 logging.error("Invalid state.json")
                 sys.exit(1)
     return data

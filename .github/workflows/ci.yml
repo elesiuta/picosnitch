@@ -14,12 +14,12 @@ jobs:
         uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
-      - run: uv tool run ruff check
-      - run: uv tool run ruff format --diff
-      - run: uv tool run tach check
-      # ty needs the project env so it can resolve dev deps (pytest) and the
-      # picosnitch package itself when checking tests/.
+      # run linters via uv run, not uv tool run, so they use the pinned dev group
+      # instead of the latest release; uv sync also gives ty the env for tests/
       - run: uv sync
+      - run: uv run ruff check
+      - run: uv run ruff format --diff
+      - run: uv run tach check
       - run: uv run ty check
 
   build:
