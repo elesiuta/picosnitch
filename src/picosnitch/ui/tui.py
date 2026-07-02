@@ -877,9 +877,9 @@ def tui_loop(stdscr: curses.window) -> int:
         # vertical separator
         for sep_y in range(1, max_y - 1):
             _chrome._safe_addnstr(stdscr, sep_y, sidebar_w, "|", 1, curses.color_pair(_chrome.CP_MUTED))
-        # main pane column header (row 1)
-        col_hdr_w = max(1, main_w - 30)
-        col_hdr = f"{col_label_now:<{col_hdr_w}.{col_hdr_w}}     Sent       Received"
+        # main pane column header (row 1) -- widths mirror the data rows below
+        name_w = max(1, main_w - 29)
+        col_hdr = f"{col_label_now:<{name_w}.{name_w}}{'Sent':>14.14} {'Received':>14.14}"
         _chrome._safe_addnstr(
             stdscr,
             1,
