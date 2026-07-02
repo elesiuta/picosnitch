@@ -14,12 +14,47 @@ import shlex
 import sqlite3
 import sys
 import time
+from pathlib import Path
 
 from picosnitch.config import Config
 from picosnitch.constants import DATA_DIR, DB_VERSION, LOG_DIR, VERSION
 from picosnitch.process_manager import ProcessManager
 from picosnitch.types import BpfEvent, ProcessHashInfo, State
-from picosnitch.utils import get_fanotify_events, get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup, safe_log_open, sync_vt_results
+from picosnitch.utils import get_fanotify_events, get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup, safe_log_open, sqlite_error_means_corrupt, sync_vt_results
+
+
+def maintain_database(file_path: Path, retention_days: int) -> None:
+    """open picosnitch.db and purge rows past the retention window. exits on a version mismatch;
+    on a corrupt/malformed or table-missing db, quarantine it to picosnitch.db.bad and exit so the
+    next boot's init recreates a fresh db (crash-loop safety -- this runs before the main loop's
+    try/except; the data is kept in .bad). a transient error (e.g. a lock) is re-raised untouched."""
+    con = None
+    try:
+        con = sqlite3.connect(file_path)
+        cur = con.cursor()
+        cur.execute("PRAGMA user_version")
+        db_version = cur.fetchone()[0]
+        if db_version != DB_VERSION:
+            con.close()
+            logging.error(f"Incorrect database version of picosnitch.db for picosnitch v{VERSION}")
+            sys.exit(1)
+        retention_cutoff = int(time.time()) - int(retention_days) * 86400
+        cur.execute("DELETE FROM connections WHERE contime < ?", (retention_cutoff,))
+        cur.execute("DELETE FROM domains WHERE id != 0 AND id NOT IN (SELECT DISTINCT domain_id FROM connections)")
+        cur.execute("DELETE FROM addresses WHERE id != 0 AND id NOT IN (SELECT DISTINCT laddr_id FROM connections UNION SELECT DISTINCT raddr_id FROM connections)")
+        con.commit()
+        con.close()
+    except sqlite3.DatabaseError as e:
+        if not sqlite_error_means_corrupt(e):
+            raise
+        logging.error(f"picosnitch.db is unusable ({e}); quarantining to picosnitch.db.bad and recreating on restart")
+        if con is not None:
+            con.close()
+        try:
+            file_path.rename(file_path.with_name("picosnitch.db.bad"))
+        except OSError:
+            pass
+        sys.exit(1)
 
 
 def resolve_hash(
@@ -202,19 +237,7 @@ def run_secondary(
     domain_id_cache: dict[str, int] = {"": 0}
     addr_id_cache: dict[str, int] = {"": 0}
     if config.database.enabled:
-        con = sqlite3.connect(file_path)
-        cur = con.cursor()
-        cur.execute(""" PRAGMA user_version """)
-        db_version = cur.fetchone()[0]
-        if db_version != DB_VERSION:
-            logging.error(f"Incorrect database version of picosnitch.db for picosnitch v{VERSION}")
-            sys.exit(1)
-        retention_cutoff = int(time.time()) - int(config.database.retention_days) * 86400
-        cur.execute("DELETE FROM connections WHERE contime < ?", (retention_cutoff,))
-        cur.execute("DELETE FROM domains WHERE id != 0 AND id NOT IN (SELECT DISTINCT domain_id FROM connections)")
-        cur.execute("DELETE FROM addresses WHERE id != 0 AND id NOT IN (SELECT DISTINCT laddr_id FROM connections UNION SELECT DISTINCT raddr_id FROM connections)")
-        con.commit()
-        con.close()
+        maintain_database(file_path, config.database.retention_days)
     if sql_kwargs := dict(config.database.remote):
         sql_client = sql_kwargs.pop("client", "no client error")
         conn_table = sql_kwargs.pop("connections_table", "connections")
@@ -239,7 +262,7 @@ def run_secondary(
     # init fanotify mod counter = {"st_dev st_ino": modify_count}, and traffic counter = {"send|recv pid socket_ino": bytes}
     fan_mod_cnt = collections.defaultdict(int)
     # get network address and mask for ignored IP subnets
-    ignored_networks = [ipaddress.ip_network(ip_subnet) for ip_subnet in config.log.ignore_ips]
+    ignored_networks = [ipaddress.ip_network(ip_subnet, strict=False) for ip_subnet in config.log.ignore_ips]
 
     # resolve exe tuples to IDs with caching
     def resolve_exe_id(con: sqlite3.Connection, exe_key: tuple) -> int:
@@ -300,12 +323,13 @@ def run_secondary(
                     new_processes.append(secondary_pipe.recv_bytes())
                     transfer_size -= 1
                 timeout_counter += 1
-                if pickle.loads(new_processes[-1]) == "done":
+                if new_processes and pickle.loads(new_processes[-1]) == "done":
                     new_processes.pop()
                     transfer_size += 1
                     break
                 elif timeout_counter > 30:
                     q_error.put("sync error between secondary and primary on receive (did not receive done)")
+                    break
             if transfer_size > 0:
                 q_error.put("sync error between secondary and primary on receive (did not receive all messages)")
             elif transfer_size < 0:

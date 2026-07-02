@@ -14,16 +14,41 @@ import multiprocessing
 import os
 import pickle
 import pwd
+import queue
 import socket
 import sqlite3
 import sys
 import tempfile
 import termios
+import time
 from pathlib import Path
 
 from picosnitch.config import load_config
 from picosnitch.constants import DATA_DIR, LOG_DIR, PID_CACHE, ST_DEV_MASK
 from picosnitch.types import FanotifyEventMetadata, State
+
+FUSE_HASH_TIMEOUT = 60
+
+
+def relaunch_argv(cmd: str) -> list[str]:
+    """argv to re-invoke picosnitch for `cmd` (used by `top` to spawn a monitor and by the
+    main loop to restart after suspend). Re-exec argv[0] directly so its own shebang or nix
+    bash wrapper (which sets LD_LIBRARY_PATH for libbpf) runs; prefixing sys.executable breaks
+    nix, whose argv[0] is a bash wrapper the python interpreter can't parse. Fall back to
+    `-m picosnitch` when we weren't launched from a picosnitch console script/wrapper."""
+    argv0 = sys.argv[0]
+    base = os.path.basename(argv0).lstrip(".").split("-wrapped")[0]
+    if base == "picosnitch" and os.access(argv0, os.X_OK):
+        return [argv0, cmd]
+    return [sys.executable, "-m", "picosnitch", cmd]
+
+
+def sqlite_error_means_corrupt(e: sqlite3.Error) -> bool:
+    """True when a sqlite error means picosnitch.db itself is unusable (quarantine+recreate);
+    False for transient errors (locked by the live daemon, busy, disk I/O) where quarantining
+    would destroy a healthy database. Shared by the cli boot check and the secondary purge."""
+    msg = str(e).lower()
+    return any(s in msg for s in ("malformed", "not a database", "no such table", "no such column", "encrypted"))
 
 
 def drop_root_permanent(uid: int, gid: int) -> None:
@@ -141,15 +166,35 @@ def load_state() -> State:
         "SHA256": {},
     }
     state_path = DATA_DIR / "state.json"
+    keys = ["Executables", "Names", "Parent Executables", "Parent Names", "Grandparent Executables", "Grandparent Names", "SHA256"]
     if state_path.exists():
-        with open(state_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
-            state_record = json.load(json_file)
-        for key in ["Executables", "Names", "Parent Executables", "Parent Names", "Grandparent Executables", "Grandparent Names", "SHA256"]:
-            if key in state_record:
-                data[key] = state_record[key]  # ty: ignore[invalid-assignment]
-            if not isinstance(data[key], dict):
-                logging.error("Invalid state.json")
-                sys.exit(1)
+        try:
+            with open(state_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
+                state_record = json.load(json_file)
+            if not isinstance(state_record, dict):
+                raise ValueError("state.json is not a JSON object")
+            for key in keys:
+                if key in state_record:
+                    value = state_record[key]
+                    if not isinstance(value, dict):
+                        raise ValueError(f"state.json[{key!r}] is not an object")
+                    # validate the inner shape too: SHA256 maps exe -> {sha256: result}, the rest
+                    # map exe -> [name history]. a wrong-typed entry (e.g. a str/int) crashes
+                    # sync_vt_results at startup (outside its subprocess try/except) -> crash-loop
+                    inner_type = dict if key == "SHA256" else list
+                    if not all(isinstance(v, inner_type) for v in value.values()):
+                        raise ValueError(f"state.json[{key!r}] has a non-{inner_type.__name__} entry")
+                    data[key] = value  # ty: ignore[invalid-key]
+        except (OSError, ValueError) as e:
+            # corrupt/unreadable state must not crash-loop the daemon (JSONDecodeError is a
+            # ValueError): quarantine the bad file and start fresh instead of sys.exit(1)
+            logging.error(f"invalid state.json, starting with empty state: {e}")
+            try:
+                state_path.rename(state_path.with_name("state.json.bad"))
+            except OSError:
+                pass
+            for key in keys:
+                data[key] = {}  # ty: ignore[invalid-key]
     return data
 
 
@@ -261,13 +306,27 @@ def get_sha256_pid(pid: int, st_dev: int, st_ino: int) -> str:
 
 
 @functools.lru_cache(maxsize=PID_CACHE)
-def get_sha256_fuse(q_in: multiprocessing.Queue[bytes], q_out: multiprocessing.Queue[str], path: str, pid: int, st_dev: int, st_ino: int, _mod_cnt: int) -> str:
+def get_sha256_fuse(q_in: multiprocessing.Queue[bytes], q_out: multiprocessing.Queue[bytes], path: str, pid: int, st_dev: int, st_ino: int, _mod_cnt: int) -> str:
     """get sha256 of process executable from a fuse mount"""
-    q_in.put(pickle.dumps((path, pid, st_dev, st_ino)))
-    try:
-        return q_out.get()
-    except Exception:
-        return "!!! FUSE Subprocess Error"
+    key = (path, pid, st_dev, st_ino)
+    q_in.put(pickle.dumps(key))
+    # bounded so a dead/wedged fuse subprocess can't stall the pipeline forever; match
+    # the reply to our request so a late reply after a timeout can't desync the queue
+    deadline = time.monotonic() + FUSE_HASH_TIMEOUT
+    while (remaining := deadline - time.monotonic()) > 0:
+        try:
+            reply = q_out.get(timeout=remaining)
+        except queue.Empty:
+            return "!!! FUSE Subprocess Timeout"
+        except Exception:
+            return "!!! FUSE Subprocess Error"
+        try:
+            rkey, sha256 = pickle.loads(reply)
+        except Exception:
+            return "!!! FUSE Subprocess Error"
+        if rkey == key:  # discard any stale reply left over from a prior timed-out call
+            return sha256
+    return "!!! FUSE Subprocess Timeout"
 
 
 def get_fstat(fd: int) -> tuple[int, int]:

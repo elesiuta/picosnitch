@@ -23,6 +23,7 @@ from picosnitch.subprocesses.primary import run_primary
 from picosnitch.subprocesses.secondary import run_secondary
 from picosnitch.subprocesses.virustotal import run_virustotal
 from picosnitch.types import State
+from picosnitch.utils import relaunch_argv
 
 
 def run_main_loop(config: Config, state: State) -> int:
@@ -111,8 +112,12 @@ def run_main_loop(config: Config, state: State) -> int:
     signal.signal(signal.SIGINT, lambda signum, frame: shutdown_event.set())
     signal.signal(signal.SIGTERM, lambda signum, frame: shutdown_event.set())
     signal.signal(signal.SIGUSR1, lambda signum, frame: resume_event.set())
-    # watch subprocesses
-    suspend_check_last = time.time()
+    # watch subprocesses; detect a real suspend/resume by the gap between CLOCK_BOOTTIME
+    # (counts time asleep) and CLOCK_MONOTONIC (does not). a plain wall-clock gap can be
+    # forged by cpu starvation or SIGSTOP, which must not trigger a monitor restart -- that
+    # would open a bpf re-attach window an attacker could slip traffic through.
+    mono_last = time.monotonic()
+    boot_last = time.clock_gettime(time.CLOCK_BOOTTIME)
     try:
         while not shutdown_event.is_set():
             resume_event.wait(timeout=5)
@@ -129,15 +134,17 @@ def run_main_loop(config: Config, state: State) -> int:
             if sum(p.memory() for p in subprocesses) > 4096000000:
                 q_error.put("picosnitch memory usage exceeded 4096 MB, attempting restart")
                 break
-            suspend_check_now = time.time()
-            if resume_event.is_set() or suspend_check_now - suspend_check_last > 20:
+            mono_now = time.monotonic()
+            boot_now = time.clock_gettime(time.CLOCK_BOOTTIME)
+            suspended_for = (boot_now - boot_last) - (mono_now - mono_last)
+            if resume_event.is_set() or suspended_for > 5:
                 resume_event.clear()
                 logging.info("restarting picosnitch monitor after resuming from suspend")
                 p_monitor.q_in.put("terminate")
                 p_monitor.terminate()
                 p_monitor.q_in.get()
                 p_monitor.start()
-            suspend_check_last = suspend_check_now
+            mono_last, boot_last = mono_now, boot_now
     except Exception as e:
         tb = sys.exc_info()[2]
         q_error.put("picosnitch subprocess exception: %s%s on line %s" % (type(e).__name__, str(e.args), tb.tb_lineno if tb else "?"))
@@ -152,6 +159,5 @@ def run_main_loop(config: Config, state: State) -> int:
     time.sleep(5)
     for p in subprocesses:
         p.terminate()
-    args = [sys.executable, "-m", "picosnitch", "restart"]
-    subprocess.Popen(args)
+    subprocess.Popen(relaunch_argv("restart"))
     return 0

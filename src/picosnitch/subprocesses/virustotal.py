@@ -121,7 +121,7 @@ def run_virustotal(config: Config, fan_fd: int, q_error: multiprocessing.Queue[s
                         # could also be an invalid api key
                         q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (analysis not found)", suspicious)))
                         continue
-                if analysis["suspicious"] != 0 or analysis["malicious"] != 0:
+                if analysis.get("suspicious", 0) != 0 or analysis.get("malicious", 0) != 0:
                     suspicious = True
                 q_vt_results.put(pickle.dumps((proc, sha256, str(analysis), suspicious)))
             else:

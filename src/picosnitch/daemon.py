@@ -66,18 +66,63 @@ class Daemon:
         try:
             with open(self.pidfile, "r") as f:
                 pid = int(f.read().strip())
-        except IOError:
+        except (IOError, ValueError):
+            # missing, empty, or garbage pidfile
             pid = None
         return pid
+
+    @staticmethod
+    def _cmdline_is_picosnitch(cmdline: bytes) -> bool:
+        """True only for a real picosnitch daemon cmdline, so a stale/recycled pid or a
+        process that merely has 'picosnitch' somewhere in its argv is never mistaken for the
+        daemon. Interpreter-agnostic (python, env, or a nix/bash wrapper are all fine):
+        argv0 must be picosnitch or its interpreter, and picosnitch must appear as
+        `-m picosnitch` or as a script path, together with a daemon subcommand."""
+        parts = [part for part in cmdline.split(b"\0") if part]
+        if not parts:
+            return False
+        daemon_cmds = {b"start", b"restart", b"start-no-daemon"}
+        if not any(part in daemon_cmds for part in parts):
+            return False
+
+        def _is_picosnitch(part: bytes) -> bool:
+            # nix runs the entry point as `.picosnitch-wrapped`; normalize before comparing
+            return os.path.basename(part).lstrip(b".").split(b"-wrapped")[0] == b"picosnitch"
+
+        # argv0 must be picosnitch itself or the interpreter/wrapper that launched it (python,
+        # env, or a nix/bash wrapper), so a /path/to/picosnitch passed as a plain argument to an
+        # unrelated program (e.g. `tail -f /var/backups/picosnitch start-no-daemon`) is not matched.
+        argv0 = os.path.basename(parts[0])
+        if not (_is_picosnitch(parts[0]) or argv0.startswith(b"python") or argv0 in (b"env", b"bash", b"sh", b"dash")):
+            return False
+        for i, part in enumerate(parts):
+            if part == b"-m" and i + 1 < len(parts) and parts[i + 1] == b"picosnitch":
+                return True
+            if _is_picosnitch(part) and (b"/" in part or i == 0):
+                return True
+        return False
+
+    def _pid_is_picosnitch(self, pid: int) -> bool:
+        """True only if pid is a live picosnitch process, so a stale or recycled
+        pid is never mistaken for the daemon (and never signalled)."""
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                return self._cmdline_is_picosnitch(f.read())
+        except OSError:
+            return False
 
     def start(self) -> None:
         """Start the daemon."""
         # Check for a pidfile to see if the daemon already runs
         pid = self.getpid()
-        if pid:
+        if pid and self._pid_is_picosnitch(pid):
             message = f"pidfile {self.pidfile} already exists. picosnitch already running?"
             logging.error(message)
             sys.exit(1)
+        if pid:
+            # stale pidfile left by a SIGKILL/OOM/crash (pid gone or recycled): clear it
+            logging.warning(f"removing stale pidfile {self.pidfile} (pid {pid} is not picosnitch)")
+            self.pidfile.unlink(missing_ok=True)
         # Start the daemon
         self.daemonize()
         self.run()
@@ -89,19 +134,28 @@ class Daemon:
             message = f"pidfile {self.pidfile} does not exist. picosnitch not running?"
             logging.warning(message)
             return  # not an error in a restart
-        # Try killing the daemon process
+        if not self._pid_is_picosnitch(pid):
+            # stale or recycled pid: clear the pidfile but never signal an unrelated process
+            logging.warning(f"pidfile {self.pidfile} is stale (pid {pid} is not picosnitch), removing")
+            self.pidfile.unlink(missing_ok=True)
+            return
+        # Signal until the process exits, bounded so a wedged process can't hang stop() forever
+        deadline = time.time() + 60
         try:
-            while 1:
+            while time.time() < deadline:
                 os.kill(pid, signal.SIGTERM)
                 time.sleep(0.1)
-        except OSError as err:
-            e = str(err.args)
-            if e.find("No such process") > 0:
-                if self.pidfile.exists():
-                    self.pidfile.unlink()
+                if not self._pid_is_picosnitch(pid):
+                    break
             else:
+                logging.error(f"picosnitch (pid {pid}) did not exit within 60s of SIGTERM")
+                return
+        except OSError as err:
+            if "No such process" not in str(err.args):
                 logging.error(f"{err.args}")
                 sys.exit(1)
+        if self.pidfile.exists():
+            self.pidfile.unlink()
 
     def restart(self) -> None:
         """Restart the daemon."""
@@ -112,12 +166,7 @@ class Daemon:
         """Get daemon status."""
         pid = self.getpid()
         if pid:
-            try:
-                with open(f"/proc/{pid}/cmdline", "r") as f:
-                    cmdline = f.read()
-            except Exception:
-                cmdline = ""
-            if "picosnitch" in cmdline:
+            if self._pid_is_picosnitch(pid):
                 logging.info(f"picosnitch is currently running with pid {pid}.")
             else:
                 logging.info("pidfile exists but no picosnitch process is running.")

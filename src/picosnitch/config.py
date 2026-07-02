@@ -2,8 +2,11 @@
 # Copyright (C) 2020 Eric Lesiuta
 
 import dataclasses
+import grp
+import ipaddress
 import logging
 import os
+import pwd
 import tomllib
 from pathlib import Path
 
@@ -121,13 +124,23 @@ def load_config(config_dir: Path = CONFIG_DIR) -> Config:
     config_path = config_dir / "config.toml"
     config = Config()
     if config_path.exists():
-        with open(config_path, "rb") as f:
-            raw = tomllib.load(f)
+        try:
+            with open(config_path, "rb") as f:
+                raw = tomllib.load(f)
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            # never crash-loop the daemon on a malformed config; fall back to defaults
+            logging.error(f"failed to read {config_path}, using defaults: {e}")
+            raw = {}
         for section_field in dataclasses.fields(config):
             section_name = section_field.name
             if section_name not in raw:
                 continue
             section_data = raw[section_name]
+            if not isinstance(section_data, dict):
+                # valid TOML but wrong shape (e.g. `monitoring = 5` instead of `[monitoring]`);
+                # skip so `field.name in section_data` can't raise and crash-loop the daemon
+                logging.warning(f"config.{section_name}: expected a table, got {type(section_data).__name__}, ignoring")
+                continue
             section_obj = getattr(config, section_name)
             for field in dataclasses.fields(section_obj):
                 if field.name in section_data:
@@ -144,6 +157,60 @@ def load_config(config_dir: Path = CONFIG_DIR) -> Config:
                         logging.warning(f"config.{section_name}.{field.name}: expected {type_name}, got {type(value).__name__}, skipping")
                         continue
                     setattr(section_obj, field.name, value)
+    # clamp values that would otherwise fail the perf mmap / BPF load and restart-loop the daemon;
+    # bound both above too so an absurd (but power-of-two / positive) value can't crash-loop either
+    pages = config.monitoring.perf_ring_buffer_pages
+    if pages < 1 or pages > 16384 or (pages & (pages - 1)) != 0:
+        logging.warning(f"monitoring.perf_ring_buffer_pages must be a power of two in [1, 16384], got {pages}, using 256")
+        config.monitoring.perf_ring_buffer_pages = 256
+    entries = config.monitoring.conn_map_max_entries
+    if entries < 1 or entries > 1048576:
+        logging.warning(f"monitoring.conn_map_max_entries must be in [1, 1048576], got {entries}, using 65536")
+        config.monitoring.conn_map_max_entries = 65536
+
+    # reset owner/group/user/mode that don't resolve to a real uid/gid/octal mode; otherwise a
+    # typo'd name crash-loops the daemon at boot (apply_data_permissions and the subprocess
+    # privilege drop resolve these outside any try/except). resolved inline with pwd/grp (mirroring
+    # utils.resolve_owner/resolve_group) to avoid a config<->utils import cycle
+    def _resolves(value, lookup) -> bool:
+        try:
+            int(value)
+            return True
+        except (ValueError, TypeError):
+            pass
+        try:
+            lookup(value)
+            return True
+        except (KeyError, TypeError):
+            return False
+
+    if not _resolves(config.data.owner, pwd.getpwnam):
+        logging.warning(f"config.data.owner: {config.data.owner!r} does not resolve, using 'root'")
+        config.data.owner = "root"
+    if not _resolves(config.data.group, grp.getgrnam):
+        logging.warning(f"config.data.group: {config.data.group!r} does not resolve, using 'root'")
+        config.data.group = "root"
+    try:
+        int(config.data.mode, 8)
+    except ValueError:
+        logging.warning(f"config.data.mode: {config.data.mode!r} is not an octal mode, using '0644'")
+        config.data.mode = "0644"
+    if config.desktop.user and not (_resolves(config.desktop.user, pwd.getpwnam) and _resolves(config.desktop.user, grp.getgrnam)):
+        logging.warning(f"config.desktop.user: {config.desktop.user!r} does not resolve, ignoring")
+        config.desktop.user = ""
+    # drop log.ignore_ips entries that aren't valid networks (strict=False accepts a host-bit CIDR);
+    # otherwise secondary crashes building ignored_networks at boot outside its try/except
+    if not isinstance(config.log.ignore_ips, list):
+        config.log.ignore_ips = []
+    valid_ignore_ips = []
+    for ip_subnet in config.log.ignore_ips:
+        try:
+            ipaddress.ip_network(ip_subnet, strict=False)
+        except (ValueError, TypeError):
+            logging.warning(f"config.log.ignore_ips: {ip_subnet!r} is not a valid network, ignoring")
+            continue
+        valid_ignore_ips.append(ip_subnet)
+    config.log.ignore_ips = valid_ignore_ips
     if not config.desktop.user and os.environ.get("SUDO_UID", "").isdigit():
         config.desktop.user = os.environ["SUDO_UID"]
     return config

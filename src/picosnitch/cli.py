@@ -20,7 +20,7 @@ from picosnitch.main_loop import run_main_loop
 from picosnitch.ui.top import top_init
 from picosnitch.ui.tui import tui_init
 from picosnitch.ui.webui import web_dashboard
-from picosnitch.utils import apply_data_permissions, connect_db_readonly, load_state, safe_log_open
+from picosnitch.utils import apply_data_permissions, connect_db_readonly, load_state, safe_log_open, sqlite_error_means_corrupt
 
 
 def check_root(cmd: str) -> int:
@@ -56,21 +56,53 @@ def check_database() -> int:
         logging.error(f"Database not found: {db_path}")
         logging.error(f"Run: sudo {Path(sys.argv[0]).resolve()} start (or use systemctl) to create it")
         return 1
+    con = None
     try:
         con = connect_db_readonly(db_path)
-    except sqlite3.OperationalError as e:
-        logging.error(f"Could not open database {db_path}: {e}")
-        return 1
-    try:
         cur = con.cursor()
         cur.execute("PRAGMA user_version")
         user_version = cur.fetchone()[0]
+    except sqlite3.Error as e:
+        # sqlite3.Error (not just OperationalError) so a corrupt db -> DatabaseError returns 1
+        # instead of crashing the boot path (init_dirs_and_config quarantines it beforehand)
+        logging.error(f"Could not open database {db_path}: {e}")
+        return 1
     finally:
-        con.close()
+        if con is not None:
+            con.close()
     if user_version != DB_VERSION:
         logging.error(f"Unsupported database version {user_version}, expected {DB_VERSION}")
         return 1
     return 0
+
+
+def _db_is_corrupt(db_path: Path) -> bool:
+    """True if the db can't be opened, its version read, or its expected tables are present -- such
+    a db must be quarantined+recreated, else check_database or the secondary boot purge crash-loops
+    the daemon. A valid db with the wrong version is NOT corrupt (returns False) so check_database
+    can reject it without destroying migratable data."""
+    try:
+        con = sqlite3.connect(db_path)
+        try:
+            cur = con.cursor()
+            if cur.execute("PRAGMA user_version").fetchone()[0] != DB_VERSION:
+                return False  # wrong version but structurally readable -> leave for check_database
+            # validate the tables AND the columns the boot purge / inserts need: a db with the
+            # right table names but wrong columns (partial migration / foreign db sharing the
+            # version) passes a name-only check yet crashes the secondary. LIMIT 0 validates the
+            # columns without reading any rows; a missing table or column raises here.
+            cur.execute("SELECT contime, domain_id, laddr_id, raddr_id FROM connections LIMIT 0")
+            cur.execute("SELECT id FROM domains LIMIT 0")
+            cur.execute("SELECT id FROM addresses LIMIT 0")
+            cur.execute("SELECT id, exe, name, cmdline, sha256 FROM executables LIMIT 0")
+            return False
+        finally:
+            con.close()
+    except sqlite3.DatabaseError as e:
+        # not a database / malformed header / missing table or column -> corrupt; a transient
+        # error (locked by the live daemon or a user's sqlite session, busy, disk I/O) must
+        # NOT quarantine a healthy db (`start` runs this before the already-running check)
+        return sqlite_error_means_corrupt(e)
 
 
 def init_dirs_and_config() -> None:
@@ -81,6 +113,14 @@ def init_dirs_and_config() -> None:
     if not config_path.exists():
         write_default_config(config_path)
     db_path = DATA_DIR / "picosnitch.db"
+    if db_path.exists() and _db_is_corrupt(db_path):
+        # quarantine a corrupt db and recreate it below, so check_database / the secondary boot
+        # purge don't crash-loop the daemon (data is kept in picosnitch.db.bad)
+        logging.error(f"picosnitch.db is unusable, quarantining to {db_path.name}.bad and recreating")
+        try:
+            db_path.rename(db_path.with_name("picosnitch.db.bad"))
+        except OSError:
+            pass
     if not db_path.exists():
         con = sqlite3.connect(db_path)
         cur = con.cursor()
@@ -225,13 +265,11 @@ def start_picosnitch() -> int:
         print(readme)
         return 2
     cmd = sys.argv[1]
-    # nix platform checks
-    if sys.executable.startswith("/nix/"):
-        if cmd in ("start", "stop", "restart"):
-            logging.warning("built-in daemon mode is not supported on Nix, use picosnitch start-no-daemon or systemctl instead")
-        if cmd == "systemd":
-            logging.error("Command not supported on Nix, add `services.picosnitch.enable = true;` to your Nix configuration")
-            return 2
+    # the built-in daemon (start/stop/restart) works on Nix once picosnitch is re-invoked
+    # via its wrapped entry point rather than `-m picosnitch`; only `systemd` is unsupported
+    if sys.executable.startswith("/nix/") and cmd == "systemd":
+        logging.error("Command not supported on Nix, add `services.picosnitch.enable = true;` to your Nix configuration")
+        return 2
     # command dispatch
     if cmd == "help":
         print(readme)

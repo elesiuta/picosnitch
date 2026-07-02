@@ -27,7 +27,7 @@ import time
 from picosnitch.constants import LOG_DIR, RUN_DIR, VERSION
 from picosnitch.live_feed import EVENTS_SOCKET_PATH, LiveFeedSubscriber
 from picosnitch.ui import _chrome, _keys
-from picosnitch.utils import safe_log_open
+from picosnitch.utils import relaunch_argv, safe_log_open
 
 
 def _format_bytes(n: int) -> str:
@@ -441,7 +441,7 @@ def top_init() -> int:
             mon_log = open(os.devnull, "ab", buffering=0)
         try:
             spawned = subprocess.Popen(
-                [sys.executable, "-m", "picosnitch", "start-no-daemon"],
+                relaunch_argv("start-no-daemon"),
                 stdin=subprocess.DEVNULL,
                 stdout=mon_log,
                 stderr=mon_log,
@@ -461,7 +461,11 @@ def top_init() -> int:
         signal.signal(signal.SIGHUP, _signal_cleanup)
 
         if not _wait_for_socket(timeout=20.0, proc=spawned):
-            logging.error("Spawned monitor did not create the live event socket within 20s.")
+            rc = spawned.poll()
+            if rc is not None:
+                logging.error(f"Spawned monitor exited immediately (exit code {rc}); see {log_path}")
+            else:
+                logging.error(f"Spawned monitor did not create the live event socket {EVENTS_SOCKET_PATH} within 20s")
             _stop_spawned(spawned)
             return 1
 

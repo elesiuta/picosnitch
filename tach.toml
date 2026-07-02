@@ -53,7 +53,7 @@ depends_on = []
 
 [[modules]]
 path = "picosnitch.main_loop"
-depends_on = ["picosnitch.subprocesses.secondary", "picosnitch.subprocesses.virustotal", "picosnitch.types", "picosnitch.subprocesses.fuse", "picosnitch.subprocesses.notifications", "picosnitch.config", "picosnitch.process_manager", "picosnitch.constants", "picosnitch.subprocesses.monitor", "picosnitch.subprocesses.primary"]
+depends_on = ["picosnitch.subprocesses.secondary", "picosnitch.subprocesses.virustotal", "picosnitch.types", "picosnitch.subprocesses.fuse", "picosnitch.subprocesses.notifications", "picosnitch.config", "picosnitch.process_manager", "picosnitch.constants", "picosnitch.subprocesses.monitor", "picosnitch.subprocesses.primary", "picosnitch.utils"]
 
 [[modules]]
 path = "picosnitch.cli"

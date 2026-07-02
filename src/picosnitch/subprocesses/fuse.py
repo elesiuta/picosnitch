@@ -11,7 +11,7 @@ from picosnitch.config import Config
 from picosnitch.utils import get_sha256_fd, get_sha256_pid
 
 
-def run_fuse(config: Config, fan_fd: int, q_error: multiprocessing.Queue[str], q_in: multiprocessing.Queue[bytes], q_out: multiprocessing.Queue[str]) -> int:
+def run_fuse(config: Config, fan_fd: int, q_error: multiprocessing.Queue[str], q_in: multiprocessing.Queue[bytes], q_out: multiprocessing.Queue[bytes]) -> int:
     """runs as user to read executables for FUSE/AppImage (since real, effective, and saved UID must match)"""
     parent_process = multiprocessing.parent_process()
     assert parent_process is not None
@@ -32,13 +32,16 @@ def run_fuse(config: Config, fan_fd: int, q_error: multiprocessing.Queue[str], q
         if not parent_process.is_alive():
             return 0
         try:
-            path, pid, st_dev, st_ino = pickle.loads(q_in.get(block=True, timeout=15))
+            key = pickle.loads(q_in.get(block=True, timeout=15))
+            path, pid, st_dev, st_ino = key
             sha256 = get_sha256_fd.__wrapped__(path, st_dev, st_ino, 0)
             if sha256.startswith("!"):
                 sha256 = get_sha256_pid.__wrapped__(pid, st_dev, st_ino)
                 if sha256.startswith("!"):
                     sha256 = "!!! FUSE Read Error"
-            q_out.put(sha256)
+            # echo the request key so a late reply after a caller timeout can't be
+            # mismatched to a later request (get_sha256_fuse discards non-matching replies)
+            q_out.put(pickle.dumps((key, sha256)))
         except queue.Empty:
             pass
         except Exception as e:

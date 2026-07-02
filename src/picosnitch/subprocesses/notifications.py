@@ -18,6 +18,7 @@ def _send_notification(msg: str) -> subprocess.CompletedProcess:
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
+        timeout=5,  # a wedged notify-send / D-Bus must not block the notifier forever
     )
 
 
