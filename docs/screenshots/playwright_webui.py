@@ -172,6 +172,24 @@ class Overlay:
         await self.page.select_option(selector, value)
         await self.page.wait_for_timeout(settle)
 
+    async def hover_chart(self, selector: str, label: str | None = None, steps: int = 7) -> None:
+        """Sweep a real mouse across a chart's <svg> so its hover tooltip
+        tracks the cursor. The visual overlay cursor only moves a div, so we
+        also dispatch actual mouse moves that fire the chart's mousemove."""
+        box = await self.page.locator(f"{selector} svg").bounding_box()
+        if not box:
+            return
+        if label:
+            await self.toast(label, after=260)
+        y = box["y"] + box["height"] * 0.45
+        x0, x1 = box["x"] + box["width"] * 0.16, box["x"] + box["width"] * 0.9
+        for i in range(steps + 1):
+            x = x0 + (x1 - x0) * i / steps
+            await self.page.mouse.move(x, y)
+            await self.page.evaluate(f"window.__pwMoveCursor({x}, {y})")
+            await self.page.wait_for_timeout(130)
+        await self.page.wait_for_timeout(320)
+
 
 # ── shared building blocks ────────────────────────────────────────────
 
@@ -311,54 +329,66 @@ async def capture_video(pw, out_dir: Path) -> None:
     await page.goto(f"{BASE_URL}/", wait_until="networkidle")
     await page.wait_for_selector("#tab-overview.active")
     await page.wait_for_selector("#overview-table tbody tr")
-    await page.wait_for_timeout(1500)
-    await o.toast("Overview · last hour", ms=2200, after=1800)
+    await page.wait_for_timeout(900)
+    await o.toast("Overview · last hour", ms=1800, after=900)
 
     # Stretch the time range out to a day so the chart fills in.
     pop = page.locator("#range-pop")
-    await o.move_to("#range-summary")
+    await o.move_to("#range-summary", settle=450)
     await pop.evaluate("el => el.setAttribute('open', '')")
-    await page.wait_for_timeout(400)
-    await o.click('#range-presets button[data-preset="1d"]', label="Range → 1 day")
+    await page.wait_for_timeout(300)
+    await o.click('#range-presets button[data-preset="1d"]', label="Range → 1 day", settle=500)
     await page.wait_for_load_state("networkidle")
-    await page.wait_for_timeout(2200)
+    await page.wait_for_timeout(900)
+
+    # Play with the chart: hover it for the docked tooltip, then swap the
+    # metric between received / sent / total and watch it re-stack.
+    await o.hover_chart("#overview-chart", label="Hover the chart for details")
+    await o.click('.metric-toggle[data-metric-target="overview"] button[data-metric="s"]', label="Metric → Sent", settle=550)
+    await o.click('.metric-toggle[data-metric-target="overview"] button[data-metric="t"]', label="Metric → Total", settle=550)
+    await o.hover_chart("#overview-chart")
+    await o.click('.metric-toggle[data-metric-target="overview"] button[data-metric="r"]', label="Metric → Received", settle=450)
 
     # Switch to the explore tab.
-    await o.click('#view-tabs li.tab[data-tab="explore"]', label="Tab → Explore")
+    await o.click('#view-tabs li.tab[data-tab="explore"]', label="Tab → Explore", settle=500)
     await page.wait_for_selector("#tab-explore.active")
     await page.wait_for_selector("#group-by li[data-dim]")
-    await page.wait_for_timeout(900)
+    await page.wait_for_timeout(500)
 
     # Group by domain, then drill into the top contributor.
-    await o.click('#group-by li[data-dim="domain"]', label="Group by → Domain")
+    await o.click('#group-by li[data-dim="domain"]', label="Group by → Domain", settle=550)
     await page.wait_for_selector("#totals tbody tr")
-    await page.wait_for_timeout(1100)
-    await o.click("#totals tbody tr:first-child", label="Drill down on top domain")
+    await page.wait_for_timeout(500)
+    await o.click("#totals tbody tr:first-child", label="Drill down on top domain", settle=600)
     await page.wait_for_selector("#drilldown-pane .meta-cell")
-    await page.wait_for_timeout(2800)
+    await page.wait_for_timeout(700)
+
+    # Interact with the explore chart too: total metric + hover.
+    await o.click('.metric-toggle[data-metric-target="explore"] button[data-metric="t"]', label="Metric → Total", settle=500)
+    await o.hover_chart("#chart-main", label="Hover for per-series totals")
 
     # Now group by process name and filter to firefox "Web Content".
-    await o.click('#group-by li[data-dim="name"]', label="Group by → Name")
+    await o.click('#group-by li[data-dim="name"]', label="Group by → Name", settle=500)
     await page.wait_for_selector("#totals tbody tr")
-    await page.wait_for_timeout(900)
-    await o.select("#where", "name", label="Filter where → name")
+    await page.wait_for_timeout(500)
+    await o.select("#where", "name", label="Filter where → name", settle=500)
     await page.wait_for_function("document.querySelector('#whereis').options.length > 1")
-    await o.select("#whereis", "Web Content", label='Filter is → "Web Content"')
+    await o.select("#whereis", "Web Content", label='Filter is → "Web Content"', settle=550)
     await page.wait_for_load_state("networkidle")
     await page.wait_for_selector("#totals tbody tr")
-    await page.wait_for_timeout(700)
-    await o.click("#totals tbody tr:first-child", label="Drill down on Web Content")
+    await page.wait_for_timeout(500)
+    await o.click("#totals tbody tr:first-child", label="Drill down on Web Content", settle=600)
     await page.wait_for_selector("#drilldown-pane .meta-cell")
-    await page.wait_for_timeout(2800)
+    await page.wait_for_timeout(1400)
 
     # Reset filter and head to the live feed.
-    await o.select("#where", "", label="Clear filter")
-    await o.click('#view-tabs li.tab[data-tab="live"]', label="Tab → Live")
+    await o.select("#where", "", label="Clear filter", settle=500)
+    await o.click('#view-tabs li.tab[data-tab="live"]', label="Tab → Live", settle=500)
     await page.wait_for_selector("#live-toggle")
-    await page.wait_for_timeout(700)
-    await o.click("#live-toggle", label="Start live stream")
-    await page.wait_for_timeout(5500)
-    await o.toast("Live events streaming…", ms=2400, after=2200)
+    await page.wait_for_timeout(500)
+    await o.click("#live-toggle", label="Start live stream", settle=500)
+    await page.wait_for_timeout(4200)
+    await o.toast("Live events streaming…", ms=2000, after=1600)
 
     await context.close()
     await browser.close()

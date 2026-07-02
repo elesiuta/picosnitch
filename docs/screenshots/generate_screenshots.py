@@ -11,12 +11,12 @@ Pipeline:
     4. mock_feed.py + VHS top.tape  -- capture top PNGs + WebM
     5. VHS demo.tape     -- short hero WebM for the README
 
-All output lands in docs/screenshots/out/. With --publish, a curated
-subset is also copied on top of docs/ for the README hero block. The
-plan for permanent hosting is to upload the artifact set to GitHub
-Releases on each tag and reference those URLs from the README -- the
---publish path stays around for that future workflow but is not used
-by the manually-triggered `Screenshots` workflow today.
+All output lands in docs/screenshots/out/. The `pages` workflow runs this
+on every release and then builds the MkDocs site, which bundles
+docs/screenshots/out/ into the published site -- so the media ships with
+the docs and the README/docs reference it there (no GitHub Release assets).
+--publish additionally copies a curated subset onto docs/ for legacy hero
+assets; it is not used by CI.
 """
 
 import argparse

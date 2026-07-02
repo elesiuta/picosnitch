@@ -19,8 +19,8 @@ and users.
 ## Web UI
 
 <video controls muted playsinline loop preload="metadata" width="100%"
-       src="https://github.com/elesiuta/picosnitch/releases/latest/download/web_ui.webm"
-       poster="https://github.com/elesiuta/picosnitch/releases/latest/download/webui-filter-web-content.png"></video>
+       src="screenshots/out/web_ui.webm"
+       poster="screenshots/out/webui-filter-web-content.png"></video>
 
 Bandwidth and connection counts broken down by executable, parent,
 domain, port, or user, over a configurable time range. Light and dark
@@ -36,8 +36,8 @@ picosnitch webui
 ## Terminal UI
 
 <video controls muted playsinline loop preload="metadata" width="100%"
-       src="https://github.com/elesiuta/picosnitch/releases/latest/download/tui.webm"
-       poster="https://github.com/elesiuta/picosnitch/releases/latest/download/tui-process-names.png"></video>
+       src="screenshots/out/tui.webm"
+       poster="screenshots/out/tui-process-names.png"></video>
 
 A curses-based read-only view of the same database, useful over SSH or
 on headless boxes. Filter by executable, parent, command line, domain,
@@ -52,8 +52,8 @@ picosnitch tui
 
 ## Live event feed
 
-<a href="https://github.com/elesiuta/picosnitch/releases/latest/download/top-default.png">
-  <img src="https://github.com/elesiuta/picosnitch/releases/latest/download/top-default.png"
+<a href="screenshots/out/top-default.png">
+  <img src="screenshots/out/top-default.png"
        alt="picosnitch top live feed" width="100%">
 </a>
 

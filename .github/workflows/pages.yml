@@ -1,39 +1,63 @@
 name: Pages
 
+# Regenerates the UI screenshots + videos and deploys the docs site with them
+# bundled in. Generation is slow (vhs + headless chromium), so this runs only
+# on a release or manual dispatch, not on every docs push.
+
 on:
-  push:
-    branches: [master]
-    paths:
-      - docs/**
-      - .github/workflows/pages.yml
   workflow_dispatch:
+  release:
+    types: [created]
 
 permissions:
   contents: read
   pages: write
   id-token: write
 
+# One deploy at a time; never cancel an in-progress publish.
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
   build:
-    name: Build site
+    name: Generate media and build site
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+
+      - name: Install system packages (ttyd, ffmpeg, chromium deps)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ttyd ffmpeg \
+            libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+            libcups2t64 libdrm2 libxkbcommon0 libatspi2.0-0t64 \
+            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libcairo2 libasound2t64
+
+      - name: Allow unprivileged user namespaces (chromium sandbox)
+        # VHS and Playwright launch chromium; on Ubuntu 24.04 the AppArmor
+        # restriction on unprivileged user namespaces breaks the sandbox.
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
 
+      - name: Generate screenshots and videos
+        run: bash docs/generate_screenshots.sh
+
+      - name: List generated media
+        run: ls -la docs/screenshots/out/
+
       - name: Build MkDocs site
-        # Screenshots and videos are not generated here; the docs reference
-        # them via the GitHub "latest release" redirect, and the screenshots
-        # workflow attaches them on every release.
+        # Media generated above under docs/screenshots/out/ is bundled into the
+        # site; --strict fails the build if any doc references a missing file.
         run: uvx --with mkdocs-material --with mkdocs-glightbox mkdocs build --strict -f docs/mkdocs.yml
 
       - name: Upload Pages artifact
