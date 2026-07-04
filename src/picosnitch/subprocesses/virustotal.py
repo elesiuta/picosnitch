@@ -9,7 +9,6 @@ import os
 import pickle
 import queue
 import time
-import urllib.error
 import urllib.request
 import uuid
 

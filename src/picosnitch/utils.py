@@ -308,7 +308,8 @@ def get_sha256_pid(pid: int, st_dev: int, st_ino: int) -> str:
 @functools.lru_cache(maxsize=PID_CACHE)
 def get_sha256_fuse(q_in: multiprocessing.Queue[bytes], q_out: multiprocessing.Queue[bytes], path: str, pid: int, st_dev: int, st_ino: int, _mod_cnt: int) -> str:
     """get sha256 of process executable from a fuse mount"""
-    key = (path, pid, st_dev, st_ino)
+    # _mod_cnt in the key so a post-modification re-hash isn't matched to a stale pre-mod reply
+    key = (path, pid, st_dev, st_ino, _mod_cnt)
     q_in.put(pickle.dumps(key))
     # bounded so a dead/wedged fuse subprocess can't stall the pipeline forever; match
     # the reply to our request so a late reply after a timeout can't desync the queue

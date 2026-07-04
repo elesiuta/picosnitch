@@ -127,7 +127,7 @@ def load_config(config_dir: Path = CONFIG_DIR) -> Config:
         try:
             with open(config_path, "rb") as f:
                 raw = tomllib.load(f)
-        except (OSError, tomllib.TOMLDecodeError) as e:
+        except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
             # never crash-loop the daemon on a malformed config; fall back to defaults
             logging.error(f"failed to read {config_path}, using defaults: {e}")
             raw = {}

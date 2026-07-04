@@ -235,64 +235,6 @@ class ExecEvent(ctypes.Structure):
     ]
 
 
-class SendRecvEvent(ctypes.Structure):
-    """Event from sendmsg_events/recvmsg_events perf buffers (IPv4)"""
-
-    _pack_ = 1
-    _layout_ = "ms"  # keep the historical _pack_ layout explicit (required from py3.19; ignored <3.14)
-    _fields_ = [
-        ("comm", ctypes.c_char * 16),
-        ("pcomm", ctypes.c_char * 16),
-        ("gpcomm", ctypes.c_char * 16),
-        ("ino", ctypes.c_uint64),
-        ("pino", ctypes.c_uint64),
-        ("gpino", ctypes.c_uint64),
-        ("pid", ctypes.c_uint32),
-        ("ppid", ctypes.c_uint32),
-        ("gppid", ctypes.c_uint32),
-        ("uid", ctypes.c_uint32),
-        ("dev", ctypes.c_uint32),
-        ("pdev", ctypes.c_uint32),
-        ("gpdev", ctypes.c_uint32),
-        ("bytes", ctypes.c_uint32),
-        ("daddr", ctypes.c_uint32),
-        ("saddr", ctypes.c_uint32),
-        ("netns", ctypes.c_uint32),
-        ("dport", ctypes.c_uint16),
-        ("lport", ctypes.c_uint16),
-        ("protocol", ctypes.c_uint16),
-    ]
-
-
-class SendRecv6Event(ctypes.Structure):
-    """Event from sendmsg6_events/recvmsg6_events perf buffers (IPv6)"""
-
-    _pack_ = 1
-    _layout_ = "ms"  # keep the historical _pack_ layout explicit (required from py3.19; ignored <3.14)
-    _fields_ = [
-        ("comm", ctypes.c_char * 16),
-        ("pcomm", ctypes.c_char * 16),
-        ("gpcomm", ctypes.c_char * 16),
-        ("daddr", ctypes.c_ubyte * 16),  # 128-bit IPv6 address as bytes
-        ("saddr", ctypes.c_ubyte * 16),  # 128-bit IPv6 address as bytes
-        ("ino", ctypes.c_uint64),
-        ("pino", ctypes.c_uint64),
-        ("gpino", ctypes.c_uint64),
-        ("pid", ctypes.c_uint32),
-        ("ppid", ctypes.c_uint32),
-        ("gppid", ctypes.c_uint32),
-        ("uid", ctypes.c_uint32),
-        ("dev", ctypes.c_uint32),
-        ("pdev", ctypes.c_uint32),
-        ("gpdev", ctypes.c_uint32),
-        ("bytes", ctypes.c_uint32),
-        ("netns", ctypes.c_uint32),
-        ("dport", ctypes.c_uint16),
-        ("lport", ctypes.c_uint16),
-        ("protocol", ctypes.c_uint16),
-    ]
-
-
 class DNSEvent(ctypes.Structure):
     """Event from dns_events perf buffer"""
 
@@ -438,18 +380,9 @@ class LibBPF:
         self.lib.bpf_object__close.argtypes = [ctypes.c_void_p]
         self.lib.bpf_object__close.restype = None
 
-        self.lib.bpf_object__name.argtypes = [ctypes.c_void_p]
-        self.lib.bpf_object__name.restype = ctypes.c_char_p
-
         # BPF program operations
         self.lib.bpf_object__find_program_by_name.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
         self.lib.bpf_object__find_program_by_name.restype = ctypes.c_void_p
-
-        self.lib.bpf_program__name.argtypes = [ctypes.c_void_p]
-        self.lib.bpf_program__name.restype = ctypes.c_char_p
-
-        self.lib.bpf_program__fd.argtypes = [ctypes.c_void_p]
-        self.lib.bpf_program__fd.restype = ctypes.c_int
 
         self.lib.bpf_program__set_autoload.argtypes = [ctypes.c_void_p, ctypes.c_bool]
         self.lib.bpf_program__set_autoload.restype = ctypes.c_int
@@ -493,9 +426,6 @@ class LibBPF:
         self.lib.bpf_map_lookup_and_delete_elem.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
         self.lib.bpf_map_lookup_and_delete_elem.restype = ctypes.c_int
 
-        self.lib.bpf_map_delete_elem.argtypes = [ctypes.c_int, ctypes.c_void_p]
-        self.lib.bpf_map_delete_elem.restype = ctypes.c_int
-
         self.lib.bpf_map_update_elem.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint64]
         self.lib.bpf_map_update_elem.restype = ctypes.c_int
 
@@ -515,10 +445,6 @@ class LibBPF:
 
         self.lib.perf_buffer__free.argtypes = [ctypes.c_void_p]
         self.lib.perf_buffer__free.restype = None
-
-        # Error handling
-        self.lib.libbpf_strerror.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t]
-        self.lib.libbpf_strerror.restype = ctypes.c_int
 
 
 # Structure for bpf_uprobe_opts - must match libbpf's definition
@@ -551,10 +477,6 @@ class BPFMap:
         """Determine the event structure type based on map name."""
         if "exec_events" in name:
             return ExecEvent
-        elif "sendmsg6_events" in name or "recvmsg6_events" in name:
-            return SendRecv6Event
-        elif "sendmsg_events" in name or "recvmsg_events" in name:
-            return SendRecvEvent
         elif "dns_events" in name:
             return DNSEvent
         return None
@@ -578,7 +500,7 @@ class BPFMap:
             data_ptr: Pointer to raw event data from perf buffer callback
 
         Returns:
-            Parsed event structure (ExecEvent, SendRecvEvent, etc.)
+            Parsed event structure (ExecEvent or DNSEvent)
         """
         if self._event_type:
             return ctypes.cast(data_ptr, ctypes.POINTER(self._event_type)).contents

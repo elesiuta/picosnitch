@@ -33,7 +33,7 @@ def run_fuse(config: Config, fan_fd: int, q_error: multiprocessing.Queue[str], q
             return 0
         try:
             key = pickle.loads(q_in.get(block=True, timeout=15))
-            path, pid, st_dev, st_ino = key
+            path, pid, st_dev, st_ino, _mod_cnt = key
             sha256 = get_sha256_fd.__wrapped__(path, st_dev, st_ino, 0)
             if sha256.startswith("!"):
                 sha256 = get_sha256_pid.__wrapped__(pid, st_dev, st_ino)

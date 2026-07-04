@@ -15,7 +15,7 @@ import sys
 import time
 
 import picosnitch.utils as utils
-from picosnitch.bpf_wrapper import DNSEvent
+from picosnitch.bpf_wrapper import ConnKey4, ConnKey6, ConnVal, DNSEvent
 from picosnitch.config import Config, load_config
 from picosnitch.daemon import Daemon
 from picosnitch.utils import get_sha256_fuse
@@ -23,6 +23,14 @@ from picosnitch.utils import get_sha256_fuse
 
 def test_corrupt_config_falls_back_to_defaults(tmp_path):
     (tmp_path / "config.toml").write_text("this is [not valid toml @@@\nx=")
+    config = load_config(tmp_path)
+    assert isinstance(config, Config)
+    assert config.database.enabled is True  # defaults intact, no exception raised
+
+
+def test_non_utf8_config_falls_back_to_defaults(tmp_path):
+    # non-UTF-8 config.toml raises UnicodeDecodeError (not TOMLDecodeError); must still fall back
+    (tmp_path / "config.toml").write_bytes(b'owner = "caf\xe9"\n')  # latin-1 e-acute, invalid UTF-8
     config = load_config(tmp_path)
     assert isinstance(config, Config)
     assert config.database.enabled is True  # defaults intact, no exception raised
@@ -385,16 +393,42 @@ def test_dns_event_family_demux():
     assert DNSEvent.from_buffer_copy(v6).family == socket.AF_INET6
 
 
+def test_conn_structs_byte_synced_with_bpf():
+    """conn_key4_t/conn_key6_t/conn_val_t drive all send/recv/pkt accounting and the connection
+    key; the ctypes mirrors must stay byte-exact with picosnitch.bpf.c or counts silently corrupt."""
+    # keys are packed (_pack_=1): u32 pid+netns+(saddr,daddr), then u16 lport,dport,protocol,_pad
+    assert ctypes.sizeof(ConnKey4) == 24  # 4+4 + 4+4 (v4 addrs) + 2*4
+    assert (ConnKey4.saddr.offset, ConnKey4.daddr.offset, ConnKey4.dport.offset) == (8, 12, 18)
+    assert ctypes.sizeof(ConnKey6) == 48  # 4+4 + 16+16 (v6 addrs) + 2*4
+    assert (ConnKey6.saddr.offset, ConnKey6.daddr.offset, ConnKey6.dport.offset) == (8, 24, 42)
+    # value is NOT packed: 3*char[16] then 7*u64 counters (8-byte aligned) then 6*u32
+    assert ctypes.sizeof(ConnVal) == 128  # 48 + 56 + 24, no internal or trailing padding
+    assert (ConnVal.send_bytes.offset, ConnVal.recv_bytes.offset) == (72, 80)
+    assert (ConnVal.send_pkts.offset, ConnVal.recv_pkts.offset) == (88, 96)
+
+
 def test_fuse_reply_correlation_discards_stale():
     """A late fuse reply left over from a previously timed-out call must be discarded,
     not returned for the next (different) request -- otherwise sha256s desync."""
     q_in: multiprocessing.Queue = multiprocessing.Queue()
     q_out: multiprocessing.Queue = multiprocessing.Queue()
-    new_key = ("/new/exe", 222, 3, 4)
-    q_out.put(pickle.dumps((("/old/exe", 111, 1, 2), "STALE_SHA")))  # leftover from a timed-out call
+    new_key = ("/new/exe", 222, 3, 4, 0)  # wire key is (path, pid, st_dev, st_ino, _mod_cnt)
+    q_out.put(pickle.dumps((("/old/exe", 111, 1, 2, 0), "STALE_SHA")))  # leftover from a timed-out call
     q_out.put(pickle.dumps((new_key, "CORRECT_SHA")))  # the matching reply for our request
-    got = get_sha256_fuse.__wrapped__(q_in, q_out, *new_key, 0)
+    got = get_sha256_fuse.__wrapped__(q_in, q_out, *new_key)
     assert got == "CORRECT_SHA", got
+
+
+def test_fuse_reply_correlation_keys_on_mod_cnt():
+    """A post-modification re-hash (same path/pid/dev/ino, bumped _mod_cnt) must not be served
+    the stale pre-modification reply -- the wire key includes _mod_cnt so it's discarded."""
+    q_in: multiprocessing.Queue = multiprocessing.Queue()
+    q_out: multiprocessing.Queue = multiprocessing.Queue()
+    ident = ("/app.AppImage", 222, 3, 4)  # same file, pid, and inode across both hashes
+    q_out.put(pickle.dumps(((*ident, 0), "OLD_PREMOD_SHA")))  # leftover from the timed-out mod_cnt=0 call
+    q_out.put(pickle.dumps(((*ident, 1), "NEW_POSTMOD_SHA")))  # reply for the mod_cnt=1 re-hash
+    got = get_sha256_fuse.__wrapped__(q_in, q_out, *ident, 1)
+    assert got == "NEW_POSTMOD_SHA", got  # not the stale pre-modification hash
 
 
 def test_fuse_no_reply_times_out(monkeypatch):

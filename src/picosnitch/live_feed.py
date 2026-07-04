@@ -133,10 +133,7 @@ class LiveFeedSubscriber:
         if self._sock is None:
             raise StopIteration
         while b"\n" not in self._buf:
-            try:
-                chunk = self._sock.recv(4096)
-            except socket.timeout:
-                raise
+            chunk = self._sock.recv(4096)
             if not chunk:
                 raise StopIteration
             self._buf += chunk

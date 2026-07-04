@@ -30,8 +30,6 @@ digraph G {
             "picosnitch__bpf_wrapper__DNSEvent" [label="DNSEvent", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__ExecEvent" [label="ExecEvent", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__LibBPF" [label="LibBPF", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            "picosnitch__bpf_wrapper__SendRecv6Event" [label="SendRecv6Event", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
-            "picosnitch__bpf_wrapper__SendRecvEvent" [label="SendRecvEvent", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper___check_bpf_filesystem" [label="_check_bpf_filesystem", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper___check_kernel_btf" [label="_check_kernel_btf", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper___detect_distro" [label="_detect_distro", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
@@ -281,8 +279,6 @@ digraph G {
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__DNSEvent" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__ExecEvent" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__LibBPF" [style="dashed",  color="#ffffff00"];
-        "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__SendRecv6Event" [style="dashed",  color="#ffffff00"];
-        "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__SendRecvEvent" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper___check_bpf_filesystem" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper___check_kernel_btf" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper___detect_distro" [style="dashed",  color="#ffffff00"];
@@ -312,8 +308,6 @@ digraph G {
         "picosnitch__bpf_wrapper__BPFMap____init__" -> "picosnitch__bpf_wrapper__BPFMap___determine_event_type" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFMap___determine_event_type" -> "picosnitch__bpf_wrapper__DNSEvent" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFMap___determine_event_type" -> "picosnitch__bpf_wrapper__ExecEvent" [style="solid",  color="#000000"];
-        "picosnitch__bpf_wrapper__BPFMap___determine_event_type" -> "picosnitch__bpf_wrapper__SendRecv6Event" [style="solid",  color="#000000"];
-        "picosnitch__bpf_wrapper__BPFMap___determine_event_type" -> "picosnitch__bpf_wrapper__SendRecvEvent" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFMap__event" -> "picosnitch__bpf_wrapper__BPFMap___determine_event_type" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFMap__open_perf_buffer" -> "picosnitch__bpf_wrapper__BPFMap" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFMap__open_perf_buffer" -> "picosnitch__bpf_wrapper__BPFObject___open_perf_buffer" [style="solid",  color="#000000"];

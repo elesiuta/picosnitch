@@ -154,8 +154,7 @@ class Daemon:
             if "No such process" not in str(err.args):
                 logging.error(f"{err.args}")
                 sys.exit(1)
-        if self.pidfile.exists():
-            self.pidfile.unlink()
+        self.pidfile.unlink(missing_ok=True)
 
     def restart(self) -> None:
         """Restart the daemon."""

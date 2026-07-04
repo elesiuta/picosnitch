@@ -635,7 +635,7 @@ def tui_loop(stdscr: curses.window) -> int:
         con = connect_db_readonly(file_path, timeout=1)
         try:
             cur = con.cursor()
-            while True and not kill_thread_query.is_set():
+            while not kill_thread_query.is_set():
                 try:
                     cur.execute(current_query, query_params)
                     break
@@ -647,9 +647,6 @@ def tui_loop(stdscr: curses.window) -> int:
                 results = cur.fetchmany(25)
         finally:
             con.close()
-
-    thread_query = threading.Thread()
-    thread_query.start()
 
     # ── splash screen ─────────────────────────────────────────────
     curses.cbreak()
