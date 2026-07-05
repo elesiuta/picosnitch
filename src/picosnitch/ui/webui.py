@@ -385,8 +385,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _serve_static(self, name: str) -> None:
         # Strict whitelist — only files we ship
-        allowed = {"index.html", "app.js", "style.css"}
-        if name not in allowed:
+        ctypes_by_name = {
+            "index.html": "text/html; charset=utf-8",
+            "app.js": "application/javascript",
+            "style.css": "text/css",
+            "favicon.svg": "image/svg+xml",
+        }
+        if name not in ctypes_by_name:
             self._send(404, b"not found", "text/plain")
             return
         path = _STATIC_DIR / name
@@ -395,7 +400,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except OSError:
             self._send(404, b"not found", "text/plain")
             return
-        ctype = {"index.html": "text/html; charset=utf-8", "app.js": "application/javascript", "style.css": "text/css"}[name]
+        ctype = ctypes_by_name[name]
         self._send(200, data, ctype)
 
     def do_GET(self) -> None:

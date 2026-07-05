@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">picosnitch pine hex favicon</title>
+  <desc id="desc">A green geometric pine tree with four chevron branches inside a hexagon, with a thin black outline for favicon use.</desc>
+  <g fill="none" stroke="#050505" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M256 58 428 157v198L256 454 84 355V157Z" stroke-width="24"/>
+    <path d="M212 190 256 146 300 190" stroke-width="28"/>
+    <path d="M188 254 256 186 324 254" stroke-width="28"/>
+    <path d="M164 320 256 228 348 320" stroke-width="28"/>
+    <path d="M194 350 256 288 318 350" stroke-width="28"/>
+    <path d="M256 334v78" stroke-width="30"/>
+  </g>
+  <rect x="244" y="98" width="24" height="24" fill="#050505"/>
+  <g fill="none" stroke="#7CDA7A" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M256 58 428 157v198L256 454 84 355V157Z" stroke-width="20"/>
+    <path d="M212 190 256 146 300 190" stroke-width="24"/>
+    <path d="M188 254 256 186 324 254" stroke-width="24"/>
+    <path d="M164 320 256 228 348 320" stroke-width="24"/>
+    <path d="M194 350 256 288 318 350" stroke-width="24"/>
+    <path d="M256 334v78" stroke-width="26"/>
+  </g>
+  <rect x="246" y="100" width="20" height="20" fill="#7CDA7A"/>
+</svg>

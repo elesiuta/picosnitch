@@ -29,6 +29,7 @@ exclude_docs: |
 
 theme:
   name: material
+  favicon: assets/favicon.svg
   features:
     - navigation.instant
     - navigation.tracking
