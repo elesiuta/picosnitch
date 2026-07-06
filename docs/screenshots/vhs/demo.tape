@@ -15,7 +15,8 @@ Set PlaybackSpeed 1.0
 Hide
 Type "PICOSNITCH_TEST=1 PYTHONUNBUFFERED=1 .venv/bin/python -m picosnitch tui"
 Enter
-Sleep 3s
+# Wait for the splash to clear before recording
+Wait+Screen@60s /Executable/
 Show
 
 Sleep 2s

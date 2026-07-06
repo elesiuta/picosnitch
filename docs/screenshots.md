@@ -69,6 +69,13 @@ spinning up a browser.
        src="out/tui.webm"
        poster="out/tui-process-names.png"></video>
 
+### Group by executable
+
+The default view: bandwidth grouped by the full executable path. Use the
+sidebar to re-bucket by name, command, hash, parent, or a network axis.
+
+![By executable](screenshots/out/tui-executables.png){ width="100%" }
+
 ### Group by process name
 
 ![By process name](screenshots/out/tui-process-names.png){ width="100%" }

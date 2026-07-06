@@ -19,15 +19,15 @@
 <table>
   <tr>
     <td align="center" width="34%" valign="top">
-      <a href="https://elesiuta.github.io/picosnitch/screenshots/"><img src="https://elesiuta.github.io/picosnitch/screenshots/out/webui-by-exe-1d.png" alt="picosnitch web UI: bandwidth grouped by executable with drill-down"></a>
+      <a href="https://elesiuta.github.io/picosnitch/screenshots/out/webui-by-exe-1d.png"><img src="https://elesiuta.github.io/picosnitch/screenshots/out/webui-by-exe-1d.png" alt="picosnitch web UI: bandwidth grouped by executable with drill-down"></a>
       <br><sub><b>picosnitch webui</b><br>browse and chart past connections</sub>
     </td>
     <td align="center" width="33%" valign="top">
-      <a href="https://elesiuta.github.io/picosnitch/screenshots/"><img src="https://elesiuta.github.io/picosnitch/screenshots/out/tui-executables.png" alt="picosnitch terminal UI: bandwidth per executable"></a>
+      <a href="https://elesiuta.github.io/picosnitch/screenshots/out/tui-executables.png"><img src="https://elesiuta.github.io/picosnitch/screenshots/out/tui-executables.png" alt="picosnitch terminal UI: bandwidth per executable"></a>
       <br><sub><b>picosnitch tui</b><br>browse past connections in a terminal</sub>
     </td>
     <td align="center" width="33%" valign="top">
-      <a href="https://elesiuta.github.io/picosnitch/screenshots/"><img src="https://elesiuta.github.io/picosnitch/screenshots/out/top-sort-recv.png" alt="picosnitch top: live event feed sorted by bytes received"></a>
+      <a href="https://elesiuta.github.io/picosnitch/screenshots/out/top-sort-recv.png"><img src="https://elesiuta.github.io/picosnitch/screenshots/out/top-sort-recv.png" alt="picosnitch top: live event feed sorted by bytes received"></a>
       <br><sub><b>picosnitch top</b><br>live event feed</sub>
     </td>
   </tr>

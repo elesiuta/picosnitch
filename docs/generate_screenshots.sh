@@ -41,8 +41,8 @@ export PATH="$BIN_DIR:$PATH"
 
 if ! command -v vhs >/dev/null 2>&1; then
     # Pinned VHS version + SHA256; bump both together. amd64-only.
-    VHS_VERSION="0.7.2"
-    VHS_SHA256="20c677ce9abfd4b4bb7ba883e66c6440758bea700f627f9b5e8297c083fcff4f"
+    VHS_VERSION="0.11.0"
+    VHS_SHA256="99cb634587eaae0473c1ea377db80c3a048c27f99fe0a7febb1a1e8cb7ee5009"
     UNAME_M="$(uname -m)"
     if [[ "$UNAME_M" != "x86_64" && "$UNAME_M" != "amd64" ]]; then
         echo "VHS bootstrap only supports x86_64/amd64 (got: $UNAME_M)." >&2
