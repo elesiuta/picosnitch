@@ -354,6 +354,12 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         proc_exe = ""
         try:
             proc_exe = os.readlink(f"/proc/{pid}/exe")
+            # events carry (dev, ino) from event time; if the pid exec'd another binary
+            # since (readlink now names it), don't attribute it or poison the caches.
+            # st_ino == 0 means the event had no inode: readlink is the only signal, keep it
+            pstat = os.stat(f"/proc/{pid}/exe")
+            if st_ino and ((pstat.st_dev & ST_DEV_MASK), pstat.st_ino) != (st_dev, st_ino):
+                proc_exe = ""
         except Exception:
             pass
         # per-(dev, ino, comm) fallback key for when /proc is gone
