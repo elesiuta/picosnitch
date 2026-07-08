@@ -16,7 +16,7 @@ import sys
 import time
 
 import picosnitch.utils as utils
-from picosnitch.bpf_wrapper import ConnKey4, ConnKey6, ConnVal, DNSEvent
+from picosnitch.bpf_wrapper import ConnKey4, ConnKey6, ConnVal, DNSEvent, ExecEvent
 from picosnitch.config import Config, load_config
 from picosnitch.daemon import Daemon
 from picosnitch.utils import get_sha256_fuse
@@ -403,6 +403,12 @@ def test_dns_event_family_demux():
     assert DNSEvent.from_buffer_copy(v4).family == socket.AF_INET  # -> "0.0.0.0", not "::"
     v6 = b"ipv6.test".ljust(80, b"\x00") + struct.pack("I", 0) + b"\x00" * 16 + struct.pack("H", socket.AF_INET6)
     assert DNSEvent.from_buffer_copy(v6).family == socket.AF_INET6
+
+
+def test_exec_event_byte_synced_with_bpf():
+    """exec_event_t <-> ExecEvent must stay byte-synced or exec ancestry misparses."""
+    assert ctypes.sizeof(ExecEvent) == 100  # 3*comm16 + 3*ino8 + 7*u32, packed
+    assert (ExecEvent.ino.offset, ExecEvent.pid.offset, ExecEvent.dev.offset) == (48, 72, 88)
 
 
 def test_conn_structs_byte_synced_with_bpf():

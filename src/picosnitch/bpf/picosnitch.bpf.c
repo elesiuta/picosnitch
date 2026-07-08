@@ -191,7 +191,9 @@ int BPF_UPROBE(dns_entry, const char *node, const char *service,
     struct dns_val_t val = {};
     val.res = res;
 
-    if (bpf_probe_read_user(&val.host, sizeof(val.host), node) == 0) {
+    // _str stops at the NUL: a fixed-size read faults (dropping the mapping)
+    // when a short hostname sits within sizeof(host) of an unmapped page
+    if (bpf_probe_read_user_str(&val.host, sizeof(val.host), node) > 0) {
         __u32 tid = (__u32)bpf_get_current_pid_tgid();
         bpf_map_update_elem(&dns_hash, &tid, &val, BPF_ANY);
     }
@@ -264,8 +266,10 @@ int BPF_KRETPROBE(exec_entry, long ret)
     data.pid = bpf_get_current_pid_tgid() >> 32;
     data.uid = bpf_get_current_uid_gid();
 
-    // Read task fields using CO-RE with null checks
-    struct task_struct *parent = BPF_CORE_READ(task, parent);
+    // Read task fields using CO-RE with null checks.
+    // real_parent (the creator), not parent (SIGCHLD recipient = the tracer
+    // when ptraced) -- so a debugger/strace can't masquerade as the ancestry.
+    struct task_struct *parent = BPF_CORE_READ(task, real_parent);
     if (!parent)
         return 0;
     data.ppid = BPF_CORE_READ(parent, tgid);
@@ -310,7 +314,7 @@ int BPF_KRETPROBE(exec_entry, long ret)
     }
 
     // Grandparent info (default to 0 if unavailable)
-    struct task_struct *grandparent = BPF_CORE_READ(parent, parent);
+    struct task_struct *grandparent = BPF_CORE_READ(parent, real_parent);
     if (grandparent) {
         data.gppid = BPF_CORE_READ(grandparent, tgid);
         bpf_probe_read_kernel_str(&data.gpcomm, sizeof(data.gpcomm), BPF_CORE_READ(grandparent, comm));
@@ -351,7 +355,7 @@ static __always_inline int fill_conn_ancestry(struct conn_val_t *val, __u32 uid)
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (!task)
         return -1;
-    struct task_struct *parent = BPF_CORE_READ(task, parent);
+    struct task_struct *parent = BPF_CORE_READ(task, real_parent);
     if (!parent)
         return -1;
 
@@ -399,7 +403,7 @@ static __always_inline int fill_conn_ancestry(struct conn_val_t *val, __u32 uid)
     }
 
     // Grandparent info (default to 0 if unavailable)
-    struct task_struct *grandparent = BPF_CORE_READ(parent, parent);
+    struct task_struct *grandparent = BPF_CORE_READ(parent, real_parent);
     if (grandparent) {
         val->gppid = BPF_CORE_READ(grandparent, tgid);
         bpf_probe_read_kernel_str(&val->gpcomm, sizeof(val->gpcomm), BPF_CORE_READ(grandparent, comm));
