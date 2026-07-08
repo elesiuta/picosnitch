@@ -51,6 +51,17 @@ def test_config_valid_values_preserved(tmp_path):
     assert config.monitoring.conn_map_max_entries == 1024
 
 
+def test_config_scalar_for_list_field_skipped(tmp_path):
+    """a scalar where a list is expected (e.g. ignore_ports = 443) must keep the default:
+    it would TypeError in the secondary's filters every write cycle, halting connection
+    logging and growing new_processes unboundedly."""
+    (tmp_path / "config.toml").write_text('[log]\nignore_ports = 443\nignore_domains = "example.com"\nignore_ips = "10.0.0.1"\n')
+    config = load_config(tmp_path)
+    assert config.log.ignore_ports == []
+    assert config.log.ignore_domains == []
+    assert config.log.ignore_ips == []
+
+
 def test_config_numeric_upper_clamps(tmp_path):
     """Absurd but positive / power-of-two BPF sizes must be clamped to defaults, not handed to
     the perf mmap or BPF map alloc where they crash-loop the daemon (conn also wraps a c_uint32)."""

@@ -146,9 +146,12 @@ def load_config(config_dir: Path = CONFIG_DIR) -> Config:
                 if field.name in section_data:
                     value = section_data[field.name]
                     expected_type = field.type
-                    # skip type check for parameterized generics (e.g. list[int])
                     if hasattr(expected_type, "__origin__"):
-                        pass
+                        # parameterized generics (list[int]): enforce the container type, a
+                        # scalar here would crash the secondary's filters every write cycle
+                        if expected_type.__origin__ is list and not isinstance(value, list):
+                            logging.warning(f"config.{section_name}.{field.name}: expected a list, got {type(value).__name__}, skipping")
+                            continue
                     elif not isinstance(expected_type, type):
                         # field.type may be a forward-ref string under `from __future__ import annotations`
                         pass
@@ -200,8 +203,6 @@ def load_config(config_dir: Path = CONFIG_DIR) -> Config:
         config.desktop.user = ""
     # drop log.ignore_ips entries that aren't valid networks (strict=False accepts a host-bit CIDR);
     # otherwise secondary crashes building ignored_networks at boot outside its try/except
-    if not isinstance(config.log.ignore_ips, list):
-        config.log.ignore_ips = []
     valid_ignore_ips = []
     for ip_subnet in config.log.ignore_ips:
         try:
