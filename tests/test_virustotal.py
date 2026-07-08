@@ -33,7 +33,7 @@ def test_transient_vt_lookup_error_is_requeued_on_startup():
         "Parent Executables": {},
     }
     q_in = _FakeQueue()
-    sync_vt_results(state, q_in, _FakeQueue(), check_pending=True)
+    sync_vt_results(state, q_in, _FakeQueue(), check_pending=True)  # ty: ignore[invalid-argument-type]
     requeued = {sha for _proc, sha in (pickle.loads(b) for b in q_in.items)}
     assert requeued == {"aaa", "bbb"}  # the lookup error is retried; the real verdict is not
 
