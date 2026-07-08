@@ -539,12 +539,15 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             "tcp_read_sock_ret": "io_zcrx_recv_skb",
         }
         syms = kernel_symbol_addrs(set(optional_trace_targets.values()))
+        # gate on symbol PRESENCE (kptr_restrict=2 zeroes addresses but still lists names).
         # None (kallsyms unreadable) -> assume present and let the load try; a fexit prog
-        # whose target symbol is absent would otherwise fail the whole bpf object load.
-        # tcp_read_sock_ret is the exception: its actor filter needs the address, so it
-        # is disabled rather than left counting nothing (or worse, everything)
-        disabled_traces = {"tcp_read_sock_ret"} if syms is None else {prog for prog, target in optional_trace_targets.items() if target not in syms}
+        # whose target symbol is absent would otherwise fail the whole bpf object load
+        disabled_traces = set() if syms is None else {prog for prog, target in optional_trace_targets.items() if target not in syms}
+        # tcp_read_sock_ret is the exception: its actor filter needs the real address, not
+        # just existence -- disable it rather than leave it attached counting nothing
         io_zcrx_actor = 0 if syms is None else syms.get("io_zcrx_recv_skb", 0)
+        if io_zcrx_actor == 0:
+            disabled_traces.add("tcp_read_sock_ret")
         b = BPF(obj_file=bpf_obj_path, map_max_entries={"conn_stats4": CONN_MAP_MAX, "conn_stats6": CONN_MAP_MAX}, disabled_programs=disabled_traces)
         b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
     except Exception as e:
@@ -598,7 +601,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     # before attach so the actor filter never counts other read_sock users. a missing/disabled
     # hook only drops io_uring zcrx recv
     if "tcp_read_sock_ret" in disabled_traces:
-        q_error.put("BPF.attach_trace() skipped for tcp_read_sock: io_uring zcrx not present, io_uring zero-copy recv bytes will not be recorded")
+        q_error.put("BPF.attach_trace() skipped for tcp_read_sock: io_zcrx_recv_skb address unavailable (absent, or kallsyms restricted), io_uring zero-copy recv bytes will not be recorded")
     else:
         try:
             b.bpf_obj.set_global(".data.io_zcrx", struct.pack("<Q", io_zcrx_actor))

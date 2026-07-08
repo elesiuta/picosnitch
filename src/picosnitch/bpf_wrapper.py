@@ -908,13 +908,14 @@ class BPF:
 def kernel_symbol_addrs(names: set[str]) -> dict[str, int] | None:
     """Addresses of names found in /proc/kallsyms (single pass), or None if kallsyms can't
     be read -- callers then assume present rather than disabling a probe they can't check.
-    A zeroed address (kptr_restrict hiding it from this uid) counts as not found."""
+    A listed name counts as present even with a zeroed address (kptr_restrict=2 hides
+    addresses, even from root); callers needing the value must check for 0."""
     try:
         found: dict[str, int] = {}
         with open("/proc/kallsyms", "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 fields = line.split(maxsplit=3)
-                if len(fields) >= 3 and fields[2] in names and int(fields[0], 16) != 0:
+                if len(fields) >= 3 and fields[2] in names:
                     found[fields[2]] = int(fields[0], 16)
                     if len(found) == len(names):
                         break
