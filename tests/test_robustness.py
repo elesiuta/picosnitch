@@ -7,6 +7,7 @@ state.json, or pidfile must never crash-loop the daemon. All pure-Python, no roo
 import ctypes
 import json
 import multiprocessing
+import os
 import pickle
 import socket
 import struct
@@ -439,3 +440,22 @@ def test_fuse_no_reply_times_out(monkeypatch):
     got = get_sha256_fuse.__wrapped__(q_in, q_out, "/new/exe", 222, 3, 4, 0)
     assert got == "!!! FUSE Subprocess Timeout"
     assert time.monotonic() - start < 1
+
+
+def test_proc_reads_survive_non_utf8_comm():
+    """a process can set a non-UTF-8 comm via prctl(PR_SET_NAME); the monitor's /proc text
+    readers must degrade to replacement chars, not raise UnicodeDecodeError (which dropped
+    the process's drain entry) or misparse stat/status (ppid 0, uid 0)"""
+    from picosnitch.subprocesses.monitor import _read_proc_comm, _read_proc_ppid, _read_proc_status_uid
+
+    code = 'import ctypes, time\nctypes.CDLL(None).prctl(15, b"\\xff\\xfe*bad", 0, 0, 0)\nprint("x", flush=True)\ntime.sleep(30)'
+    p = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE)
+    try:
+        assert p.stdout is not None and p.stdout.read(1) == b"x"  # comm is set once the child prints
+        comm = _read_proc_comm(p.pid)
+        assert "\ufffd" in comm and "*bad" in comm  # replaced, not raised or emptied
+        assert _read_proc_ppid(p.pid) == os.getpid()  # stat parse survives the comm bytes
+        assert _read_proc_status_uid(p.pid) == os.geteuid()  # status parse reaches the Uid: line
+    finally:
+        p.kill()
+        p.wait()

@@ -239,6 +239,10 @@ def run_secondary(
     exe_id_cache: dict[tuple, int] = {}
     domain_id_cache: dict[str, int] = {"": 0}
     addr_id_cache: dict[str, int] = {"": 0}
+    # ids inserted into the caches during the current (uncommitted) sqlite transaction;
+    # a rolled-back INSERT frees its rowid for reuse, so on failure these must be dropped
+    # from the caches or a later cache hit would misattribute rows to a stale/reused id
+    pending_cache_keys: list[tuple] = []
     if config.database.enabled:
         maintain_database(file_path, config.database.retention_days)
     # remote logging is handed off to the remote_sql subprocess, not a destination here
@@ -255,6 +259,7 @@ def run_secondary(
         con.execute(sqlite_insert_exe, exe_key)
         row = con.execute(sqlite_select_exe, exe_key).fetchone()
         exe_id_cache[exe_key] = row[0]
+        pending_cache_keys.append((exe_id_cache, exe_key))
         return row[0]
 
     def resolve_domain_id(con: sqlite3.Connection, domain: str) -> int:
@@ -263,6 +268,7 @@ def run_secondary(
         con.execute(sqlite_insert_dom, (domain,))
         row = con.execute(sqlite_select_dom, (domain,)).fetchone()
         domain_id_cache[domain] = row[0]
+        pending_cache_keys.append((domain_id_cache, domain))
         return row[0]
 
     def resolve_addr_id(con: sqlite3.Connection, addr: str) -> int:
@@ -271,6 +277,7 @@ def run_secondary(
         con.execute(sqlite_insert_addr, (addr,))
         row = con.execute(sqlite_select_addr, (addr,)).fetchone()
         addr_id_cache[addr] = row[0]
+        pending_cache_keys.append((addr_id_cache, addr))
         return row[0]
 
     # main loop
@@ -347,7 +354,12 @@ def run_secondary(
                             con.executemany(sqlite_insert_conn, conn_rows)
                         con.close()
                         transaction_success = True
+                        pending_cache_keys.clear()  # committed: cached ids are now durable
                 except Exception as e:
+                    # rolled back: drop this transaction's cache entries so a retry re-inserts
+                    for cache, cache_key in pending_cache_keys:
+                        cache.pop(cache_key, None)
+                    pending_cache_keys.clear()
                     q_error.put("SQLite execute %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?", len(transaction)))
                 try:
                     if config.database.text_log:

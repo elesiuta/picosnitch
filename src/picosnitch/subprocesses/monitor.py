@@ -26,8 +26,9 @@ from picosnitch.utils import get_fstat
 
 
 def _read_proc_comm(pid: int) -> str:
+    # comm is kernel-supplied bytes (prctl PR_SET_NAME), not necessarily utf-8
     try:
-        with open(f"/proc/{pid}/comm", "r") as f:
+        with open(f"/proc/{pid}/comm", "r", errors="replace") as f:
             return f.read().strip()
     except OSError:
         return ""
@@ -63,8 +64,9 @@ def _read_proc_status_uid(pid: int) -> int:
     Format: 'Uid:\\treal\\teffective\\tsaved\\tfs'.  We use the effective
     UID (field 2) because BPF's bpf_get_current_uid_gid() also returns
     the effective UID -- keeping the two paths consistent."""
+    # errors="replace": the Name: line precedes Uid: and may hold non-utf-8 comm bytes
     try:
-        with open(f"/proc/{pid}/status", "r") as f:
+        with open(f"/proc/{pid}/status", "r", errors="replace") as f:
             for line in f:
                 if line.startswith("Uid:"):
                     return int(line.split()[2])
@@ -167,9 +169,9 @@ def _scan_pid_socket_inodes(pid: int) -> list[int]:
 
 def _read_proc_ppid(pid: int) -> int:
     """Parse ppid (4th field) from /proc/{pid}/stat, splitting on the last
-    `)` to handle commands containing spaces or parens."""
+    `)` to handle comms containing spaces, parens, or non-utf-8 bytes."""
     try:
-        with open(f"/proc/{pid}/stat", "r") as f:
+        with open(f"/proc/{pid}/stat", "r", errors="replace") as f:
             return int(f.read().rsplit(")", 1)[1].split()[1])
     except (OSError, ValueError, IndexError):
         return 0
@@ -267,7 +269,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     _FAN_MODIFY = 0x2
     libc.fanotify_mark(fan_fd, _FAN_MARK_FLUSH, _FAN_MODIFY, -1, None)
     # domain and file descriptor cache, domains are cached for the life of the program, fd has a fixed size, populate with dummy values
-    domain_dict = collections.defaultdict(str)
+    domain_dict: dict[str, str] = {}
     fd_dict = collections.OrderedDict()
     for cache_idx in range(FD_CACHE):
         fd_dict[f"tmp{cache_idx}"] = (0,)
@@ -334,7 +336,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         comm, which usually matches the binary's basename and lets
         _find_exe_by_inode() resolve it on disk."""
         try:
-            with open(f"/proc/{pid}/comm", "r") as f:
+            with open(f"/proc/{pid}/comm", "r", errors="replace") as f:
                 return f.read().strip()
         except OSError:
             return ""
@@ -444,7 +446,8 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     @functools.lru_cache(maxsize=PID_CACHE)
     def get_cmdline(pid: int) -> str:
         try:
-            with open(f"/proc/{pid}/cmdline", "r") as f:
+            # errors="replace": a non-utf-8 argv must not blank the whole cmdline
+            with open(f"/proc/{pid}/cmdline", "r", errors="replace") as f:
                 return f.read()
         except Exception:
             return ""
@@ -464,7 +467,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             gpst_dev, gpst_ino, gpfd, gpexe = 0, 0, "", ""
             gpcmd = ""
             try:
-                with open(f"/proc/{proc['ppid']}/stat", "r") as f:
+                with open(f"/proc/{proc['ppid']}/stat", "r", errors="replace") as f:
                     stat_fields = f.read().rsplit(")", 1)[-1].split()
                 gppid = int(stat_fields[1])
                 if gppid > 0:
@@ -508,7 +511,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                             "rport": proc["rport"],
                             "laddr": proc["laddr"],
                             "raddr": proc["raddr"],
-                            "domain": domain_dict[proc["raddr"]],
+                            "domain": domain_dict.get(proc["raddr"], ""),
                             "netns": _read_netns_inode(pid),
                         }
                     )
@@ -617,7 +620,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         garbage rows in the executables table."""
         if event.gppid <= 0:
             return 0, 0, 0, "", "", "", ""
-        gpcomm = event.gpcomm.decode()
+        gpcomm = event.gpcomm.decode(errors="replace")
         gpst_dev, gpst_ino, gppid, gpfd, gpexe = get_fd(event.gpdev, event.gpino, event.gppid, -1, gpcomm)
         gpcmd = get_cmdline(event.gppid)
         return gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm
@@ -643,62 +646,68 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             # near capacity means connections may have been dropped before drain
             if len(entries) >= CONN_MAP_MAX * 9 // 10:
                 q_error.put(f"{map_name} near capacity ({len(entries)}/{CONN_MAP_MAX}), connections may have been evicted, try increasing [monitoring].conn_map_max_entries")
+            # drain_map already lookup_and_delete'd every entry from the kernel, so a
+            # raise here would drop the rest of this (now unrecoverable) batch -- keep
+            # per-entry failures isolated so one bad entry can't lose its siblings
             for key, val in entries:
-                st_dev, st_ino, pid, fd, exe = get_fd(val.dev, val.ino, key.pid, key.dport, val.comm.decode())
-                pst_dev, pst_ino, ppid, pfd, pexe = get_fd(val.pdev, val.pino, val.ppid, -1, val.pcomm.decode())
-                gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(val)
-                cmd = get_cmdline(key.pid)
-                pcmd = get_cmdline(val.ppid)
-                if family == socket.AF_INET:
-                    laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", key.saddr))
-                    raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", key.daddr))
-                else:
-                    laddr = socket.inet_ntop(socket.AF_INET6, bytes(key.saddr)[:16])
-                    raddr = socket.inet_ntop(socket.AF_INET6, bytes(key.daddr)[:16])
-                pipe.send_bytes(
-                    pickle.dumps(
-                        {
-                            "pid": pid,
-                            "name": val.comm.decode(),
-                            "fd": fd,
-                            "dev": st_dev,
-                            "ino": st_ino,
-                            "exe": exe,
-                            "cmdline": cmd,
-                            "ppid": ppid,
-                            "pname": val.pcomm.decode(),
-                            "pfd": pfd,
-                            "pdev": pst_dev,
-                            "pino": pst_ino,
-                            "pexe": pexe,
-                            "pcmdline": pcmd,
-                            "gppid": gppid,
-                            "gpname": gpcomm,
-                            "gpfd": gpfd,
-                            "gpdev": gpst_dev,
-                            "gpino": gpst_ino,
-                            "gpexe": gpexe,
-                            "gpcmdline": gpcmd,
-                            "uid": val.uid,
-                            "send": int(val.send_bytes),
-                            "recv": int(val.recv_bytes),
-                            "pkts": int(val.send_pkts) + int(val.recv_pkts),
-                            "family": family,
-                            "protocol": int(key.protocol),
-                            "lport": key.lport,
-                            "rport": key.dport,
-                            "laddr": laddr,
-                            "raddr": raddr,
-                            "domain": domain_dict[raddr],
-                            "netns": int(key.netns),
-                        }
+                try:
+                    st_dev, st_ino, pid, fd, exe = get_fd(val.dev, val.ino, key.pid, key.dport, val.comm.decode(errors="replace"))
+                    pst_dev, pst_ino, ppid, pfd, pexe = get_fd(val.pdev, val.pino, val.ppid, -1, val.pcomm.decode(errors="replace"))
+                    gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(val)
+                    cmd = get_cmdline(key.pid)
+                    pcmd = get_cmdline(val.ppid)
+                    if family == socket.AF_INET:
+                        laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", key.saddr))
+                        raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", key.daddr))
+                    else:
+                        laddr = socket.inet_ntop(socket.AF_INET6, bytes(key.saddr)[:16])
+                        raddr = socket.inet_ntop(socket.AF_INET6, bytes(key.daddr)[:16])
+                    pipe.send_bytes(
+                        pickle.dumps(
+                            {
+                                "pid": pid,
+                                "name": val.comm.decode(errors="replace"),
+                                "fd": fd,
+                                "dev": st_dev,
+                                "ino": st_ino,
+                                "exe": exe,
+                                "cmdline": cmd,
+                                "ppid": ppid,
+                                "pname": val.pcomm.decode(errors="replace"),
+                                "pfd": pfd,
+                                "pdev": pst_dev,
+                                "pino": pst_ino,
+                                "pexe": pexe,
+                                "pcmdline": pcmd,
+                                "gppid": gppid,
+                                "gpname": gpcomm,
+                                "gpfd": gpfd,
+                                "gpdev": gpst_dev,
+                                "gpino": gpst_ino,
+                                "gpexe": gpexe,
+                                "gpcmdline": gpcmd,
+                                "uid": val.uid,
+                                "send": int(val.send_bytes),
+                                "recv": int(val.recv_bytes),
+                                "pkts": int(val.send_pkts) + int(val.recv_pkts),
+                                "family": family,
+                                "protocol": int(key.protocol),
+                                "lport": key.lport,
+                                "rport": key.dport,
+                                "laddr": laddr,
+                                "raddr": raddr,
+                                "domain": domain_dict.get(raddr, ""),
+                                "netns": int(key.netns),
+                            }
+                        )
                     )
-                )
+                except Exception as e:
+                    q_error.put("BPF drain entry %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
 
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
-        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, -1, event.comm.decode())
-        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode())
+        st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, -1, event.comm.decode(errors="replace"))
+        pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, -1, event.pcomm.decode(errors="replace"))
         gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(event)
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
@@ -707,14 +716,14 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                 pickle.dumps(
                     {
                         "pid": pid,
-                        "name": event.comm.decode(),
+                        "name": event.comm.decode(errors="replace"),
                         "fd": fd,
                         "dev": st_dev,
                         "ino": st_ino,
                         "exe": exe,
                         "cmdline": cmd,
                         "ppid": ppid,
-                        "pname": event.pcomm.decode(),
+                        "pname": event.pcomm.decode(errors="replace"),
                         "pfd": pfd,
                         "pdev": pst_dev,
                         "pino": pst_ino,
