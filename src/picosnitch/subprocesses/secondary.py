@@ -367,7 +367,9 @@ def run_secondary(
                         with safe_log_open(text_path) as text_file:
                             for contime, send, recv, n_events, exe_key, pexe_key, gpexe_key, uid, family, protocol, lport, rport, laddr, raddr, domain, netns in transaction:
                                 flat = (contime, send, recv, n_events, *exe_key, *pexe_key, *gpexe_key, uid, family, protocol, lport, rport, laddr, raddr, domain, netns)
-                                clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\0", "") for value in flat]
+                                # strip CR too, not just LF: a lone \r in an attacker-influenced
+                                # field (name/cmdline/domain) can forge or overwrite a CSV log line
+                                clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\r", "").replace("\0", "") for value in flat]
                                 clean_entry[0] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(contime))
                                 text_file.write(",".join(clean_entry) + "\n")
                         transaction_success = True
