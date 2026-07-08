@@ -127,18 +127,18 @@ class Daemon:
         self.daemonize()
         self.run()
 
-    def stop(self) -> None:
-        """Stop the daemon."""
+    def stop(self) -> bool:
+        """Stop the daemon. True when stopped (or not running), False when it failed."""
         pid = self.getpid()
         if not pid:
             message = f"pidfile {self.pidfile} does not exist. picosnitch not running?"
             logging.warning(message)
-            return  # not an error in a restart
+            return True  # not an error in a restart
         if not self._pid_is_picosnitch(pid):
             # stale or recycled pid: clear the pidfile but never signal an unrelated process
             logging.warning(f"pidfile {self.pidfile} is stale (pid {pid} is not picosnitch), removing")
             self.pidfile.unlink(missing_ok=True)
-            return
+            return True
         # Signal until the process exits, bounded so a wedged process can't hang stop() forever
         deadline = time.time() + 60
         try:
@@ -149,16 +149,18 @@ class Daemon:
                     break
             else:
                 logging.error(f"picosnitch (pid {pid}) did not exit within 60s of SIGTERM")
-                return
+                return False
         except OSError as err:
             if "No such process" not in str(err.args):
                 logging.error(f"{err.args}")
                 sys.exit(1)
         self.pidfile.unlink(missing_ok=True)
+        return True
 
     def restart(self) -> None:
         """Restart the daemon."""
-        self.stop()
+        if not self.stop():
+            sys.exit(1)
         self.start()
 
     def status(self) -> None:

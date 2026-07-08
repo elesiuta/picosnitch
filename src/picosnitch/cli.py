@@ -20,13 +20,14 @@ from picosnitch.main_loop import run_main_loop
 from picosnitch.ui.top import top_init
 from picosnitch.ui.tui import tui_init
 from picosnitch.ui.webui import web_dashboard
-from picosnitch.utils import apply_data_permissions, connect_db_readonly, load_state, safe_log_open, sqlite_error_means_corrupt
+from picosnitch.utils import apply_data_permissions, connect_db_readonly, load_state, relaunch_argv, safe_log_open, sqlite_error_means_corrupt
 
 
 def check_root(cmd: str) -> int:
     """check for root privileges, return exit code on failure"""
     if os.getuid() != 0:
-        logging.error(f"This command requires root. Try: sudo {Path(sys.argv[0]).resolve()} {cmd}")
+        # relaunch_argv gives a runnable suggestion for console script, -m, and nix wrapper alike
+        logging.error(f"This command requires root. Try: sudo {' '.join(relaunch_argv(cmd))}")
         return 1
     return 0
 
@@ -54,7 +55,7 @@ def check_database() -> int:
     db_path = DATA_DIR / "picosnitch.db"
     if not db_path.exists():
         logging.error(f"Database not found: {db_path}")
-        logging.error(f"Run: sudo {Path(sys.argv[0]).resolve()} start (or use systemctl) to create it")
+        logging.error(f"Run: sudo {' '.join(relaunch_argv('start'))} (or use systemctl) to create it")
         return 1
     con = None
     try:
@@ -310,9 +311,13 @@ def start_picosnitch() -> int:
     elif cmd == "systemd":
         if err := check_root(cmd):
             return err
-        with open("/usr/lib/systemd/system/picosnitch.service", "w") as f:
-            f.write(systemd_service)
-        subprocess.run(["systemctl", "daemon-reload"])
+        try:
+            with open("/usr/lib/systemd/system/picosnitch.service", "w") as f:
+                f.write(systemd_service)
+            subprocess.run(["systemctl", "daemon-reload"])
+        except (OSError, FileNotFoundError) as e:
+            logging.error(f"could not install picosnitch.service (is this a systemd distro?): {e}")
+            return 1
         logging.info("Wrote /usr/lib/systemd/system/picosnitch.service")
         logging.info("Enable on boot and start now with: sudo systemctl enable --now picosnitch")
         return 0
@@ -321,13 +326,10 @@ def start_picosnitch() -> int:
             return err
         if Path("/usr/lib/systemd/system/picosnitch.service").exists() or Path("/etc/systemd/system/picosnitch.service").exists():
             try:
-                active = (
-                    subprocess.run(
-                        ["systemctl", "is-active", "--quiet", "picosnitch"],
-                        check=False,
-                    ).returncode
-                    == 0
-                )
+                # "activating" counts too: a crash-looping unit (RestartSec backoff) still
+                # respawns anything Daemon.stop() kills, so defer to systemctl there as well
+                r = subprocess.run(["systemctl", "is-active", "picosnitch"], capture_output=True, text=True, check=False)
+                active = r.stdout.strip() in ("active", "activating", "reloading")
             except FileNotFoundError:
                 active = False
             if active:
@@ -344,8 +346,7 @@ def start_picosnitch() -> int:
                     logging.error("aborted; run `systemctl stop picosnitch` instead")
                     return 1
         logging.info("stopping picosnitch daemon")
-        Daemon(pid_file).stop()
-        return 0
+        return 0 if Daemon(pid_file).stop() else 1
     elif cmd in ("start", "restart", "start-no-daemon"):
         if err := check_root(cmd):
             return err
@@ -360,13 +361,9 @@ def start_picosnitch() -> int:
         if cmd in ("start", "restart"):
             if Path("/usr/lib/systemd/system/picosnitch.service").exists() or Path("/etc/systemd/system/picosnitch.service").exists():
                 try:
-                    active = (
-                        subprocess.run(
-                            ["systemctl", "is-active", "--quiet", "picosnitch"],
-                            check=False,
-                        ).returncode
-                        == 0
-                    )
+                    # "activating" counts too: a crash-looping unit would conflict just the same
+                    r = subprocess.run(["systemctl", "is-active", "picosnitch"], capture_output=True, text=True, check=False)
+                    active = r.stdout.strip() in ("active", "activating", "reloading")
                 except FileNotFoundError:
                     active = False
                 if active:
@@ -411,8 +408,14 @@ def start_picosnitch() -> int:
             PicoDaemon(pid_file).restart()
         elif cmd == "start-no-daemon":
             if pid_file.exists():
-                logging.error(f"pid file already exists: {pid_file}")
-                return 1
+                daemon = Daemon(pid_file)
+                pid = daemon.getpid()
+                if pid and daemon._pid_is_picosnitch(pid):
+                    logging.error(f"pid file already exists: {pid_file} (picosnitch running with pid {pid})")
+                    return 1
+                # stale pidfile left by a SIGKILL/OOM/crash: clear it, like `start` does
+                logging.warning(f"removing stale pidfile {pid_file}")
+                pid_file.unlink(missing_ok=True)
 
             def delpid():
                 try:

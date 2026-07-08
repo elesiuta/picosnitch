@@ -46,6 +46,9 @@ class ProcessManager:
         self.p = multiprocessing.Process(name=self.name, target=self.target, daemon=True, args=(*self.init_args, self.q_in, self.q_out))
         self.p.start()
 
+    def join(self, timeout: float | None = None) -> None:
+        self.p.join(timeout)
+
     def terminate(self) -> None:
         if self.p.is_alive():
             self.p.terminate()

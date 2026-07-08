@@ -120,8 +120,15 @@ def run_main_loop(config: Config, state: State) -> int:
     subprocesses = [p_monitor, p_fuse, p_virustotal, p_remote_sql, p_primary, p_secondary, p_notifications]
     shutdown_event = threading.Event()
     resume_event = threading.Event()
-    signal.signal(signal.SIGINT, lambda signum, frame: shutdown_event.set())
-    signal.signal(signal.SIGTERM, lambda signum, frame: shutdown_event.set())
+
+    def _request_shutdown(signum, frame):
+        # also wake the resume_event.wait() below so stop/restart tears down promptly
+        # instead of after the 5s poll timeout (the loop breaks on shutdown before resuming)
+        shutdown_event.set()
+        resume_event.set()
+
+    signal.signal(signal.SIGINT, _request_shutdown)
+    signal.signal(signal.SIGTERM, _request_shutdown)
     signal.signal(signal.SIGUSR1, lambda signum, frame: resume_event.set())
     # watch subprocesses; detect a real suspend/resume by the gap between CLOCK_BOOTTIME
     # (counts time asleep) and CLOCK_MONOTONIC (does not). a plain wall-clock gap can be
@@ -148,10 +155,15 @@ def run_main_loop(config: Config, state: State) -> int:
             mono_now = time.monotonic()
             boot_now = time.clock_gettime(time.CLOCK_BOOTTIME)
             suspended_for = (boot_now - boot_last) - (mono_now - mono_last)
-            if resume_event.is_set() or suspended_for > 5:
+            # skip the resume/suspend restart once shutdown is requested: the shutdown handler
+            # also sets resume_event (to break the wait() above), and a spurious monitor re-attach
+            # here would only add teardown latency before the clean exit below
+            if not shutdown_event.is_set() and (resume_event.is_set() or suspended_for > 5):
                 resume_event.clear()
                 logging.info("restarting picosnitch monitor after resuming from suspend")
                 p_monitor.q_in.put("terminate")
+                # let the monitor drain the conn maps and exit before SIGTERM aborts it
+                p_monitor.join(timeout=10)
                 p_monitor.terminate()
                 p_monitor.q_in.get()
                 p_monitor.start()
