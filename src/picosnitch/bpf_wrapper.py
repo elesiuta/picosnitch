@@ -827,32 +827,23 @@ class BPF:
 
     @staticmethod
     def _resolve_library(name: str) -> str:
-        """Resolve a library name to its full path."""
-        if name == "c":
-            # Find libc
-            libc_path = ctypes.util.find_library("c")
-            if not libc_path:
-                # Try common paths
-                for path in ["/lib/x86_64-linux-gnu/libc.so.6", "/lib/aarch64-linux-gnu/libc.so.6", "/lib64/libc.so.6"]:
-                    if os.path.exists(path):
-                        return path
-                raise RuntimeError("libc not found")
-            # find_library returns just the name, need full path
-            if not libc_path.startswith("/"):
-                # Try to find the full path
-                try:
-                    result = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True, check=True)
-                    for line in result.stdout.splitlines():
-                        if "libc.so.6" in line and "=>" in line:
-                            return line.split("=>")[1].strip()
-                except Exception:
-                    pass
-                # Fallback to common paths
-                for path in ["/lib/x86_64-linux-gnu/libc.so.6", "/lib/aarch64-linux-gnu/libc.so.6", "/lib64/libc.so.6"]:
-                    if os.path.exists(path):
-                        return path
-            return libc_path
-        return name
+        """Full path for a library name (absolute paths pass through). For libc, map the
+        runtime address of getaddrinfo to its backing file in /proc/self/maps: the real
+        loaded path, correct on any distro (glibc/musl/nix) without find_library/FHS guesses."""
+        if name != "c":
+            return name
+        addr = ctypes.cast(ctypes.CDLL(None).getaddrinfo, ctypes.c_void_p).value
+        if not addr:
+            raise RuntimeError("could not resolve getaddrinfo address")
+        # surrogateescape: a non-UTF-8 path in our own maps must not crash the monitor
+        with open("/proc/self/maps", encoding="utf-8", errors="surrogateescape") as f:
+            for line in f:
+                fields = line.split(maxsplit=5)
+                if len(fields) == 6 and fields[5].startswith("/"):
+                    lo, _, hi = fields[0].partition("-")
+                    if int(lo, 16) <= addr < int(hi, 16):
+                        return fields[5].rstrip("\n")
+        raise RuntimeError("could not locate libc providing getaddrinfo")
 
     def __getitem__(self, key: str) -> BPFMap:
         """Map access: b["map_name"]"""

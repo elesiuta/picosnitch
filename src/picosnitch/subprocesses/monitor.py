@@ -556,7 +556,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         b.attach_uretprobe(name="c", sym="getaddrinfo", fn_name="dns_return")
         use_getaddrinfo_uprobe = True
     except Exception as e:
-        q_error.put(f"BPF.attach_uprobe() failed for getaddrinfo: {e}, falling back to only using reverse DNS lookup")
+        q_error.put(f"getaddrinfo uprobe not attached ({e}); falling back to only using reverse DNS lookup")
     # attach fexit network hooks: inet_sendmsg for send, inet_recvmsg for recv;
     # sock_common_recvmsg covers af_inet6 raw / l2tp / dccp recv (not inet6_recvmsg)
     try:

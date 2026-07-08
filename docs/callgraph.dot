@@ -364,6 +364,10 @@ digraph G {
         "picosnitch__bpf_wrapper__BPF____init__" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF____init__" -> "picosnitch__bpf_wrapper__BPFObject____init__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF____init__" -> "picosnitch__bpf_wrapper__BPFObject__load" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__BPF___resolve_library" -> "picosnitch__bpf_wrapper__BPFObject____enter__" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__BPF___resolve_library" -> "picosnitch__bpf_wrapper__BPFObject____exit__" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__BPF___resolve_library" -> "picosnitch__bpf_wrapper__BPF____enter__" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__BPF___resolve_library" -> "picosnitch__bpf_wrapper__BPF____exit__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF__attach_kprobe" -> "picosnitch__bpf_wrapper__BPFObject__attach_kprobe" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF__attach_kretprobe" -> "picosnitch__bpf_wrapper__BPFObject__attach_kprobe" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF__attach_uprobe" -> "picosnitch__bpf_wrapper__BPF" [style="solid",  color="#000000"];
