@@ -361,7 +361,9 @@ def sync_vt_results(state: State, q_vt: multiprocessing.Queue[bytes], q_out: mul
     if check_pending:
         for exe in state["SHA256"]:
             for sha256 in state["SHA256"][exe]:
-                if state["SHA256"][exe][sha256] in ["VT Pending", "File not analyzed (no api key)", "", None]:
+                vt_state = state["SHA256"][exe][sha256]
+                # re-query pending/unscanned states and transient/auth lookup errors (retried, not terminal)
+                if vt_state in ["VT Pending", "File not analyzed (no api key)", "", None] or (isinstance(vt_state, str) and vt_state.startswith("VT lookup error")):
                     if exe in state["Executables"] and state["Executables"][exe]:
                         name = state["Executables"][exe][0]
                     elif exe in state["Parent Executables"] and state["Parent Executables"][exe]:

@@ -105,7 +105,8 @@ def resolve_hash(
             state["SHA256"][proc["exe"]][sha256] = "SUBMITTED"
             q_vt.put(pickle.dumps((proc, sha256)))
             q_out.put(pickle.dumps({"type": "sha256", "name": proc["name"], "exe": proc["exe"], "sha256": sha256}))
-        elif state["SHA256"][proc["exe"]][sha256] == "Failed to read process for upload":
+        elif state["SHA256"][proc["exe"]][sha256] == "Failed to read process for upload" or str(state["SHA256"][proc["exe"]][sha256]).startswith("VT lookup error"):
+            # retry a prior upload-read failure or a transient/auth VT lookup error (429/timeout/401)
             state["SHA256"][proc["exe"]][sha256] = "RETRY"
             q_vt.put(pickle.dumps((proc, sha256)))
     else:

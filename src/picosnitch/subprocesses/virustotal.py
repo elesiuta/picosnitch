@@ -9,6 +9,7 @@ import os
 import pickle
 import queue
 import time
+import urllib.error
 import urllib.request
 import uuid
 
@@ -94,7 +95,16 @@ def run_virustotal(config: Config, fan_fd: int, q_error: multiprocessing.Queue[s
                 try:
                     analysis = _http_get_json("https://www.virustotal.com/api/v3/files/" + sha256, headers)
                     analysis = analysis["data"]["attributes"]["last_analysis_stats"]
-                except Exception:
+                except Exception as e:
+                    # only HTTP 404 means the file is genuinely absent from VT and worth
+                    # uploading; a 401/429/timeout must not trigger an upload -- that worsens
+                    # rate limits and would ship the binary to VT on a transient error
+                    if not (isinstance(e, urllib.error.HTTPError) and e.code == 404):
+                        # retryable marker (not a terminal verdict): resolve_hash in secondary and
+                        # sync_vt_results re-query any state starting with "VT lookup error", so a
+                        # rate-limited/offline/auth failure is retried instead of cached forever
+                        q_vt_results.put(pickle.dumps((proc, sha256, f"VT lookup error: {type(e).__name__}", suspicious)))
+                        continue
                     if config.virustotal.file_upload:
                         try:
                             with open(proc["fd"], "rb") as f:
@@ -117,7 +127,8 @@ def run_virustotal(config: Config, fan_fd: int, q_error: multiprocessing.Queue[s
                                 q_vt_results.put(pickle.dumps((proc, sha256, "Failed to read process for upload", suspicious)))
                                 continue
                     else:
-                        # could also be an invalid api key
+                        # reached only for a genuine 404 (absent from VT) with uploads disabled;
+                        # a 401/invalid key now takes the retryable branch above, not this one
                         q_vt_results.put(pickle.dumps((proc, sha256, "File not analyzed (analysis not found)", suspicious)))
                         continue
                 if analysis.get("suspicious", 0) != 0 or analysis.get("malicious", 0) != 0:
