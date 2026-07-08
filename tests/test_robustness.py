@@ -302,6 +302,32 @@ def test_relaunch_argv_reexecs_console_script(monkeypatch, tmp_path):
     # non-picosnitch argv0 (e.g. `python -m picosnitch`) -> fall back to -m picosnitch
     monkeypatch.setattr(sys, "argv", ["/usr/bin/python3", "top"])
     assert utils.relaunch_argv("restart") == [sys.executable, "-m", "picosnitch", "restart"]
+    # a bare/relative argv0 must fall back to -m, never be re-exec'd directly (Popen would resolve
+    # it via $PATH/cwd) -- even an executable ./picosnitch in cwd
+    (tmp_path / "picosnitch").chmod(0o755)  # exists and executable, but relative
+    monkeypatch.chdir(tmp_path)
+    for bad_argv0 in ("picosnitch", "./picosnitch"):
+        monkeypatch.setattr(sys, "argv", [bad_argv0, "top"])
+        assert utils.relaunch_argv("restart") == [sys.executable, "-m", "picosnitch", "restart"]
+
+
+def test_resolve_tool_prefers_trusted_dirs(tmp_path, monkeypatch):
+    """a build tool must resolve from a standard system dir even when another dir is earlier on
+    $PATH (a bare-name lookup would resolve the other one first)."""
+    import pytest
+
+    from picosnitch import bpf_wrapper
+
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "env").write_text("#!/bin/sh\ntrue\n")  # shadow a tool that exists in /usr/bin
+    (other / "env").chmod(0o755)
+    monkeypatch.setenv("PATH", str(other) + os.pathsep + os.environ.get("PATH", ""))
+    resolved = bpf_wrapper._resolve_tool("env")
+    assert resolved.startswith(("/usr/bin/", "/bin/"))  # trusted dir won, not the one on $PATH
+    assert str(other) not in resolved
+    with pytest.raises(RuntimeError):
+        bpf_wrapper._resolve_tool("picosnitch-no-such-build-tool-xyz")
 
 
 def test_corrupt_state_json_quarantined(tmp_path, monkeypatch):

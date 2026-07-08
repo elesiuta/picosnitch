@@ -34,6 +34,8 @@ digraph G {
             "picosnitch__bpf_wrapper___check_kernel_btf" [label="_check_kernel_btf", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper___detect_distro" [label="_detect_distro", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper___get_install_instructions" [label="_get_install_instructions", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            "picosnitch__bpf_wrapper___resolve_tool" [label="_resolve_tool", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            "picosnitch__bpf_wrapper___tool_search_path" [label="_tool_search_path", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__check_bpf_requirements" [label="check_bpf_requirements", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__compile_bpf" [label="compile_bpf", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__find_bpf_object" [label="find_bpf_object", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
@@ -290,6 +292,8 @@ digraph G {
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper___check_kernel_btf" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper___detect_distro" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper___get_install_instructions" [style="dashed",  color="#ffffff00"];
+        "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper___resolve_tool" [style="dashed",  color="#ffffff00"];
+        "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper___tool_search_path" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__check_bpf_requirements" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__compile_bpf" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__find_bpf_object" [style="dashed",  color="#ffffff00"];
@@ -402,6 +406,7 @@ digraph G {
         "picosnitch__bpf_wrapper___detect_distro" -> "picosnitch__bpf_wrapper__BPF____enter__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper___detect_distro" -> "picosnitch__bpf_wrapper__BPF____exit__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper___get_install_instructions" -> "picosnitch__bpf_wrapper___detect_distro" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper___resolve_tool" -> "picosnitch__bpf_wrapper___tool_search_path" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__check_bpf_requirements" -> "picosnitch__bpf_wrapper__BPFObject____enter__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__check_bpf_requirements" -> "picosnitch__bpf_wrapper__BPFObject____exit__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__check_bpf_requirements" -> "picosnitch__bpf_wrapper__BPF____enter__" [style="solid",  color="#000000"];
@@ -415,6 +420,8 @@ digraph G {
         "picosnitch__bpf_wrapper__compile_bpf" -> "picosnitch__bpf_wrapper__BPFObject____exit__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__compile_bpf" -> "picosnitch__bpf_wrapper__BPF____enter__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__compile_bpf" -> "picosnitch__bpf_wrapper__BPF____exit__" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__compile_bpf" -> "picosnitch__bpf_wrapper___resolve_tool" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__compile_bpf" -> "picosnitch__bpf_wrapper___tool_search_path" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__find_bpf_object" -> "picosnitch__bpf_wrapper__compile_bpf" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__kernel_symbol_addrs" -> "picosnitch__bpf_wrapper__BPFObject____enter__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__kernel_symbol_addrs" -> "picosnitch__bpf_wrapper__BPFObject____exit__" [style="solid",  color="#000000"];

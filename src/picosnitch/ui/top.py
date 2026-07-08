@@ -446,6 +446,8 @@ def top_init() -> int:
                 stderr=mon_log,
                 start_new_session=True,
                 close_fds=True,
+                # don't inherit the caller's cwd: the -m fallback puts cwd on sys.path[0]
+                cwd="/",
             )
         finally:
             mon_log.close()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ctypes
-import ctypes.util
 import logging
 import multiprocessing
 import os
@@ -29,8 +28,9 @@ from picosnitch.utils import relaunch_argv
 
 def run_main_loop(config: Config, state: State) -> int:
     """coordinates all picosnitch subprocesses"""
-    # init fanotify
-    libc = ctypes.CDLL(ctypes.util.find_library("c"))
+    # init fanotify; CDLL(None) binds fanotify_* from the already-loaded libc, avoiding
+    # find_library's gcc/objdump $PATH fallback (like bpf_wrapper._resolve_library)
+    libc = ctypes.CDLL(None)
     _FAN_CLASS_CONTENT = 0x4
     _FAN_UNLIMITED_MARKS = 0x20
     flags = _FAN_CLASS_CONTENT if FD_CACHE < 8192 else _FAN_CLASS_CONTENT | _FAN_UNLIMITED_MARKS
@@ -182,5 +182,6 @@ def run_main_loop(config: Config, state: State) -> int:
     time.sleep(5)
     for p in subprocesses:
         p.terminate()
-    subprocess.Popen(relaunch_argv("restart"))
+    # cwd="/" so the -m fallback doesn't put an inherited cwd on sys.path[0]
+    subprocess.Popen(relaunch_argv("restart"), cwd="/")
     return 0

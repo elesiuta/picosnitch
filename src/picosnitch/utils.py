@@ -38,7 +38,9 @@ def relaunch_argv(cmd: str) -> list[str]:
     `-m picosnitch` when we weren't launched from a picosnitch console script/wrapper."""
     argv0 = sys.argv[0]
     base = os.path.basename(argv0).lstrip(".").split("-wrapped")[0]
-    if base == "picosnitch" and os.access(argv0, os.X_OK):
+    # only re-exec argv0 directly if it's absolute; a bare/relative name would be resolved via
+    # $PATH or cwd at exec time. otherwise use the interpreter (sys.executable is always absolute)
+    if base == "picosnitch" and os.path.isabs(argv0) and os.access(argv0, os.X_OK):
         return [argv0, cmd]
     return [sys.executable, "-m", "picosnitch", cmd]
 

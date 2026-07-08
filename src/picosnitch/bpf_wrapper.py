@@ -6,15 +6,30 @@ Uses ctypes to interface with libbpf.so directly for BPF CO-RE support
 """
 
 import ctypes
-import ctypes.util
 import errno
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import traceback
 from pathlib import Path
+
+# standard system dirs, searched before $PATH so build tools resolve to a fixed path (see _resolve_tool)
+_TRUSTED_TOOL_PATH = "/usr/bin:/usr/sbin:/bin:/sbin:/usr/local/bin:/usr/local/sbin"
+
+
+def _tool_search_path() -> str:
+    return _TRUSTED_TOOL_PATH + os.pathsep + os.environ.get("PATH", "")
+
+
+def _resolve_tool(tool: str) -> str:
+    """absolute path to a build tool: standard system dirs first, then $PATH (nix etc.); raise if absent"""
+    path = shutil.which(tool, path=_tool_search_path())
+    if path is None:
+        raise RuntimeError(f"{tool} not found. Install it to compile BPF programs.")
+    return path
 
 
 def _detect_distro() -> str:
@@ -137,17 +152,15 @@ def compile_bpf(output_path: str | None = None, arch: str | None = None) -> str:
         if not Path("/sys/kernel/btf/vmlinux").exists():
             raise RuntimeError("Cannot generate vmlinux.h: /sys/kernel/btf/vmlinux not found.\nYour kernel must be built with CONFIG_DEBUG_INFO_BTF=y")
         try:
-            result = subprocess.run(["bpftool", "btf", "dump", "file", "/sys/kernel/btf/vmlinux", "format", "c"], capture_output=True, text=True, check=True)
+            result = subprocess.run([_resolve_tool("bpftool"), "btf", "dump", "file", "/sys/kernel/btf/vmlinux", "format", "c"], capture_output=True, text=True, check=True)
             with open(vmlinux_h, "w") as f:
                 f.write(result.stdout)
-        except FileNotFoundError:
-            raise RuntimeError("bpftool not found. Install bpftool to compile BPF programs.")
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Failed to generate vmlinux.h: {e.stderr}")
 
     # Compile BPF program
     clang_cmd = [
-        "clang",
+        _resolve_tool("clang"),
         "-g",
         "-O2",
         "-target",
@@ -166,16 +179,16 @@ def compile_bpf(output_path: str | None = None, arch: str | None = None) -> str:
     ]
     try:
         subprocess.run(clang_cmd, capture_output=True, text=True, check=True)
-    except FileNotFoundError:
-        raise RuntimeError("clang not found. Install clang to compile BPF programs.")
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"BPF compilation failed:\n{e.stderr}")
 
-    # Strip debug info to reduce size
-    try:
-        subprocess.run(["llvm-strip", "-g", str(output_path)], capture_output=True, check=True)
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        pass  # Non-fatal: llvm-strip is optional
+    # Strip debug info to reduce size (optional: skip if llvm-strip is absent)
+    llvm_strip = shutil.which("llvm-strip", path=_tool_search_path())
+    if llvm_strip:
+        try:
+            subprocess.run([llvm_strip, "-g", str(output_path)], capture_output=True, check=True)
+        except subprocess.CalledProcessError:
+            pass  # Non-fatal: llvm-strip is optional
 
     return output_path
 
@@ -336,28 +349,18 @@ class LibBPF:
         if self._initialized:
             return
 
-        # Try to find libbpf
-        libbpf_path = ctypes.util.find_library("bpf")
-
-        if not libbpf_path:
-            # Try common paths directly
-            common_paths = [
-                "/usr/lib/x86_64-linux-gnu/libbpf.so.1",  # Debian/Ubuntu x86_64
-                "/usr/lib/aarch64-linux-gnu/libbpf.so.1",  # Debian/Ubuntu arm64
-                "/usr/lib64/libbpf.so.1",  # Fedora/RHEL x86_64
-                "/usr/lib/libbpf.so.1",  # Generic
-                "/lib/x86_64-linux-gnu/libbpf.so.1",  # Older Debian
-                "/lib64/libbpf.so.1",  # Older Fedora
-            ]
-            for path in common_paths:
-                if Path(path).exists():
-                    libbpf_path = path
-                    break
-
-        if not libbpf_path:
-            # Final fallback: let the dynamic loader resolve the soname via its
-            # standard search (DT_RUNPATH, LD_LIBRARY_PATH, ldconfig cache).
-            libbpf_path = "libbpf.so.1"
+        # Locate libbpf by absolute path or soname, not find_library("bpf") which can shell out
+        # to gcc/ld resolved from $PATH. Common FHS paths first, then let the dynamic loader
+        # resolve the soname (DT_RUNPATH / LD_LIBRARY_PATH for nix / the ldconfig cache).
+        common_paths = [
+            "/usr/lib/x86_64-linux-gnu/libbpf.so.1",  # Debian/Ubuntu x86_64
+            "/usr/lib/aarch64-linux-gnu/libbpf.so.1",  # Debian/Ubuntu arm64
+            "/usr/lib64/libbpf.so.1",  # Fedora/RHEL x86_64
+            "/usr/lib/libbpf.so.1",  # Generic
+            "/lib/x86_64-linux-gnu/libbpf.so.1",  # Older Debian
+            "/lib64/libbpf.so.1",  # Older Fedora
+        ]
+        libbpf_path = next((p for p in common_paths if Path(p).exists()), "libbpf.so.1")
 
         try:
             self.lib = ctypes.CDLL(libbpf_path)

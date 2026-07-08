@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import collections
 import ctypes
-import ctypes.util
 import functools
 import ipaddress
 import multiprocessing
@@ -261,8 +260,9 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     EVERY_EXE: typing.Final[bool] = config.monitoring.every_exe
     PAGE_CNT: typing.Final[int] = config.monitoring.perf_ring_buffer_pages
     CONN_MAP_MAX: typing.Final[int] = config.monitoring.conn_map_max_entries
-    # fanotify (for watching executables for modification)
-    libc = ctypes.CDLL(ctypes.util.find_library("c"))
+    # fanotify (for watching executables for modification); CDLL(None) binds from the
+    # already-loaded libc, avoiding find_library's gcc/objdump $PATH fallback
+    libc = ctypes.CDLL(None)
     _FAN_MARK_ADD = 0x1
     _FAN_MARK_REMOVE = 0x2
     _FAN_MARK_FLUSH = 0x80

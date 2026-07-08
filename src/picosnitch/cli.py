@@ -7,6 +7,7 @@ import logging
 import multiprocessing
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -21,6 +22,11 @@ from picosnitch.ui.top import top_init
 from picosnitch.ui.tui import tui_init
 from picosnitch.ui.webui import web_dashboard
 from picosnitch.utils import apply_data_permissions, connect_db_readonly, load_state, relaunch_argv, safe_log_open, sqlite_error_means_corrupt
+
+
+def _systemctl() -> str:
+    """absolute path to systemctl (standard system dirs before $PATH); bare name if not found"""
+    return shutil.which("systemctl", path="/usr/bin:/bin:/usr/sbin:/sbin:" + os.environ.get("PATH", "")) or "systemctl"
 
 
 def check_root(cmd: str) -> int:
@@ -302,7 +308,7 @@ def start_picosnitch() -> int:
         Daemon(pid_file).status()
         if Path("/usr/lib/systemd/system/picosnitch.service").exists() or Path("/etc/systemd/system/picosnitch.service").exists():
             try:
-                r = subprocess.run(["systemctl", "is-active", "picosnitch"], capture_output=True, text=True, check=False)
+                r = subprocess.run([_systemctl(), "is-active", "picosnitch"], capture_output=True, text=True, check=False)
                 state = (r.stdout or r.stderr).strip() or "unknown"
             except FileNotFoundError:
                 state = "unknown (systemctl not found)"
@@ -314,7 +320,7 @@ def start_picosnitch() -> int:
         try:
             with open("/usr/lib/systemd/system/picosnitch.service", "w") as f:
                 f.write(systemd_service)
-            subprocess.run(["systemctl", "daemon-reload"])
+            subprocess.run([_systemctl(), "daemon-reload"])
         except (OSError, FileNotFoundError) as e:
             logging.error(f"could not install picosnitch.service (is this a systemd distro?): {e}")
             return 1
@@ -328,7 +334,7 @@ def start_picosnitch() -> int:
             try:
                 # "activating" counts too: a crash-looping unit (RestartSec backoff) still
                 # respawns anything Daemon.stop() kills, so defer to systemctl there as well
-                r = subprocess.run(["systemctl", "is-active", "picosnitch"], capture_output=True, text=True, check=False)
+                r = subprocess.run([_systemctl(), "is-active", "picosnitch"], capture_output=True, text=True, check=False)
                 active = r.stdout.strip() in ("active", "activating", "reloading")
             except FileNotFoundError:
                 active = False
@@ -340,7 +346,7 @@ def start_picosnitch() -> int:
                     except EOFError:
                         confirm = ""
                     if not confirm.lower().startswith("n"):
-                        subprocess.run(["systemctl", "stop", "picosnitch"])
+                        subprocess.run([_systemctl(), "stop", "picosnitch"])
                         return 0
                 else:
                     logging.error("aborted; run `systemctl stop picosnitch` instead")
@@ -362,7 +368,7 @@ def start_picosnitch() -> int:
             if Path("/usr/lib/systemd/system/picosnitch.service").exists() or Path("/etc/systemd/system/picosnitch.service").exists():
                 try:
                     # "activating" counts too: a crash-looping unit would conflict just the same
-                    r = subprocess.run(["systemctl", "is-active", "picosnitch"], capture_output=True, text=True, check=False)
+                    r = subprocess.run([_systemctl(), "is-active", "picosnitch"], capture_output=True, text=True, check=False)
                     active = r.stdout.strip() in ("active", "activating", "reloading")
                 except FileNotFoundError:
                     active = False
@@ -374,7 +380,7 @@ def start_picosnitch() -> int:
                         except EOFError:
                             confirm = ""
                         if not confirm.lower().startswith("n"):
-                            subprocess.run(["systemctl", cmd, "picosnitch"])
+                            subprocess.run([_systemctl(), cmd, "picosnitch"])
                             return 0
                     else:
                         logging.error(f"aborted; run `systemctl {cmd} picosnitch` instead")
@@ -387,7 +393,7 @@ def start_picosnitch() -> int:
                         except EOFError:
                             confirm = ""
                         if confirm.lower().startswith("y"):
-                            subprocess.run(["systemctl", cmd, "picosnitch"])
+                            subprocess.run([_systemctl(), cmd, "picosnitch"])
                             return 0
         apply_data_permissions(CONFIG_DIR, DATA_DIR, LOG_DIR, CACHE_DIR)
         # log warnings/errors to the existing error.log so failures in the
