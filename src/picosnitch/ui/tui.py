@@ -903,7 +903,6 @@ def tui_loop(stdscr: curses.window) -> int:
                     view_stack.append(view_i)
                     filter_values.append(name)
                     filter_exclude.append("NOT " if add_filter_exclude else "")
-                    add_filter_exclude = False
                     break
             else:
                 row_attr = 0
@@ -954,6 +953,9 @@ def tui_loop(stdscr: curses.window) -> int:
         # ── filter follow-through (set on previous iter) ──────────
         if add_filter:
             add_filter = False
+            # clear here too: on an empty result list the row loop above never runs, so a
+            # stale exclude flag would otherwise turn the next plain filter into an exclude
+            add_filter_exclude = False
             update_query = True
             execute_query = True
             cursor = first_line

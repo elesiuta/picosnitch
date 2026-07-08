@@ -151,3 +151,23 @@ def test_chrome_handles_minimal_inputs() -> None:
         _run_in_pty(_chrome_tiny_screen)
     except OSError as e:
         pytest.skip(f"pty not available: {e}")
+
+
+def _chrome_ctrl_chars(stdscr: "curses.window") -> None:
+    """A control char in an attacker-influenced name (curses acts on \\r \\n \\t \\b as
+    cursor movement) must not overwrite or spoof another row -- it is neutralized to '?'."""
+    _chrome.init_colors()
+    _chrome._safe_addnstr(stdscr, 0, 0, "safe\r\nSPOOF\tx\bz", 40)
+    stdscr.refresh()
+    row0 = stdscr.instr(0, 0, 40)
+    row1 = stdscr.instr(1, 0, 40)
+    assert b"SPOOF" in row0  # stayed on the intended row
+    assert b"SPOOF" not in row1 and row1.strip() == b""  # the \n did not bleed onto row 1
+    assert b"\r" not in row0 and b"\t" not in row0  # controls replaced, not acted on
+
+
+def test_chrome_sanitizes_control_chars() -> None:
+    try:
+        _run_in_pty(_chrome_ctrl_chars)
+    except OSError as e:
+        pytest.skip(f"pty not available: {e}")

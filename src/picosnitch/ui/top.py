@@ -179,11 +179,10 @@ def _top_loop(stdscr, sub: LiveFeedSubscriber) -> int:
                     recent.appendleft(event)
                     new_events_this_tick += 1
                 key = (event.get("name", ""), event.get("exe", ""))
-                row = totals.setdefault(key, [0, 0, 0, time.time()])
+                row = totals.setdefault(key, [0, 0, 0])
                 row[0] += int(event.get("send", 0) or 0)
                 row[1] += int(event.get("recv", 0) or 0)
                 row[2] += 1
-                row[3] = time.time()
         except Exception:
             pass
 
@@ -238,7 +237,7 @@ def _top_loop(stdscr, sub: LiveFeedSubscriber) -> int:
                 sv_bot = min(len(ranked), summary_offset + totals_rows)
                 sum_indicator = f"  [{sv_top}-{sv_bot} / {len(ranked)}]"
             _chrome._safe_addnstr(stdscr, 1, 0, (col_hdr + sum_indicator).ljust(max_x), max_x - 1, curses.A_UNDERLINE)
-            for i, ((name, exe), (s, r, c, _ts)) in enumerate(ranked[summary_offset : summary_offset + totals_rows]):
+            for i, ((name, exe), (s, r, c)) in enumerate(ranked[summary_offset : summary_offset + totals_rows]):
                 ports = listening.get(exe)
                 ports_s = ",".join(str(p) for p in sorted(ports)) if ports else ""
                 line = f" {exe[:40]:<40} {name[:16]:<16} {c:>7d} {_format_bytes(int(s)):>7} {_format_bytes(int(r)):>7} {ports_s}"

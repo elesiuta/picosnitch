@@ -46,12 +46,20 @@ def init_colors() -> None:
             pass
 
 
+# curses addch acts on \t \n \r \b etc. as cursor movement, so a control char in an
+# attacker-influenced process name/domain could overwrite or spoof other cells; map every
+# C0 control and DEL to '?' (kept visible, not stripped, so a tampered name can't impersonate
+# a benign one by collapsing to it)
+_CTRL_TABLE = {c: "?" for c in [*range(0x20), 0x7F]}
+
+
 def _safe_addnstr(win: "curses.window", y: int, x: int, s: str, n: int, attr: int = 0) -> None:
-    """addnstr that never raises (e.g. drawing on the bottom-right cell)."""
+    """addnstr that never raises (e.g. drawing on the bottom-right cell) and never lets a
+    control character in `s` move the cursor to forge another row."""
     if n <= 0:
         return
     try:
-        win.addnstr(y, x, s, n, attr)
+        win.addnstr(y, x, s.translate(_CTRL_TABLE), n, attr)
     except curses.error:
         pass
 
