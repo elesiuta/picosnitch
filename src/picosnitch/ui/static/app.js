@@ -624,7 +624,7 @@ function renderOverviewTable() {
   Object.keys(totals).forEach((k) => {
     const tr = document.createElement("tr");
     const t1 = document.createElement("td"); t1.textContent = shortenLabel(k, 60);
-    const t2 = document.createElement("td"); t2.className = "right"; t2.textContent = "—";
+    const t2 = document.createElement("td"); t2.className = "right"; t2.textContent = fmtInt(totals[k].connections || 0);
     const t3 = document.createElement("td"); t3.className = "right"; t3.textContent = fmtBytes(totals[k].send);
     const t4 = document.createElement("td"); t4.className = "right"; t4.textContent = fmtBytes(totals[k].recv);
     tr.appendChild(t1); tr.appendChild(t2); tr.appendChild(t3); tr.appendChild(t4);
@@ -966,8 +966,6 @@ function liveBuildRow(event, ts) {
   // ts: ms since epoch when the event was received
   const tr = document.createElement("tr");
   tr.classList.add("live-row");
-  // raw event payload; the filter re-evaluates this row when the box changes
-  tr.dataset.event = JSON.stringify(event);
   const remote = (event.domain || event.raddr || "") + (event.rport && event.rport > 0 ? ":" + event.rport : "");
   const cells = [
     [new Date(ts).toLocaleTimeString(), false],

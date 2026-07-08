@@ -108,9 +108,10 @@ def _resolve_window(qs: dict) -> tuple[int, int, str]:
     raw_to = qs.get("to", [""])[0]
     if raw_from or raw_to:
         try:
+            # OverflowError: int(float("inf")); ValueError: int(float("nan"))/non-numeric
             since = int(float(raw_from)) if raw_from else 0
             until = int(float(raw_to)) if raw_to else now
-        except ValueError:
+        except (ValueError, OverflowError):
             since, until = 0, now
         if since < 0:
             since = 0
@@ -151,7 +152,7 @@ def _query_aggregate(dim: str, since: int, until: int, label: str, where: str | 
     bucket = max(1, seconds // 300) if seconds else 3600
     dim_col = _DIM_SQL[dim]
     bucket_expr = f"(c.contime / {bucket}) * {bucket}"
-    sql = f"SELECT {dim_col} AS d, {bucket_expr} AS t, SUM(c.send) AS s, SUM(c.recv) AS r FROM {_FROM_CLAUSE}{where_sql} GROUP BY d, t ORDER BY t"
+    sql = f"SELECT {dim_col} AS d, {bucket_expr} AS t, SUM(c.send) AS s, SUM(c.recv) AS r, COUNT(*) AS n FROM {_FROM_CLAUSE}{where_sql} GROUP BY d, t ORDER BY t"
 
     con = connect_db_readonly(_DB_PATH)
     try:
@@ -161,15 +162,16 @@ def _query_aggregate(dim: str, since: int, until: int, label: str, where: str | 
 
     series: dict = {}
     totals: dict = {}
-    for d, t, s, r in rows:
+    for d, t, s, r, n in rows:
         key = "" if d is None else str(d)
         bucket_arr = series.setdefault(key, {"t": [], "s": [], "r": []})
         bucket_arr["t"].append(int(t))
         bucket_arr["s"].append(int(s or 0))
         bucket_arr["r"].append(int(r or 0))
-        tot = totals.setdefault(key, [0, 0])
+        tot = totals.setdefault(key, [0, 0, 0])
         tot[0] += int(s or 0)
         tot[1] += int(r or 0)
+        tot[2] += int(n or 0)
 
     # rank by total (send + recv) descending and trim to limit
     ranked = sorted(totals.items(), key=lambda kv: kv[1][0] + kv[1][1], reverse=True)[:limit]
@@ -184,7 +186,7 @@ def _query_aggregate(dim: str, since: int, until: int, label: str, where: str | 
         "range": label,
         "range_seconds": seconds,
         "series": {k: series[k] for k in keys if k in series},
-        "totals": {k: {"send": v[0], "recv": v[1]} for k, v in ranked},
+        "totals": {k: {"send": v[0], "recv": v[1], "connections": v[2]} for k, v in ranked},
     }
 
 
@@ -403,8 +405,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         ctype = ctypes_by_name[name]
         self._send(200, data, ctype)
 
+    def _host_allowed(self) -> bool:
+        """reject a request whose Host header isn't a loopback name (DNS-rebinding guard).
+        only enforced on a loopback bind; a missing Host is a non-browser client (rebinding
+        always carries the attacker's Host, which browsers set and page JS cannot override)."""
+        if not getattr(self.server, "loopback_only", False):
+            return True
+        host_header = self.headers.get("Host", "")
+        if not host_header:
+            return True
+        return host_header.lower() in getattr(self.server, "allowed_hosts", frozenset())
+
     def do_GET(self) -> None:
         try:
+            if not self._host_allowed():
+                self._send(403, b"forbidden: Host header not allowed", "text/plain")
+                return
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
             qs = urllib.parse.parse_qs(parsed.query)
@@ -483,7 +499,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 except ValueError:
                     limit = 1000
                 limit = max(1, min(5000, limit))
-                self._send_json(200, _query_aggregate(dim, since, until, label, where, whereis, limit))
+                try:
+                    self._send_json(200, _query_aggregate(dim, since, until, label, where, whereis, limit))
+                except ValueError as e:
+                    # unknown dim: 400 JSON, matching /api/drilldown (not a 500)
+                    self._send_json(400, {"error": str(e)})
                 return
             if path == "/api/distinct":
                 dim = (qs.get("dim", ["exe"])[0]).strip()
@@ -555,13 +575,23 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
 
             self._send(404, b"not found", "text/plain")
+        except (BrokenPipeError, ConnectionResetError):
+            # client hung up mid-response; nothing left to send
+            return
         except Exception as e:
-            self._send(500, f"error: {type(e).__name__}: {e}".encode("utf-8"), "text/plain")
+            # best-effort 500; swallow a secondary failure if the response already started
+            try:
+                self._send(500, f"error: {type(e).__name__}: {e}".encode("utf-8"), "text/plain")
+            except OSError:
+                pass
 
 
 class _ThreadingServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    # set in web_dashboard(): reject non-allowlisted Host headers on a loopback bind
+    loopback_only = False
+    allowed_hosts: frozenset[str] = frozenset()
 
 
 def web_dashboard() -> int:
@@ -570,15 +600,29 @@ def web_dashboard() -> int:
     try:
         port = int(os.getenv("PICOSNITCH_PORT", "5100"))
     except ValueError:
+        logging.warning(f"invalid PICOSNITCH_PORT {os.getenv('PICOSNITCH_PORT')!r}, using 5100")
         port = 5100
     try:
-        addr = ipaddress.ip_address(host)
-        if not addr.is_loopback:
-            logging.warning(f"web dashboard binding to non-loopback address {host} - dashboard has no authentication")
+        loopback_only = ipaddress.ip_address(host).is_loopback
     except ValueError:
-        if host != "localhost":
-            logging.warning(f"web dashboard binding to {host} - dashboard has no authentication")
-    server = _ThreadingServer((host, port), _Handler)
+        # not an IP literal; "localhost" resolves to loopback, a custom hostname is the user's call
+        loopback_only = host == "localhost"
+    if not loopback_only:
+        logging.warning(f"web dashboard binding to {host} - dashboard has no authentication")
+    try:
+        server = _ThreadingServer((host, port), _Handler)
+    except OSError as e:
+        logging.error(f"could not start web dashboard on {host}:{port}: {e}")
+        return 1
+    # on a loopback bind, only accept requests whose Host is a loopback name, so a remote
+    # page can't reach the dashboard via DNS rebinding (the victim's browser always sends
+    # the attacker's Host); a non-loopback bind already warned it has no auth
+    server.loopback_only = loopback_only
+    allowed = set()
+    for h in ("localhost", "127.0.0.1", "::1", "[::1]", host):
+        allowed.add(h.lower())
+        allowed.add(f"{h}:{port}".lower())
+    server.allowed_hosts = frozenset(allowed)
     logging.info(f"picosnitch web UI on http://{host}:{port}")
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
