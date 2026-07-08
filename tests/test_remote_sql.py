@@ -10,8 +10,17 @@ import sqlite3
 import pytest
 
 from picosnitch.cli import check_remote_config
-from picosnitch.constants import SCHEMA_ADDRESSES, SCHEMA_CONNECTIONS, SCHEMA_DOMAINS, SCHEMA_EXECUTABLES
-from picosnitch.subprocesses.remote_sql import insert_entries, remote_dialect
+from picosnitch.constants import SCHEMA_ADDRESSES, SCHEMA_CONNECTIONS, SCHEMA_DOMAINS
+from picosnitch.subprocesses.remote_sql import executables_key_hash, insert_entries, remote_dialect
+
+# remote executables shape: dedup is on key_hash, not the unbounded TEXT columns
+SCHEMA_REMOTE_EXECUTABLES = """
+    id INTEGER PRIMARY KEY,
+    exe TEXT NOT NULL,
+    name TEXT NOT NULL,
+    cmdline TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE"""
 
 
 def test_check_remote_config_fails_loudly(monkeypatch):
@@ -80,7 +89,7 @@ def test_insert_entries_resolves_ids(is_postgres, ph):
     Runs for each dialect/paramstyle shape (pymysql, mariadb, psycopg). send/recv
     and netns carry values past 2**31 to exercise the BIGINT columns."""
     con = sqlite3.connect(":memory:")
-    con.execute(f"CREATE TABLE executables ({SCHEMA_EXECUTABLES})")
+    con.execute(f"CREATE TABLE executables ({SCHEMA_REMOTE_EXECUTABLES})")
     con.execute(f"CREATE TABLE domains ({SCHEMA_DOMAINS})")
     con.execute(f"CREATE TABLE addresses ({SCHEMA_ADDRESSES})")
     con.execute(f"CREATE TABLE connections ({SCHEMA_CONNECTIONS})")
@@ -105,3 +114,33 @@ def test_insert_entries_resolves_ids(is_postgres, ph):
         (1000, 5_000_000_000, 6_000_000_000, 4026531840, "curl", "bash", "93.184.216.34", "example.com"),
         (1005, 10, 20, 4026531840, "curl", "bash", "93.184.216.34", "example.com"),
     ]
+
+
+def test_insert_entries_dedups_on_key_hash():
+    """id resolution must key on key_hash, never the raw TEXT columns: MySQL unique
+    prefix indexes dedup on 191-char prefixes (full-value SELECT then finds no row ->
+    entry lost), Postgres btree rejects index rows > 2704 bytes (verified live on both).
+    Long cmdlines and >191-char shared prefixes must yield distinct interned rows."""
+    con = sqlite3.connect(":memory:")
+    con.execute(f"CREATE TABLE executables ({SCHEMA_REMOTE_EXECUTABLES})")
+    con.execute(f"CREATE TABLE domains ({SCHEMA_DOMAINS})")
+    con.execute(f"CREATE TABLE addresses ({SCHEMA_ADDRESSES})")
+    con.execute(f"CREATE TABLE connections ({SCHEMA_CONNECTIONS})")
+    chrome = ("/usr/bin/chrome", "chrome", "/usr/bin/chrome " + "-" * 4000, "a" * 64)  # > postgres 2704B index cap
+    twin_a = ("/usr/bin/python3", "python3", "python3 " + "x" * 200 + "a", "b" * 64)  # shared 191-char prefix
+    twin_b = ("/usr/bin/python3", "python3", "python3 " + "x" * 200 + "b", "b" * 64)
+    entry = lambda key: (1000, 1, 2, 1, key, key, key, 1000, 2, 6, 1, 443, "10.0.0.1", "1.2.3.4", "", 0)  # noqa: E731
+    insert_entries(FakeCon(con), "connections", [entry(chrome), entry(twin_a), entry(twin_b)], False, "%s")
+    insert_entries(FakeCon(con), "connections", [entry(twin_a)], False, "%s")  # re-insert dedups
+    assert con.execute("SELECT COUNT(*) FROM executables").fetchone()[0] == 3
+    stored = dict(con.execute("SELECT key_hash, cmdline FROM executables").fetchall())
+    assert stored == {executables_key_hash(k): k[2] for k in (chrome, twin_a, twin_b)}
+
+
+def test_key_hash_injective_over_separator():
+    """the key must stay injective even when a field contains the 0x1f separator byte (real exe
+    paths / cmdlines can): tuples that a plain delimiter-join would conflate must hash distinctly."""
+    # a delimiter-join would map both of these to "A\x1fB\x1fC\x1fD" and collapse them into one row
+    a = ("A", "B", "C\x1fD", "e" * 64)
+    b = ("A", "B\x1fC", "D", "e" * 64)
+    assert executables_key_hash(a) != executables_key_hash(b)

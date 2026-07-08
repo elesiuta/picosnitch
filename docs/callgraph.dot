@@ -204,6 +204,7 @@ digraph G {
 
             graph [style="filled,rounded", fillcolor="#80808018", label="picosnitch.subprocesses.remote_sql"];
             "picosnitch__subprocesses__remote_sql__create_tables" [label="create_tables", style="filled", fillcolor="#65e0ffb2", fontcolor="#000000", group="8"];
+            "picosnitch__subprocesses__remote_sql__executables_key_hash" [label="executables_key_hash", style="filled", fillcolor="#65e0ffb2", fontcolor="#000000", group="8"];
             "picosnitch__subprocesses__remote_sql__insert_entries" [label="insert_entries", style="filled", fillcolor="#65e0ffb2", fontcolor="#000000", group="8"];
             "picosnitch__subprocesses__remote_sql__remote_dialect" [label="remote_dialect", style="filled", fillcolor="#65e0ffb2", fontcolor="#000000", group="8"];
             "picosnitch__subprocesses__remote_sql__run_remote_sql" [label="run_remote_sql", style="filled", fillcolor="#65e0ffb2", fontcolor="#000000", group="8"];
@@ -651,9 +652,11 @@ digraph G {
         "picosnitch__subprocesses__primary__run_primary__save_state_and_exit" -> "picosnitch__subprocesses__primary__run_primary___drain_errors" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__primary__run_primary__save_state_and_exit" -> "picosnitch__utils__save_state" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__remote_sql" -> "picosnitch__subprocesses__remote_sql__create_tables" [style="dashed",  color="#ffffff00"];
+        "picosnitch__subprocesses__remote_sql" -> "picosnitch__subprocesses__remote_sql__executables_key_hash" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__remote_sql" -> "picosnitch__subprocesses__remote_sql__insert_entries" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__remote_sql" -> "picosnitch__subprocesses__remote_sql__remote_dialect" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__remote_sql" -> "picosnitch__subprocesses__remote_sql__run_remote_sql" [style="dashed",  color="#ffffff00"];
+        "picosnitch__subprocesses__remote_sql__insert_entries" -> "picosnitch__subprocesses__remote_sql__executables_key_hash" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__remote_sql__run_remote_sql" -> "picosnitch__subprocesses__remote_sql__create_tables" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__remote_sql__run_remote_sql" -> "picosnitch__subprocesses__remote_sql__insert_entries" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__remote_sql__run_remote_sql" -> "picosnitch__subprocesses__remote_sql__remote_dialect" [style="solid",  color="#000000"];
