@@ -216,7 +216,7 @@ def load_config(config_dir: Path = CONFIG_DIR) -> Config:
         config.data.group = "root"
     try:
         mode = int(config.data.mode, 8)
-        if not 0 <= mode <= 0o777:
+        if not 0 <= mode <= 0o7777:
             raise ValueError
     except ValueError:
         logging.warning(f"config.data.mode: {config.data.mode!r} is not an octal mode, using '0644'")
