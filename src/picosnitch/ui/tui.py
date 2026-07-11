@@ -17,6 +17,8 @@ import sqlite3
 import sys
 import threading
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 
 from picosnitch.config import load_config
@@ -24,6 +26,9 @@ from picosnitch.constants import CACHE_DIR, DATA_DIR, DB_VERSION, RUN_DIR, VERSI
 from picosnitch.live_feed import EVENTS_SOCKET_PATH, LiveFeedSubscriber
 from picosnitch.ui import _chrome, _keys
 from picosnitch.utils import connect_db_readonly
+
+_GEOIP_DOWNLOAD_LIMIT = 64 * 1024 * 1024
+
 
 # ── sidebar layout ────────────────────────────────────────────────────
 # (section_label, [(item_label, sql_column), ...]) -- the selected
@@ -165,7 +170,12 @@ def init_geoip():
                 try:
                     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
                     with urllib.request.urlopen(req, timeout=30) as resp, open(cache_path, "wb") as f:
-                        f.write(resp.read())
+                        downloaded = 0
+                        while chunk := resp.read(1024 * 1024):
+                            downloaded += len(chunk)
+                            if downloaded > _GEOIP_DOWNLOAD_LIMIT:  # bound the fetch so a bad/huge response can't fill the disk
+                                raise ValueError("GeoIP download is too large")
+                            f.write(chunk)
                     last_err = None
                     break
                 except Exception as exc:
@@ -963,8 +973,6 @@ def tui_loop(stdscr: curses.window) -> int:
 
         # ── input ─────────────────────────────────────────────────
         if running_query:
-            if not thread_query.is_alive():
-                running_query = False
             stdscr.nodelay(True)
             new_results = False
             while True:
@@ -975,10 +983,16 @@ def tui_loop(stdscr: curses.window) -> int:
                     ch = stdscr.getch()
                     if ch != -1:
                         break
-                    if new_results:
-                        sum_send = sum(b for _, b, _ in current_screen)
-                        sum_recv = sum(b for _, _, b in current_screen)
+                    # break to redraw when a batch arrived; also stop when the producer is done, so
+                    # a zero-row query doesn't busy-spin here until a keypress (queue.Queue has no
+                    # put/get lag, so !is_alive() means every batch is already drained)
+                    if new_results or not thread_query.is_alive():
                         break
+            running_query = thread_query.is_alive()
+            # recompute after the loop, not per-break, so a keypress mid-stream can't leave stale totals
+            if new_results:
+                sum_send = sum(b for _, b, _ in current_screen)
+                sum_recv = sum(b for _, _, b in current_screen)
             stdscr.nodelay(False)
         else:
             ch = stdscr.getch()

@@ -117,6 +117,10 @@ def _resolve_window(qs: dict) -> tuple[int, int, str]:
             since = 0
         if until <= 0:
             until = now
+        # clamp to sqlite's signed-64-bit INTEGER range: a finite-but-huge value (e.g. from=1e300)
+        # parses fine here but overflows at the query bind, 500ing instead of falling back
+        since = min(since, 2**63 - 1)
+        until = min(until, 2**63 - 1)
         if since and until and since > until:
             since, until = until, since
         label = f"{since}-{until}"
@@ -523,9 +527,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-store")
-                self.send_header("Connection", "keep-alive")
                 self.send_header("X-Accel-Buffering", "no")
                 self.end_headers()
+                # when the stream ends (daemon restart closes the feed) do_GET returns; close the
+                # connection so the browser's EventSource reconnects instead of parking this handler
+                # thread on a blocking read forever (the request's own keep-alive would suppress that)
+                self.close_connection = True
                 sub = LiveFeedSubscriber(timeout=2.0)
                 try:
                     sub.connect()
@@ -599,27 +606,31 @@ def web_dashboard() -> int:
     host = os.getenv("PICOSNITCH_HOST", "localhost")
     try:
         port = int(os.getenv("PICOSNITCH_PORT", "5100"))
+        if not 0 <= port <= 65535:  # else socket.bind raises OverflowError, past the OSError catch below
+            raise ValueError("port out of range")
     except ValueError:
         logging.warning(f"invalid PICOSNITCH_PORT {os.getenv('PICOSNITCH_PORT')!r}, using 5100")
         port = 5100
-    try:
-        loopback_only = ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        # not an IP literal; "localhost" resolves to loopback, a custom hostname is the user's call
-        loopback_only = host == "localhost"
-    if not loopback_only:
-        logging.warning(f"web dashboard binding to {host} - dashboard has no authentication")
     try:
         server = _ThreadingServer((host, port), _Handler)
     except OSError as e:
         logging.error(f"could not start web dashboard on {host}:{port}: {e}")
         return 1
+    bound_host_raw = server.server_address[0]
+    bound_host = bytes(bound_host_raw).decode() if isinstance(bound_host_raw, (bytes, bytearray)) else bound_host_raw
+    port = int(server.server_address[1])
+    try:
+        loopback_only = ipaddress.ip_address(bound_host).is_loopback
+    except ValueError:
+        loopback_only = False
+    if not loopback_only:
+        logging.warning(f"web dashboard binding to {host} - dashboard has no authentication")
     # on a loopback bind, only accept requests whose Host is a loopback name, so a remote
     # page can't reach the dashboard via DNS rebinding (the victim's browser always sends
     # the attacker's Host); a non-loopback bind already warned it has no auth
     server.loopback_only = loopback_only
     allowed = set()
-    for h in ("localhost", "127.0.0.1", "::1", "[::1]", host):
+    for h in ("localhost", "127.0.0.1", "::1", "[::1]", host, bound_host):
         allowed.add(h.lower())
         allowed.add(f"{h}:{port}".lower())
     server.allowed_hosts = frozenset(allowed)

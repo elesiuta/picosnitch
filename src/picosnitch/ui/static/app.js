@@ -111,12 +111,15 @@ function fmtNetns(inode) {
 }
 function shortenLabel(s, max) {
   if (s === null || s === undefined || s === "") return "(none)";
-  s = String(s);
+  s = safeText(s);
   if (s.length <= max) return s;
   return s.slice(0, max / 2 | 0) + "…" + s.slice(-(max / 2 | 0));
 }
+function safeText(s) {
+  return String(s).replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ud800-\udfff\ufeff]/gu,"�");
+}
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({
+  return safeText(s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   }[c]));
 }
