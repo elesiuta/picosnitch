@@ -2,12 +2,12 @@
 # Copyright (C) 2020 Eric Lesiuta
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib
 import multiprocessing
 import os
 import pickle
-import pwd
 import queue
 import re
 
@@ -30,9 +30,8 @@ def executables_key_hash(exe_key: tuple) -> str:
     uniqueness on the raw TEXT columns fails for real cmdlines: MySQL unique
     prefix indexes dedup on the first 191 chars (id lookup then finds no row),
     Postgres btree rejects index rows > 2704 bytes (whole batch lost)"""
-    # length-prefix each field so the digest is injective even when a field itself contains the
-    # 0x1f separator (real exe paths / cmdlines can): distinct tuples never collide onto one row
-    return hashlib.sha256("".join(f"{len(f)}\x1f{f}" for f in exe_key).encode("utf-8", "replace")).hexdigest()
+    # Length prefixes keep field boundaries unambiguous before hashing.
+    return hashlib.sha256("".join(f"{len(f)}\x1f{f}" for f in exe_key).encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def create_tables(con, conn_table: str, is_postgres: bool) -> None:
@@ -59,15 +58,15 @@ def create_tables(con, conn_table: str, is_postgres: bool) -> None:
     cur.execute(f"CREATE TABLE IF NOT EXISTS addresses ({addr_schema})")
     cur.execute(f"CREATE TABLE IF NOT EXISTS {conn_table} ({conn_schema})")
     con.commit()
-    # CREATE TABLE IF NOT EXISTS leaves a pre-key_hash executables table (from an older
-    # picosnitch) untouched; fail loudly with the remedy instead of spamming opaque "unknown
-    # column key_hash" errors on every batch while silently dropping all remote inserts
+    # CREATE TABLE IF NOT EXISTS won't migrate an existing remote 'executables' table from an
+    # older schema; probe for the current schema and fail loudly with the drop-and-recreate remedy
+    # instead of spamming opaque errors every batch while silently dropping all remote inserts
     try:
         cur.execute("SELECT key_hash FROM executables LIMIT 0")
         cur.fetchall()
     except Exception as e:
         raise RuntimeError(
-            "remote 'executables' table predates the key_hash schema; drop the old remote tables (executables, domains, addresses, and the connections table) so picosnitch can recreate them"
+            "remote 'executables' table has an outdated schema; drop the old remote tables (executables, domains, addresses, and the connections table) so picosnitch can recreate them"
         ) from e
 
 
@@ -115,22 +114,16 @@ def run_remote_sql(config: Config, fan_fd: int, q_error: multiprocessing.Queue[s
     parent_process = multiprocessing.parent_process()
     assert parent_process is not None
     # drop root (desktop.user, or nobody) before importing or running any third-party code
-    from ..utils import drop_root_permanent, resolve_group, resolve_owner
+    from ..utils import drop_root_permanent, resolve_unprivileged_user
 
-    if config.desktop.user:
-        uid, gid = resolve_owner(config.desktop.user), resolve_group(config.desktop.user)
-    else:
-        try:
-            uid, gid = pwd.getpwnam("nobody").pw_uid, pwd.getpwnam("nobody").pw_gid
-        except KeyError:
-            uid, gid = 65534, 65534
-    drop_root_permanent(uid, gid)
-    # fan_fd is inherited via fork() but never used here; close it so a privileged
-    # fanotify handle doesn't leak into a dropped-privilege security domain
+    # close the privileged fanotify handle before dropping: never used here, must not persist into
+    # the dropped-privilege domain
     try:
         os.close(fan_fd)
     except OSError:
         pass
+    uid, gid = resolve_unprivileged_user(config.desktop.user)
+    drop_root_permanent(uid, gid)
     # config was validated loudly by check_remote_config at start; revalidate before use
     # (defense in depth) but only report and idle, never crash-loop the daemon
     sql = None
@@ -161,12 +154,12 @@ def run_remote_sql(config: Config, fan_fd: int, q_error: multiprocessing.Queue[s
             entries = pickle.loads(q_in.get(block=True, timeout=15))
             if sql is None:
                 continue
-            con = sql.connect(**sql_kwargs)
-            if not tables_ready:
-                create_tables(con, conn_table, is_postgres)
-                tables_ready = True
-            insert_entries(con, conn_table, entries, is_postgres, ph)
-            con.close()
+            # closing() so a create_tables/insert_entries error doesn't leak the driver socket
+            with contextlib.closing(sql.connect(**sql_kwargs)) as con:
+                if not tables_ready:
+                    create_tables(con, conn_table, is_postgres)
+                    tables_ready = True
+                insert_entries(con, conn_table, entries, is_postgres, ph)
         except queue.Empty:
             pass
         except Exception as e:

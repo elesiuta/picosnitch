@@ -32,7 +32,7 @@ def _set_desktop_session_env(uid: int) -> None:
 def _send_notification(msg: str) -> subprocess.CompletedProcess:
     """fire-and-forget desktop notification via libnotify's notify-send"""
     return subprocess.run(
-        ["notify-send", "--app-name=picosnitch", "--expire-time=2000", "picosnitch", msg],
+        ["notify-send", "--app-name=picosnitch", "--expire-time=2000", "--", "picosnitch", msg],
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -53,28 +53,18 @@ def run_notifications(config: Config, fan_fd: int, q_error: multiprocessing.Queu
       q_error per distinct stderr signature."""
     parent_process = multiprocessing.parent_process()
     assert parent_process is not None
-    from ..utils import drop_root_permanent, resolve_group, resolve_owner
+    from ..utils import drop_root_permanent, resolve_unprivileged_user
 
-    if config.desktop.user:
-        uid = resolve_owner(config.desktop.user)
-        gid = resolve_group(config.desktop.user)
-        drop_root_permanent(uid, gid)
-        _set_desktop_session_env(uid)
-    else:
-        # no desktop user (e.g. systemd, no SUDO_UID): can't reach a session bus anyway, so drop
-        # to nobody rather than run notify-send with root privileges (matches run_remote_sql)
-        try:
-            uid, gid = pwd.getpwnam("nobody").pw_uid, pwd.getpwnam("nobody").pw_gid
-        except KeyError:
-            uid, gid = 65534, 65534
-        drop_root_permanent(uid, gid)
-    # fan_fd is inherited via fork() but this subprocess never uses it;
-    # closing it prevents leaking a privileged fanotify handle into a
-    # dropped-privilege security domain.
+    # close the privileged fanotify handle before dropping: never used here, must not persist into
+    # the dropped-privilege domain
     try:
         os.close(fan_fd)
     except OSError:
         pass
+    uid, gid = resolve_unprivileged_user(config.desktop.user)
+    drop_root_permanent(uid, gid)
+    if config.desktop.user:
+        _set_desktop_session_env(uid)
     notifications_enabled = bool(config.desktop.notifications)
     last_notification = ""
     notify_send_missing_reported = False

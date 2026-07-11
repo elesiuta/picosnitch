@@ -10,67 +10,106 @@ import pickle
 import queue
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
 from picosnitch.config import Config
 from picosnitch.utils import get_fstat
 
+VT_UPLOAD_MAX_BYTES = 32 * 1024 * 1024
+VT_JSON_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _validate_url(url: str) -> None:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or parsed.hostname != "www.virustotal.com":
+        raise ValueError(f"unexpected VirusTotal URL: {url}")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, "VirusTotal redirect refused", headers, fp)
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def _read_json(resp) -> dict:
+    data = resp.read(VT_JSON_MAX_BYTES + 1)
+    if len(data) > VT_JSON_MAX_BYTES:
+        raise ValueError("VirusTotal JSON response is too large")
+    return json.loads(data.decode("utf-8", "replace"))
+
 
 def _http_get_json(url: str, headers: dict, timeout: int = 60) -> dict:
+    _validate_url(url)
     req = urllib.request.Request(url, headers=headers, method="GET")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - VirusTotal API only
-        return json.loads(resp.read().decode("utf-8", "replace"))
+    with _OPENER.open(req, timeout=timeout) as resp:
+        return _read_json(resp)
 
 
-def _http_post_multipart_file_json(url: str, headers: dict, file_obj, filename: str, timeout: int = 300) -> dict:
+def _http_post_multipart_file_json(url: str, headers: dict, file_obj, filename: str, expected_sha256: str = "", timeout: int = 300) -> dict:
     """POST a single file as multipart/form-data with field name 'file'.
 
     Streams the file in 64K chunks built into a single bytes payload (VT
     file uploads are bounded by their API limits anyway, so a single
     bytes blob is acceptable and avoids needing chunked transfer).
     """
+    _validate_url(url)
     boundary = uuid.uuid4().hex
     crlf = b"\r\n"
-    head = (
-        f"--{boundary}{crlf.decode()}"
-        f'Content-Disposition: form-data; name="file"; filename="{os.path.basename(filename)}"{crlf.decode()}'
-        f"Content-Type: application/octet-stream{crlf.decode()}{crlf.decode()}"
-    ).encode("utf-8")
-    tail = f"{crlf.decode()}--{boundary}--{crlf.decode()}".encode("utf-8")
+    safe_filename = os.path.basename(filename).replace("\\", "_").replace('"', "_").replace("\r", "_").replace("\n", "_")
+    head = crlf.join(
+        (
+            f"--{boundary}".encode(),
+            f'Content-Disposition: form-data; name="file"; filename="{safe_filename}"'.encode(),
+            b"Content-Type: application/octet-stream",
+            b"",
+            b"",
+        )
+    )
+    tail = crlf + f"--{boundary}--".encode() + crlf
     body_chunks = [head]
+    size = 0
+    digest = hashlib.sha256()
     while True:
         chunk = file_obj.read(65536)
         if not chunk:
             break
+        size += len(chunk)
+        if size > VT_UPLOAD_MAX_BYTES:
+            raise ValueError("VirusTotal direct uploads are limited to 32 MiB")
+        digest.update(chunk)
         body_chunks.append(chunk)
+    if expected_sha256 and digest.hexdigest() != expected_sha256:
+        raise ValueError("VirusTotal upload hash mismatch")
     body_chunks.append(tail)
     body = b"".join(body_chunks)
     post_headers = dict(headers)
     post_headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
     post_headers["Content-Length"] = str(len(body))
     req = urllib.request.Request(url, data=body, headers=post_headers, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - VirusTotal API only
-        return json.loads(resp.read().decode("utf-8", "replace"))
+    with _OPENER.open(req, timeout=timeout) as resp:
+        return _read_json(resp)
 
 
 def run_virustotal(config: Config, fan_fd: int, q_error: multiprocessing.Queue[str], q_vt_pending: multiprocessing.Queue[bytes], q_vt_results: multiprocessing.Queue[bytes]) -> int:
     """get virustotal results of process executable"""
     parent_process = multiprocessing.parent_process()
     assert parent_process is not None
-    if config.desktop.user:
-        from ..utils import drop_root_permanent, resolve_group, resolve_owner
+    from ..utils import drop_root_permanent, resolve_unprivileged_user
 
-        uid = resolve_owner(config.desktop.user)
-        gid = resolve_group(config.desktop.user)
-        drop_root_permanent(uid, gid)
-    # fan_fd is inherited via fork() but this subprocess never uses it;
-    # closing it prevents leaking a privileged fanotify handle into a
-    # dropped-privilege security domain.
+    # close the privileged fanotify handle before dropping: never used here, must not persist into
+    # the dropped-privilege domain
     try:
         os.close(fan_fd)
     except OSError:
         pass
+    # always drop root: this subprocess makes HTTPS requests and parses JSON, which must not run as
+    # root even when [desktop].user is unset (matches run_remote_sql / run_notifications)
+    uid, gid = resolve_unprivileged_user(config.desktop.user)
+    drop_root_permanent(uid, gid)
     request_limit = config.virustotal.request_limit_seconds if config.virustotal.api_key else 0
     headers = {"x-apikey": config.virustotal.api_key} if config.virustotal.api_key else {}
 
@@ -110,18 +149,12 @@ def run_virustotal(config: Config, fan_fd: int, q_error: multiprocessing.Queue[s
                             with open(proc["fd"], "rb") as f:
                                 if (proc["dev"], proc["ino"]) != get_fstat(f.fileno()):
                                     raise ValueError("file stat mismatch")
-                                analysis_id = _http_post_multipart_file_json("https://www.virustotal.com/api/v3/files", headers, f, proc["exe"])
+                                analysis_id = _http_post_multipart_file_json("https://www.virustotal.com/api/v3/files", headers, f, proc["exe"], sha256)
                             analysis = get_analysis(analysis_id, sha256)
                         except Exception:
                             try:
-                                readlink_exe_sha256 = hashlib.sha256()
                                 with open(proc["exe"], "rb") as f:
-                                    while data := f.read(1048576):
-                                        readlink_exe_sha256.update(data)
-                                if readlink_exe_sha256.hexdigest() != sha256:
-                                    raise ValueError("sha256 mismatch")
-                                with open(proc["exe"], "rb") as f:
-                                    analysis_id = _http_post_multipart_file_json("https://www.virustotal.com/api/v3/files", headers, f, proc["exe"])
+                                    analysis_id = _http_post_multipart_file_json("https://www.virustotal.com/api/v3/files", headers, f, proc["exe"], sha256)
                                 analysis = get_analysis(analysis_id, sha256)
                             except Exception:
                                 q_vt_results.put(pickle.dumps((proc, sha256, "Failed to read process for upload", suspicious)))

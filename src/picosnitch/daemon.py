@@ -150,10 +150,11 @@ class Daemon:
             else:
                 logging.error(f"picosnitch (pid {pid}) did not exit within 60s of SIGTERM")
                 return False
+        except ProcessLookupError:
+            pass  # raced: the process exited between the _pid_is_picosnitch check and os.kill
         except OSError as err:
-            if "No such process" not in str(err.args):
-                logging.error(f"{err.args}")
-                sys.exit(1)
+            logging.error(f"{err.args}")
+            sys.exit(1)
         self.pidfile.unlink(missing_ok=True)
         return True
 

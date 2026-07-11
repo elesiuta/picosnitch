@@ -31,9 +31,12 @@ def run_main_loop(config: Config, state: State) -> int:
     # init fanotify; CDLL(None) binds fanotify_* from the already-loaded libc, avoiding
     # find_library's gcc/objdump $PATH fallback (like bpf_wrapper._resolve_library)
     libc = ctypes.CDLL(None)
+    _FAN_CLOEXEC = 0x1
     _FAN_CLASS_CONTENT = 0x4
     _FAN_UNLIMITED_MARKS = 0x20
-    flags = _FAN_CLASS_CONTENT if FD_CACHE < 8192 else _FAN_CLASS_CONTENT | _FAN_UNLIMITED_MARKS
+    flags = _FAN_CLOEXEC | _FAN_CLASS_CONTENT
+    if FD_CACHE >= 8192:
+        flags |= _FAN_UNLIMITED_MARKS
     fan_fd = libc.fanotify_init(flags, os.O_RDONLY)
     if fan_fd < 0:
         logging.error("fanotify_init() failed")

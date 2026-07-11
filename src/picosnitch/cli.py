@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import textwrap
@@ -25,8 +26,11 @@ from picosnitch.utils import apply_data_permissions, connect_db_readonly, load_s
 
 
 def _systemctl() -> str:
-    """absolute path to systemctl (standard system dirs before $PATH); bare name if not found"""
-    return shutil.which("systemctl", path="/usr/bin:/bin:/usr/sbin:/sbin:" + os.environ.get("PATH", "")) or "systemctl"
+    """absolute path to systemctl (standard system dirs before $PATH); never a bare/relative name,
+    which subprocess would re-resolve from cwd -- root could then exec a planted ./systemctl"""
+    dirs = [d for d in ("/usr/bin", "/bin", "/usr/sbin", "/sbin", *os.environ.get("PATH", "").split(os.pathsep)) if d]
+    path = shutil.which("systemctl", path=os.pathsep.join(dirs))
+    return path if path and os.path.isabs(path) else "/usr/bin/systemctl"
 
 
 def check_root(cmd: str) -> int:
@@ -109,6 +113,9 @@ def _db_is_corrupt(db_path: Path) -> bool:
     the daemon. A valid db with the wrong version is NOT corrupt (returns False) so check_database
     can reject it without destroying migratable data."""
     try:
+        db_stat = db_path.lstat()
+        if not stat.S_ISREG(db_stat.st_mode) or db_stat.st_nlink != 1:
+            return True
         con = sqlite3.connect(db_path)
         try:
             cur = con.cursor()
@@ -136,11 +143,16 @@ def init_dirs_and_config() -> None:
     """create FHS directories, write default config, and create database if missing"""
     for d in [CONFIG_DIR, DATA_DIR, LOG_DIR, RUN_DIR, CACHE_DIR]:
         d.mkdir(parents=True, exist_ok=True)
+    for d in (CONFIG_DIR, RUN_DIR):
+        d.chmod(0o755)
+        os.chown(d, 0, 0)
     config_path = CONFIG_DIR / "config.toml"
     if not config_path.exists():
         write_default_config(config_path)
+    # Secure upgrade-created directories before opening any existing data path.
+    apply_data_permissions(CONFIG_DIR, DATA_DIR, LOG_DIR, CACHE_DIR)
     db_path = DATA_DIR / "picosnitch.db"
-    if db_path.exists() and _db_is_corrupt(db_path):
+    if (db_path.exists() or db_path.is_symlink()) and _db_is_corrupt(db_path):
         # quarantine a corrupt db and recreate it below, so check_database / the secondary boot
         # purge don't crash-loop the daemon (data is kept in picosnitch.db.bad)
         logging.error(f"picosnitch.db is unusable, quarantining to {db_path.name}.bad and recreating")
@@ -400,7 +412,7 @@ def start_picosnitch() -> int:
         # forked daemon (where stderr is /dev/null) are still visible.
         # Use O_NOFOLLOW so the daemon never follows an attacker-placed
         # symlink in LOG_DIR (relevant when [data].owner is non-root).
-        error_log_stream = safe_log_open(LOG_DIR / "error.log")
+        error_log_stream = safe_log_open(LOG_DIR / "error.log", config=load_config())
         error_log_handler = logging.StreamHandler(error_log_stream)
         error_log_handler.setLevel(logging.WARNING)
         error_log_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))

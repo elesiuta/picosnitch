@@ -17,13 +17,16 @@ import pwd
 import queue
 import socket
 import sqlite3
+import stat
 import sys
 import tempfile
 import termios
 import time
+import unicodedata
+import urllib.parse
 from pathlib import Path
 
-from picosnitch.config import load_config
+from picosnitch.config import Config, load_config
 from picosnitch.constants import DATA_DIR, LOG_DIR, PID_CACHE, ST_DEV_MASK
 from picosnitch.types import FanotifyEventMetadata, State
 
@@ -87,24 +90,47 @@ def resolve_group(group: str) -> int:
         return grp.getgrnam(group).gr_gid
 
 
+def resolve_unprivileged_user(user: str) -> tuple[int, int]:
+    """Resolve a user and primary group, falling back to nobody (also when uid or gid would be 0)."""
+    if user:
+        try:
+            entry = pwd.getpwuid(int(user))
+        except (ValueError, TypeError, OverflowError, KeyError):
+            try:
+                entry = pwd.getpwnam(user)
+            except (KeyError, TypeError):
+                entry = None
+        if entry is not None and entry.pw_uid != 0 and entry.pw_gid != 0:
+            return entry.pw_uid, entry.pw_gid
+    try:
+        entry = pwd.getpwnam("nobody")
+        if entry.pw_uid != 0:
+            return entry.pw_uid, entry.pw_gid
+    except KeyError:
+        pass
+    return 65534, 65534
+
+
 def connect_db_readonly(db_path: Path | str, timeout: float = 5.0) -> sqlite3.Connection:
     """Open a sqlite3 connection for read-only access.
 
-    Tries in order: `mode=ro`, then `mode=ro&immutable=1`, and finally a
-    plain read-write open as a last resort. Read-only is preferred so a
-    buggy caller cannot accidentally issue writes against the daemon's
-    database. The immutable fallback is needed when the caller cannot
-    write to the -shm / -wal sidecar files of a WAL-mode database (e.g.
+    Tries `mode=ro`, then `mode=ro&immutable=1`. The immutable fallback is needed
+    when the caller cannot write to the -shm / -wal sidecar files of a WAL database (e.g.
     a non-root user opening the picosnitch database written by the root
-    daemon). The RW fallback covers exotic cases (e.g. older sqlite3
-    builds that reject the URI form). Raises sqlite3.OperationalError
-    if every attempt fails."""
+    daemon). Raises sqlite3.OperationalError if both attempts fail."""
+    try:
+        db_stat = os.lstat(db_path)
+    except OSError as e:
+        raise sqlite3.OperationalError(f"could not inspect {db_path}: {e}") from e
+    if not stat.S_ISREG(db_stat.st_mode) or db_stat.st_nlink != 1:
+        raise sqlite3.OperationalError(f"refusing non-regular or hardlinked database: {db_path}")
+    quoted_path = urllib.parse.quote(os.fspath(db_path), safe="/")
     last_err: Exception | None = None
     for uri in (
-        f"file:{db_path}?mode=ro",
-        f"file:{db_path}?mode=ro&immutable=1",
-        str(db_path),
+        f"file:{quoted_path}?mode=ro",
+        f"file:{quoted_path}?mode=ro&immutable=1",
     ):
+        con = None
         try:
             con = sqlite3.connect(uri, uri=uri.startswith("file:"), timeout=timeout)
             # Force the connection to actually touch the file so we
@@ -113,45 +139,92 @@ def connect_db_readonly(db_path: Path | str, timeout: float = 5.0) -> sqlite3.Co
             con.execute("PRAGMA user_version").fetchone()
             return con
         except sqlite3.OperationalError as e:
+            if con is not None:
+                con.close()
             last_err = e
             continue
     raise sqlite3.OperationalError(f"could not open {db_path} for reading: {last_err}")
 
 
-def safe_log_open(path: Path | str, binary: bool = False):
-    """Open a log file for appending without following symlinks.
+def safe_log_open(path: Path | str, binary: bool = False, config: Config | None = None):
+    """Open a log file for appending without following a symlink or blocking on a FIFO.
 
     `LOG_DIR` may be chown'd to a non-root account when `[data].owner` is
-    overridden in config.toml. Without `O_NOFOLLOW` that user could swap
-    a log file for a symlink and trick the root daemon into appending
-    sanitized lines to an arbitrary path. `O_NOFOLLOW` causes open() to
-    fail with ELOOP if the final path component is a symlink; the file
-    itself is still created if it does not exist.
+    overridden in config.toml, so that user could swap a log file for a
+    symlink (redirect the root daemon's writes to an arbitrary path) or a
+    FIFO (block the daemon forever on open). `O_NOFOLLOW` fails with ELOOP
+    on a symlink; `O_NONBLOCK` plus an `S_ISREG` check rejects a FIFO/device
+    instead of hanging. The file is still created if it does not exist.
     """
-    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
     fd = os.open(str(path), flags, 0o644)
+    try:
+        file_stat = os.fstat(fd)
+        if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_nlink != 1:
+            raise OSError(f"refusing non-regular or hardlinked log file: {path}")
+        if config is not None:
+            os.fchown(fd, resolve_owner(config.data.owner), resolve_group(config.data.group))
+            os.fchmod(fd, int(config.data.mode, 8))
+        os.set_blocking(fd, True)
+    except BaseException:
+        os.close(fd)
+        raise
     if binary:
         return os.fdopen(fd, "ab", buffering=0)
     return os.fdopen(fd, "a", encoding="utf-8", errors="surrogateescape")
 
 
 def apply_data_permissions(config_dir: Path, data_dir: Path, log_dir: Path, cache_dir: Path) -> None:
-    """Apply configured ownership and permissions to data, log, and cache directories."""
+    """Apply the configured ownership and mode to the data, log, and cache FILES.
+
+    The directories are kept root-owned and never group/other-writable. [data].owner may be a
+    non-root account (to read or restrict access to the logs); a directory owned by that account
+    would let it swap a file for a symlink or FIFO and attack the root daemon (chown/open/sqlite
+    all target these paths). Only the FILES take [data].owner:group and the configured mode -- the
+    daemon (root) writes them, and readers reach the db read-only (WAL immutable if they can't
+    write the sidecars, as non-root readers already do). Live data comes from the events socket,
+    not the db, so this does not affect live monitoring."""
+    config_dir.chmod(0o755)
+    os.chown(config_dir, 0, 0)
     config_path = config_dir / "config.toml"
-    if not config_path.exists():
+    try:
+        config_fd = os.open(config_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except FileNotFoundError:
         return
+    try:
+        config_stat = os.fstat(config_fd)
+        if not stat.S_ISREG(config_stat.st_mode) or config_stat.st_nlink != 1:
+            raise OSError(f"refusing non-regular or hardlinked config: {config_path}")
+        os.fchown(config_fd, 0, 0)
+        os.fchmod(config_fd, 0o600)
+    finally:
+        os.close(config_fd)
     config = load_config(config_dir)
     uid = resolve_owner(config.data.owner)
     gid = resolve_group(config.data.group)
     mode = int(config.data.mode, 8)
-    dir_mode = mode | 0o111  # add execute bits for directories
+    dir_mode = (mode | 0o111) & ~0o022  # traversable, but writable only by root (never group/other)
     for d in [data_dir, log_dir, cache_dir]:
         d.chmod(dir_mode)
-        os.chown(d, uid, gid)
+        os.chown(d, 0, gid)  # root-owned dir (with [data].group for traversal), not [data].owner
         for entry in d.iterdir():
-            if entry.is_file() and not entry.is_symlink():
-                entry.chmod(mode)
-                os.chown(entry, uid, gid)
+            # fd-based with O_NOFOLLOW: [data].owner may own these dirs, so a symlink swapped
+            # in after a path check could redirect the root chown/chmod to an arbitrary file
+            # (e.g. /etc/sudoers); O_NONBLOCK so a planted fifo can't block the open
+            try:
+                fd = os.open(entry, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+            except OSError:
+                continue
+            try:
+                st = os.fstat(fd)
+                # nlink==1: O_NOFOLLOW stops a symlink swap but not a hardlink from the (untrusted)
+                # [data].owner to a root-owned file, which fchown would hand them (LPE where
+                # fs.protected_hardlinks=0); picosnitch's own data files are never hardlinked
+                if stat.S_ISREG(st.st_mode) and st.st_nlink == 1:
+                    os.fchmod(fd, mode)
+                    os.fchown(fd, uid, gid)
+            finally:
+                os.close(fd)
 
 
 def load_state() -> State:
@@ -169,9 +242,18 @@ def load_state() -> State:
     }
     state_path = DATA_DIR / "state.json"
     keys = ["Executables", "Names", "Parent Executables", "Parent Names", "Grandparent Executables", "Grandparent Names", "SHA256"]
-    if state_path.exists():
+    if state_path.exists() or state_path.is_symlink():
         try:
-            with open(state_path, "r", encoding="utf-8", errors="surrogateescape") as json_file:
+            state_fd = os.open(state_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            state_stat = os.fstat(state_fd)
+            if not stat.S_ISREG(state_stat.st_mode) or state_stat.st_nlink != 1:
+                os.close(state_fd)
+                raise OSError("state.json is not a regular, singly linked file")
+            if state_stat.st_size > 256 * 1024 * 1024:
+                os.close(state_fd)
+                raise OSError("state.json exceeds 256 MiB")
+            os.set_blocking(state_fd, True)
+            with os.fdopen(state_fd, "r", encoding="utf-8", errors="surrogateescape") as json_file:
                 state_record = json.load(json_file)
             if not isinstance(state_record, dict):
                 raise ValueError("state.json is not a JSON object")
@@ -200,55 +282,55 @@ def load_state() -> State:
     return data
 
 
-# translation table to strip control characters from log entries (keeps printable + space)
-_CONTROL_CHAR_TABLE = str.maketrans("", "", "".join(chr(c) for c in range(32) if c not in (9,)) + chr(127))  # keep tab
-
-
 def sanitize_log_line(line: str) -> str:
-    """Remove control characters from a log line to prevent log injection."""
-    return line.translate(_CONTROL_CHAR_TABLE)
+    """Remove control characters from a log line to prevent terminal-escape / log injection."""
+    return "".join(c for c in line if c == "\t" or unicodedata.category(c) not in ("Cc", "Cf", "Cs"))
 
 
-def flush_logs(state: State) -> None:
+def flush_logs(state: State, config: Config | None = None) -> None:
     """append pending error.log and exe.log entries, then clear the lists"""
     exe_log_path = LOG_DIR / "exe.log"
     error_log_path = LOG_DIR / "error.log"
     try:
         if state["Error Log"]:
-            with safe_log_open(error_log_path) as f:
+            with safe_log_open(error_log_path, config=config) as f:
                 f.write("\n".join(sanitize_log_line(line) for line in state["Error Log"]) + "\n")
             state["Error Log"] = []
     except Exception as e:
         logging.error(f"picosnitch write error (error.log): {type(e).__name__}{e.args}")
     try:
         if state["Exe Log"]:
-            with safe_log_open(exe_log_path) as f:
+            with safe_log_open(exe_log_path, config=config) as f:
                 f.write("\n".join(sanitize_log_line(line) for line in state["Exe Log"]) + "\n")
             state["Exe Log"] = []
     except Exception as e:
         logging.error(f"picosnitch write error (exe.log): {type(e).__name__}{e.args}")
 
 
-def save_state(state: State, write_record: bool = True) -> None:
+def save_state(state: State, write_record: bool = True, config: Config | None = None) -> None:
     """flush logs then atomically write state.json via tempfile + os.replace"""
-    flush_logs(state)
+    flush_logs(state, config)
     try:
         if write_record:
             state_path = DATA_DIR / "state.json"
             state_data = {k: state[k] for k in ("Executables", "Names", "Parent Executables", "Parent Names", "Grandparent Executables", "Grandparent Names", "SHA256")}
-            # preserve the existing file mode across atomic replacement (tempfile defaults to 0o600)
+            # Preserve ownership and mode across atomic replacement.
             try:
-                existing_mode = state_path.stat().st_mode & 0o777
+                existing = state_path.lstat()
+                attrs = (existing.st_uid, existing.st_gid, existing.st_mode & 0o777) if stat.S_ISREG(existing.st_mode) and existing.st_nlink == 1 else None
             except FileNotFoundError:
-                existing_mode = None
+                attrs = None
+            if attrs is None and config is not None:
+                attrs = (resolve_owner(config.data.owner), resolve_group(config.data.group), int(config.data.mode, 8))
             fd = tempfile.NamedTemporaryFile(dir=DATA_DIR, mode="w", prefix=".state.", suffix=".tmp", delete=False, encoding="utf-8", errors="surrogateescape")
             try:
                 json.dump(state_data, fd, indent=2, separators=(",", ": "), sort_keys=True, ensure_ascii=False)
                 fd.flush()
                 os.fsync(fd.fileno())
+                if attrs is not None:
+                    os.fchown(fd.fileno(), attrs[0], attrs[1])
+                    os.fchmod(fd.fileno(), attrs[2])
                 fd.close()
-                if existing_mode is not None:
-                    os.chmod(fd.name, existing_mode)
                 os.replace(fd.name, state_path)
             except BaseException:
                 fd.close()
@@ -293,7 +375,7 @@ def get_sha256_fd(path: str, st_dev: int, st_ino: int, _mod_cnt: int) -> str:
 
 
 @functools.lru_cache(maxsize=PID_CACHE)
-def get_sha256_pid(pid: int, st_dev: int, st_ino: int) -> str:
+def get_sha256_pid(pid: int, st_dev: int, st_ino: int, _mod_cnt: int = 0) -> str:
     """get sha256 of process executable from /proc/pid/exe"""
     try:
         sha256 = hashlib.sha256()
@@ -347,15 +429,27 @@ def get_fanotify_events(fan_fd: int, fan_mod_cnt: dict[str, int], q_error: multi
     bytes_avail = ctypes.c_int()
     fcntl.ioctl(fan_fd, termios.FIONREAD, bytes_avail)
     for _ in range(0, bytes_avail.value, sizeof_event):
+        event_fd = -1
         try:
             fanotify_event_metadata = FanotifyEventMetadata()
             buf = os.read(fan_fd, sizeof_event)
+            if len(buf) != sizeof_event:
+                raise OSError(f"short fanotify event: {len(buf)}/{sizeof_event}")
             ctypes.memmove(ctypes.addressof(fanotify_event_metadata), buf, sizeof_event)
-            st_dev, st_ino = get_fstat(fanotify_event_metadata.fd)
+            event_fd = fanotify_event_metadata.fd
+            if fanotify_event_metadata.mask & 0x4000:  # FAN_Q_OVERFLOW
+                fan_mod_cnt["*"] = fan_mod_cnt.get("*", 0) + 1
+                q_error.put("fanotify queue overflowed; invalidating all cached executable hashes")
+                continue
+            if event_fd < 0:
+                raise OSError(f"fanotify event has invalid fd {event_fd}")
+            st_dev, st_ino = get_fstat(event_fd)
             fan_mod_cnt[f"{st_dev} {st_ino}"] += 1
-            os.close(fanotify_event_metadata.fd)
         except Exception as e:
             q_error.put("Fanotify Event %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
+        finally:
+            if event_fd >= 0:
+                os.close(event_fd)
 
 
 def sync_vt_results(state: State, q_vt: multiprocessing.Queue[bytes], q_out: multiprocessing.Queue[bytes], check_pending: bool = False) -> None:
