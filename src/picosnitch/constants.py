@@ -4,7 +4,6 @@
 import logging
 import os
 import resource
-import time
 import tomllib
 import typing
 from pathlib import Path
@@ -32,18 +31,18 @@ try:
     file_path = CONFIG_DIR / "config.toml"
     with open(file_path, "rb") as toml_file:
         nofile = tomllib.load(toml_file).get("monitoring", {}).get("rlimit_nofile")
-    if isinstance(nofile, int):
+    if isinstance(nofile, int) and not isinstance(nofile, bool) and nofile >= 256:
         try:
-            new_limit = (nofile, resource.getrlimit(resource.RLIMIT_NOFILE)[1])
-            resource.setrlimit(resource.RLIMIT_NOFILE, new_limit)
-            logging.info(f"set RLIMIT_NOFILE to {nofile}")
-            time.sleep(0.5)
+            soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+            if nofile > soft:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (nofile, hard))
+                logging.info(f"set RLIMIT_NOFILE to {nofile}")
         except Exception as e:
             logging.error(f"{type(e).__name__}{e.args}")
             logging.error("monitoring.rlimit_nofile was found in config.toml but it could not be set")
 except Exception:
     pass
-FD_CACHE: typing.Final[int] = resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128
+FD_CACHE: typing.Final[int] = max(1, resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128)
 PID_CACHE: typing.Final[int] = max(8192, 2 * FD_CACHE)
 st_dev_mask = 0xFFFFFFFF
 try:
@@ -62,7 +61,7 @@ try:
     file_path = CONFIG_DIR / "config.toml"
     with open(file_path, "rb") as toml_file:
         set_mask = tomllib.load(toml_file).get("monitoring", {}).get("st_dev_mask")
-    if isinstance(set_mask, int):
+    if isinstance(set_mask, int) and not isinstance(set_mask, bool) and 0 <= set_mask <= 0xFFFFFFFF:
         st_dev_mask = set_mask
 except Exception:
     pass

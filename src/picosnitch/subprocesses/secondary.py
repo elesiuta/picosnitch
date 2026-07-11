@@ -18,7 +18,7 @@ from picosnitch.config import Config
 from picosnitch.constants import DATA_DIR, DB_VERSION, LOG_DIR, VERSION
 from picosnitch.process_manager import ProcessManager
 from picosnitch.types import BpfEvent, ProcessHashInfo, State
-from picosnitch.utils import get_fanotify_events, get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup, safe_log_open, sqlite_error_means_corrupt, sync_vt_results
+from picosnitch.utils import get_fanotify_events, get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup, safe_log_open, sanitize_log_line, sqlite_error_means_corrupt, sync_vt_results
 
 
 def maintain_database(file_path: Path, retention_days: int) -> None:
@@ -76,21 +76,22 @@ def resolve_hash(
     # toasts and polluting the DB with garbage sha256 values.
     if not proc["exe"] or proc["pid"] <= 0:
         return ""
+    mod_cnt = fan_mod_cnt.get("*", 0) + fan_mod_cnt.get("%d %d" % (proc["dev"], proc["ino"]), 0)
     sha_fd_error = ""
     sha_pid_error = ""
-    sha256 = get_sha256_fd(proc["fd"], proc["dev"], proc["ino"], fan_mod_cnt["%d %d" % (proc["dev"], proc["ino"])])
+    sha256 = get_sha256_fd(proc["fd"], proc["dev"], proc["ino"], mod_cnt)
     if sha256.startswith("!"):
         # fallback on trying to read directly (if still alive) if fd_cache fails, probable causes include:
         # system suspends in the middle of hashing (since cache is reset)
         # process too short lived to open fd or stat in time (then fallback will fail too)
         # too many executables on system (see [monitoring].rlimit_nofile)
         sha_fd_error = sha256
-        sha256 = get_sha256_pid(proc["pid"], proc["dev"], proc["ino"])
+        sha256 = get_sha256_pid(proc["pid"], proc["dev"], proc["ino"], mod_cnt)
         if sha256.startswith("!"):
             # fallback to trying to read from fuse mount
             # this is meant for appimages that are run as the same user as the one running picosnitch, since they are not readable as root
             sha_pid_error = sha256
-            sha256 = get_sha256_fuse(p_fuse.q_in, p_fuse.q_out, proc["fd"], proc["pid"], proc["dev"], proc["ino"], fan_mod_cnt["%d %d" % (proc["dev"], proc["ino"])])
+            sha256 = get_sha256_fuse(p_fuse.q_in, p_fuse.q_out, proc["fd"], proc["pid"], proc["dev"], proc["ino"], mod_cnt)
             if sha256.startswith("!"):
                 # notify user with what went wrong (may be cause for suspicion)
                 sha256_error = sha_fd_error[4:] + " and " + sha_pid_error[4:] + " and " + sha256[4:]
@@ -301,9 +302,10 @@ def run_secondary(
             transfer_size = 0
             if secondary_pipe.poll():
                 first_pickle = secondary_pipe.recv_bytes()
-                if isinstance(pickle.loads(first_pickle), int):
-                    transfer_size = pickle.loads(first_pickle)
-                elif pickle.loads(first_pickle) == "done":
+                first = pickle.loads(first_pickle)
+                if isinstance(first, int):
+                    transfer_size = first
+                elif first == "done":
                     q_error.put("sync error between secondary and primary on ready (received done)")
                 else:
                     q_error.put("sync error between secondary and primary on ready (did not receive transfer size)")
@@ -364,12 +366,14 @@ def run_secondary(
                     q_error.put("SQLite execute %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?", len(transaction)))
                 try:
                     if config.database.text_log:
-                        with safe_log_open(text_path) as text_file:
+                        with safe_log_open(text_path, config=config) as text_file:
                             for contime, send, recv, n_events, exe_key, pexe_key, gpexe_key, uid, family, protocol, lport, rport, laddr, raddr, domain, netns in transaction:
                                 flat = (contime, send, recv, n_events, *exe_key, *pexe_key, *gpexe_key, uid, family, protocol, lport, rport, laddr, raddr, domain, netns)
-                                # strip CR too, not just LF: a lone \r in an attacker-influenced
-                                # field (name/cmdline/domain) can forge or overwrite a CSV log line
-                                clean_entry = [str(value).replace(",", "").replace("\n", "").replace("\r", "").replace("\0", "") for value in flat]
+                                # neutralize control chars (ESC/CR/LF/NUL/C1) and drop the CSV delimiter: an
+                                # attacker-influenced field (name/cmdline/domain) must not forge or overwrite a
+                                # log line, nor drive a terminal escape when conn.log is viewed (matches the
+                                # curses/error.log sinks; the other sinks already go through sanitize_log_line)
+                                clean_entry = [sanitize_log_line(str(value)).replace(",", "") for value in flat]
                                 clean_entry[0] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(contime))
                                 text_file.write(",".join(clean_entry) + "\n")
                         transaction_success = True

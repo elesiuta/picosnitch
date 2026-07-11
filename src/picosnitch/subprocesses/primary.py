@@ -110,7 +110,7 @@ def run_primary(
 
     def save_state_and_exit(state: State, q_error: multiprocessing.Queue, event_pipes: tuple) -> None:
         _drain_errors(state, q_error, q_notify)
-        save_state(state)
+        save_state(state, config=config)
         live_feed.stop()
         for event_pipe in event_pipes:
             event_pipe.close()
@@ -204,7 +204,7 @@ def run_primary(
                     else:
                         state["Exe Log"].append(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg['sha256']:<16.16} {msg['exe']} (clean)")
             # flush logs every iteration (cheap appends), write state.json only when changed or every 30s
-            flush_logs(state)
+            flush_logs(state, config)
             if time.time() - last_write > 30:
                 new_record = pickle.dumps(
                     [state["Executables"], state["Names"], state["Parent Executables"], state["Parent Names"], state["Grandparent Executables"], state["Grandparent Names"], state["SHA256"]]
@@ -213,7 +213,7 @@ def run_primary(
                     state_record = new_record
                     write_record = True
                 if write_record:
-                    save_state(state, write_record=True)
+                    save_state(state, write_record=True, config=config)
                     write_record = False
                 last_write = time.time()
         except Exception as e:

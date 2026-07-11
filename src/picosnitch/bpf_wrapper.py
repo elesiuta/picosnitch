@@ -168,6 +168,7 @@ def compile_bpf(output_path: str | None = None, arch: str | None = None) -> str:
         f"-D__TARGET_ARCH_{bpf_target_arch}",
         "-Wall",
         "-Werror",
+        f"-ffile-prefix-map={bpf_src_dir}=picosnitch/bpf",
         # Anonymous forward decls inside structs in libbpf's curated vmlinux.h
         # trip -Wmissing-declarations; harmless for BPF compilation.
         "-Wno-missing-declarations",
@@ -363,7 +364,9 @@ class LibBPF:
         libbpf_path = next((p for p in common_paths if Path(p).exists()), "libbpf.so.1")
 
         try:
-            self.lib = ctypes.CDLL(libbpf_path)
+            # use_errno so bpf_object__open_file's errno survives for its failure message (else
+            # ctypes.get_errno() there is always 0 -> "unknown error" at the moment it would help)
+            self.lib = ctypes.CDLL(libbpf_path, use_errno=True)
         except OSError as e:
             raise RuntimeError(f"Failed to load libbpf from {libbpf_path}: {e}" + _get_install_instructions())
 
@@ -526,6 +529,7 @@ class BPFObject:
         self._links = []
         self._perf_buffers = []
         self._callbacks = []  # Must keep references to prevent garbage collection
+        self._map_max_entries: dict[str, int] = {}
 
     def load(self, map_max_entries: dict[str, int] | None = None, disabled_programs: set[str] | None = None) -> "BPFObject":
         """Load the BPF object file into the kernel.
@@ -535,6 +539,7 @@ class BPFObject:
         """
         if not os.path.exists(self.obj_path):
             raise FileNotFoundError(f"BPF object file not found: {self.obj_path}")
+        self._map_max_entries = dict(map_max_entries or {})
 
         # Open object file
         self.obj = self.libbpf.lib.bpf_object__open_file(self.obj_path.encode(), None)
@@ -609,27 +614,16 @@ class BPFObject:
     def drain_map(self, name: str, key_type, val_type) -> list:
         """Atomically drain all entries from a hash map.
 
-        Snapshots the current keys via bpf_map_get_next_key, then removes each
-        with bpf_map_lookup_and_delete_elem (atomic per entry, so in-flight
-        atomic adds in the kernel are never lost). Returns a list of
-        (key, value) ctypes instances.
+        Repeatedly removes the first key with lookup-and-delete, bounded by the
+        configured map capacity so concurrent inserts cannot keep a drain alive
+        forever. Returns (key, value) ctypes instances.
         """
         fd = self.get_map_fd(name)
-        keys: list[bytes] = []
-        cur_key = None
-        next_key = key_type()
-        while True:
-            cur_ptr = ctypes.byref(cur_key) if cur_key is not None else None
-            ret = self.libbpf.lib.bpf_map_get_next_key(fd, cur_ptr, ctypes.byref(next_key))
-            if ret != 0:
-                break
-            kbytes = bytes(memoryview(next_key))
-            keys.append(kbytes)
-            cur_key = key_type.from_buffer_copy(kbytes)
-
         results = []
-        for kbytes in keys:
-            key = key_type.from_buffer_copy(kbytes)
+        for _ in range(self._map_max_entries.get(name, 1048576)):
+            key = key_type()
+            if self.libbpf.lib.bpf_map_get_next_key(fd, None, ctypes.byref(key)) != 0:
+                break
             val = val_type()
             ret = self.libbpf.lib.bpf_map_lookup_and_delete_elem(fd, ctypes.byref(key), ctypes.byref(val))
             if ret == 0:

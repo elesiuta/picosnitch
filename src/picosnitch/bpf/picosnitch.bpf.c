@@ -135,7 +135,9 @@ static __always_inline __u32 read_netns(struct sock *sk) {
 
 // Maps
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    // LRU so a flood of in-flight getaddrinfo (dns_entry with no matching dns_return) evicts
+    // old tids instead of rejecting new inserts once full
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 10240);
     __type(key, __u32);
     __type(value, struct dns_val_t);

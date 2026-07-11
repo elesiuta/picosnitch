@@ -16,13 +16,13 @@ import threading
 from picosnitch.constants import RUN_DIR
 
 EVENTS_SOCKET_PATH = RUN_DIR / "events.sock"
+MAX_SUBSCRIBERS = 32
 
 
 class LiveFeedPublisher:
     """Single-publisher, many-subscribers UNIX socket broadcaster.
 
-    Runs an accept thread; per-subscriber writes are blocking-with-timeout
-    and a slow subscriber is dropped instead of stalling the publisher.
+    Runs an accept thread and drops subscribers whose nonblocking send cannot complete.
     """
 
     def __init__(self, group: str | None = None) -> None:
@@ -63,9 +63,12 @@ class LiveFeedPublisher:
                 conn, _ = self._sock.accept()
             except OSError:
                 return
-            conn.settimeout(0.5)
+            conn.setblocking(False)
             with self._lock:
-                self._subscribers.append(conn)
+                if self._stopped.is_set() or len(self._subscribers) >= MAX_SUBSCRIBERS:
+                    conn.close()
+                else:
+                    self._subscribers.append(conn)
 
     def publish(self, event: dict) -> None:
         if self._sock is None:
