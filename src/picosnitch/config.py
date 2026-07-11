@@ -170,6 +170,27 @@ def load_config(config_dir: Path = CONFIG_DIR) -> Config:
     if entries < 1 or entries > 1048576:
         logging.warning(f"monitoring.conn_map_max_entries must be in [1, 1048576], got {entries}, using 65536")
         config.monitoring.conn_map_max_entries = 65536
+    nofile = config.monitoring.rlimit_nofile
+    if nofile is not None and (isinstance(nofile, bool) or not isinstance(nofile, int) or nofile < 256):
+        logging.warning(f"monitoring.rlimit_nofile must be an integer >= 256, got {nofile!r}, ignoring")
+        config.monitoring.rlimit_nofile = None
+    dev_mask = config.monitoring.st_dev_mask
+    if dev_mask is not None and (isinstance(dev_mask, bool) or not isinstance(dev_mask, int) or not 0 <= dev_mask <= 0xFFFFFFFF):
+        logging.warning(f"monitoring.st_dev_mask must be in [0, 4294967295], got {dev_mask!r}, ignoring")
+        config.monitoring.st_dev_mask = None
+    # reject only negatives (a negative retention makes the cutoff a future time -> wipes the db)
+    retention = config.database.retention_days
+    if retention < 0:
+        logging.warning(f"database.retention_days must not be negative, got {retention}, using 30")
+        config.database.retention_days = 30
+    write_limit = config.database.write_limit_seconds
+    if write_limit < 0:
+        logging.warning(f"database.write_limit_seconds must not be negative, got {write_limit}, using 10")
+        config.database.write_limit_seconds = 10
+    request_limit = config.virustotal.request_limit_seconds
+    if request_limit < 0:
+        logging.warning(f"virustotal.request_limit_seconds must not be negative, got {request_limit}, using 15")
+        config.virustotal.request_limit_seconds = 15
 
     # reset owner/group/user/mode that don't resolve to a real uid/gid/octal mode; otherwise a
     # typo'd name crash-loops the daemon at boot (apply_data_permissions and the subprocess
@@ -177,8 +198,8 @@ def load_config(config_dir: Path = CONFIG_DIR) -> Config:
     # utils.resolve_owner/resolve_group) to avoid a config<->utils import cycle
     def _resolves(value, lookup) -> bool:
         try:
-            int(value)
-            return True
+            numeric = int(value)
+            return 0 <= numeric < 2**32 - 1
         except (ValueError, TypeError):
             pass
         try:
@@ -194,12 +215,27 @@ def load_config(config_dir: Path = CONFIG_DIR) -> Config:
         logging.warning(f"config.data.group: {config.data.group!r} does not resolve, using 'root'")
         config.data.group = "root"
     try:
-        int(config.data.mode, 8)
+        mode = int(config.data.mode, 8)
+        if not 0 <= mode <= 0o777:
+            raise ValueError
     except ValueError:
         logging.warning(f"config.data.mode: {config.data.mode!r} is not an octal mode, using '0644'")
         config.data.mode = "0644"
-    if config.desktop.user and not (_resolves(config.desktop.user, pwd.getpwnam) and _resolves(config.desktop.user, grp.getgrnam)):
-        logging.warning(f"config.desktop.user: {config.desktop.user!r} does not resolve, ignoring")
+
+    def _unprivileged_user(value: str) -> bool:
+        try:
+            entry = pwd.getpwuid(int(value))
+        except (ValueError, TypeError, OverflowError):
+            try:
+                entry = pwd.getpwnam(value)
+            except (KeyError, TypeError):
+                return False
+        except KeyError:
+            return False
+        return entry.pw_uid != 0 and entry.pw_gid != 0
+
+    if config.desktop.user and not _unprivileged_user(config.desktop.user):
+        logging.warning(f"config.desktop.user: {config.desktop.user!r} is not a valid non-root user, ignoring")
         config.desktop.user = ""
     # drop log.ignore_ips entries that aren't valid networks (strict=False accepts a host-bit CIDR);
     # otherwise secondary crashes building ignored_networks at boot outside its try/except
@@ -212,13 +248,28 @@ def load_config(config_dir: Path = CONFIG_DIR) -> Config:
             continue
         valid_ignore_ips.append(ip_subnet)
     config.log.ignore_ips = valid_ignore_ips
-    if not config.desktop.user and os.environ.get("SUDO_UID", "").isdigit():
-        config.desktop.user = os.environ["SUDO_UID"]
+    # drop ignore_domains entries that aren't non-empty strings: a non-str crashes secondary's
+    # startswith() filter every write cycle (halting all logging), an empty string prefixes every
+    # domain (silently dropping all connections) -- both outside the subprocess try/except
+    valid_ignore_domains = []
+    for domain_prefix in config.log.ignore_domains:
+        if not isinstance(domain_prefix, str) or not domain_prefix:
+            logging.warning(f"config.log.ignore_domains: {domain_prefix!r} is not a non-empty string, ignoring")
+            continue
+        valid_ignore_domains.append(domain_prefix)
+    config.log.ignore_domains = valid_ignore_domains
+    config.log.ignore_ports = [port for port in config.log.ignore_ports if isinstance(port, int) and not isinstance(port, bool) and -1 <= port <= 65535]
+    config.log.ignore_sha256 = [digest.lower() for digest in config.log.ignore_sha256 if isinstance(digest, str) and len(digest) == 64 and all(c in "0123456789abcdefABCDEF" for c in digest)]
+    sudo_uid = os.environ.get("SUDO_UID", "")
+    if not config.desktop.user and sudo_uid.isdigit() and _unprivileged_user(sudo_uid):
+        config.desktop.user = sudo_uid
     return config
 
 
 def write_default_config(config_path: Path) -> None:
     """Write the default config to a TOML file."""
-    with open(config_path, "w", encoding="utf-8") as f:
+    fd = os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(_dump_toml(Config()))
     logging.info(f"wrote default config to {config_path}")
