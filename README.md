@@ -95,9 +95,10 @@ text_log = false              # also write a CSV connection log to /var/log/pico
                               # while reusing the shared `executables`/`domains`/`addresses`
 
 [data]
-owner = "root"                # owner for files in /etc/picosnitch, /var/lib/picosnitch,
-group = "root"                # /var/log/picosnitch, and /var/cache/picosnitch
+owner = "root"                # owner for files in /var/lib/picosnitch, /var/log/picosnitch,
+group = "root"                # and /var/cache/picosnitch
 mode = "0644"                 # mode applied to those files (directories add execute bits)
+                              # config.toml stays root:root 0600 because it can contain credentials
 
 [log]
 addresses = true              # log remote addresses for each connection
@@ -159,6 +160,8 @@ Picosnitch splits its on-disk state across the FHS directories. All defaults ass
 | `/run/picosnitch/events.sock` | live event socket consumed by `picosnitch top` |
 
 `[database.remote]` can be used to additionally ship every connection to a MariaDB, MySQL, or PostgreSQL server. It mirrors the local SQLite schema (`connections`, `executables`, `domains`, `addresses`); only the `connections` table name can be overridden (via `connections_table`), which lets multiple hosts share one server with a `connections` table each while reusing the shared reference tables. Picosnitch never updates or deletes remote rows (no retention, no garbage collection), so it is intended for keeping an [off-system copy of your logs](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS); grant only `CREATE` (first run), `INSERT`, and `SELECT` (id lookups) so an adversary on the monitored host cannot rewrite or delete picosnitch's off-system logs.
+
+If an existing remote `executables` table lacks the `key_hash` column, the daemon reports the outdated schema and leaves it unchanged; back up and recreate the remote tables to enable remote logging.
 
 `conn.log` is a CSV with these fields (commas, newlines, carriage returns, and NUL characters are stripped from values): `entry time, sent bytes, received bytes, event count, executable path, process name, cmdline, sha256, parent executable, parent name, parent cmdline, parent sha256, grandparent executable, grandparent name, grandparent cmdline, grandparent sha256, user id, address family, protocol, local port, remote port, local address, remote address, domain, network namespace`.
 

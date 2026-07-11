@@ -14,7 +14,9 @@ def _handler(loopback_only, allowed_hosts, host_header):
     """A _Handler with just enough state for _host_allowed(), no socket/__init__."""
     h = object.__new__(webui._Handler)
     h.server = types.SimpleNamespace(loopback_only=loopback_only, allowed_hosts=allowed_hosts)
-    h.headers = {} if host_header is None else {"Host": host_header}
+    h.headers = {}
+    if host_header is not None:
+        h.headers["Host"] = host_header
     return h
 
 
@@ -41,3 +43,10 @@ def test_resolve_window_handles_infinity_and_nan():
     since, until, _ = webui._resolve_window({"from": ["notnumeric"]})
     assert since == 0 and until > 0
     assert webui._resolve_window({"from": ["100"], "to": ["200"]})[:2] == (100, 200)
+
+
+def test_resolve_window_clamps_finite_huge():
+    """A finite-but-huge from/to parses past the inf/nan guard but overflows sqlite's signed-64-bit
+    INTEGER at the query bind (HTTP 500); it must be clamped to that range instead."""
+    since, until, _ = webui._resolve_window({"from": ["1e300"], "to": ["1e300"]})
+    assert since <= 2**63 - 1 and until <= 2**63 - 1

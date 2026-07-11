@@ -96,6 +96,7 @@ class BPFBuildHook(BuildHookInterface):
                 f"-D__TARGET_ARCH_{bpf_target_arch}",
                 "-Wall",
                 "-Werror",
+                f"-ffile-prefix-map={self.root}=.",
                 # Anonymous forward decls inside structs in libbpf's curated vmlinux.h
                 # trip -Wmissing-declarations; harmless for BPF compilation.
                 "-Wno-missing-declarations",

@@ -4,16 +4,26 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     name: Lint (ruff)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
+          version: "0.11.26"
       # run linters via uv run, not uv tool run, so they use the pinned dev group
       # instead of the latest release; uv sync also gives ty the env for tests/
       - run: uv sync
@@ -35,13 +45,14 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13", "3.14"]
         platform:
-          - runner: ubuntu-latest
+          - runner: ubuntu-24.04
             name: manylinux_2_34_x86_64
           - runner: ubuntu-24.04-arm
             name: manylinux_2_34_aarch64
     steps:
       - uses: actions/checkout@v6
         with:
+          persist-credentials: false
           # Only need the tests/ directory; install picosnitch from the wheel
           # that the build job produced rather than from the working tree.
           sparse-checkout: |
@@ -56,6 +67,7 @@ jobs:
         uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
+          version: "0.11.26"
           python-version: ${{ matrix.python-version }}
       - name: Install runtime dependencies
         # libbpf1 provides libbpf.so for picosnitch's ctypes wrapper.
@@ -66,6 +78,6 @@ jobs:
       - name: Install picosnitch wheel + pytest into venv
         run: |
           uv venv
-          uv pip install dist/*.whl pytest
+          uv pip install dist/*.whl pytest==9.1.1
       - name: Run tests
         run: sudo -E env "PATH=$PATH" .venv/bin/pytest tests/ -v

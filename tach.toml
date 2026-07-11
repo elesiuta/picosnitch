@@ -81,11 +81,11 @@ depends_on = ["picosnitch.config", "picosnitch.utils", "picosnitch.constants", "
 
 [[modules]]
 path = "picosnitch.subprocesses.fuse"
-depends_on = ["picosnitch.config", "picosnitch.utils"]
+depends_on = ["picosnitch.utils", "picosnitch.config"]
 
 [[modules]]
 path = "picosnitch.subprocesses.remote_sql"
-depends_on = ["picosnitch.config", "picosnitch.constants", "picosnitch.utils"]
+depends_on = ["picosnitch.constants", "picosnitch.utils", "picosnitch.config"]
 
 [[modules]]
 path = "picosnitch.subprocesses.virustotal"
@@ -93,7 +93,7 @@ depends_on = ["picosnitch.utils", "picosnitch.config"]
 
 [[modules]]
 path = "picosnitch.subprocesses.notifications"
-depends_on = ["picosnitch.config", "picosnitch.utils"]
+depends_on = ["picosnitch.utils", "picosnitch.config"]
 
 [[modules]]
 path = "picosnitch.ui"

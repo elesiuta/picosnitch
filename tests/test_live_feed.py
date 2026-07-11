@@ -50,12 +50,33 @@ def test_slow_subscriber_dropped():
         sub_sock.connect(str(live_feed.EVENTS_SOCKET_PATH))
         time.sleep(0.05)
         # Flood; some sends will eventually time out and the subscriber will be dropped.
+        started = time.monotonic()
         for i in range(2000):
             pub.publish({"i": i, "blob": "x" * 1024})
+        assert time.monotonic() - started < 2
+        assert not pub._subscribers
         # Publisher should still be functional
         pub.publish({"final": True})
         sub_sock.close()
     finally:
+        pub.stop()
+
+
+def test_subscriber_count_is_bounded(monkeypatch):
+    monkeypatch.setattr(live_feed, "MAX_SUBSCRIBERS", 2)
+    pub = live_feed.LiveFeedPublisher(group=None)
+    pub.start()
+    clients = []
+    try:
+        for _ in range(3):
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.connect(str(live_feed.EVENTS_SOCKET_PATH))
+            clients.append(client)
+        time.sleep(0.05)
+        assert len(pub._subscribers) == 2
+    finally:
+        for client in clients:
+            client.close()
         pub.stop()
 
 

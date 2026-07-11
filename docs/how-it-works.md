@@ -51,7 +51,7 @@ flowchart TD
 
     LIVE([live feed socket])
     SQL[("<b>local SQLite</b><br/>connections, executables,<br/>domains, addresses")]
-    REMOTE[("<b>optional remote DB</b><br/>INSERT-only")]
+    REMOTE[("<b>optional remote DB</b><br/>append-only")]
 
     TOP["<b>picosnitch top</b>"]
     TUI["<b>picosnitch tui</b>"]
@@ -111,9 +111,9 @@ small. See the [database schema](schema.md) for the column-level
 reference and example queries.
 
 Connection logs are pruned to `retention_days` on the local SQLite
-database only. If `[database.remote]` is configured, picosnitch issues
-only `INSERT` against the remote, intentionally, so the daemon
-cannot delete its own off-system history.
+database only. If `[database.remote]` is configured, picosnitch never
+updates or deletes remote rows, intentionally, so the daemon cannot
+delete its own off-system history.
 
 ## Trust model
 

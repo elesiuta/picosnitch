@@ -2,7 +2,14 @@ name: Publish to PyPI
 
 on:
   release:
-    types: [created]
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pypi
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -12,12 +19,12 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: pypi
       url: https://pypi.org/project/picosnitch/
     permissions:
-      id-token: write
+      id-token: write # PyPI trusted publishing
     steps:
       - uses: actions/download-artifact@v8
         with:

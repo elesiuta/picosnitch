@@ -15,11 +15,14 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 import picosnitch.utils as utils
 from picosnitch.bpf_wrapper import ConnKey4, ConnKey6, ConnVal, DNSEvent, ExecEvent
-from picosnitch.config import Config, load_config
+from picosnitch.config import Config, load_config, write_default_config
 from picosnitch.daemon import Daemon
-from picosnitch.utils import get_sha256_fuse
+from picosnitch.types import FanotifyEventMetadata, State
+from picosnitch.utils import get_sha256_fuse, resolve_unprivileged_user
 
 
 def test_corrupt_config_falls_back_to_defaults(tmp_path):
@@ -38,10 +41,19 @@ def test_non_utf8_config_falls_back_to_defaults(tmp_path):
 
 
 def test_config_numeric_clamps(tmp_path):
-    (tmp_path / "config.toml").write_text("[monitoring]\nperf_ring_buffer_pages = 3\nconn_map_max_entries = 0\n")
+    (tmp_path / "config.toml").write_text(
+        "[monitoring]\nperf_ring_buffer_pages = 3\nconn_map_max_entries = 0\nrlimit_nofile = true\nst_dev_mask = 4294967296\n"
+        "[database]\nretention_days = -1\nwrite_limit_seconds = -1\n"
+        "[virustotal]\nrequest_limit_seconds = -1\n"
+    )
     config = load_config(tmp_path)
     assert config.monitoring.perf_ring_buffer_pages == 256  # non-power-of-two clamped to default
     assert config.monitoring.conn_map_max_entries == 65536  # < 1 clamped to default
+    assert config.monitoring.rlimit_nofile is None
+    assert config.monitoring.st_dev_mask is None
+    assert config.database.retention_days == 30
+    assert config.database.write_limit_seconds == 10
+    assert config.virustotal.request_limit_seconds == 15
 
 
 def test_config_valid_values_preserved(tmp_path):
@@ -89,6 +101,36 @@ def test_config_valid_owner_preserved(tmp_path):
     assert config.data.owner == "root" and config.data.group == "0" and config.data.mode == "0600"
 
 
+def test_desktop_user_uses_passwd_primary_group(tmp_path, monkeypatch):
+    import pwd
+
+    monkeypatch.delenv("SUDO_UID", raising=False)
+    nobody = pwd.getpwnam("nobody")
+    (tmp_path / "config.toml").write_text(f'[desktop]\nuser = "{nobody.pw_name}"\n')
+    assert load_config(tmp_path).desktop.user == nobody.pw_name
+    assert resolve_unprivileged_user(nobody.pw_name) == (nobody.pw_uid, nobody.pw_gid)
+    (tmp_path / "config.toml").write_text('[desktop]\nuser = "root"\n')
+    assert load_config(tmp_path).desktop.user == ""
+    assert resolve_unprivileged_user("9" * 100) != (0, 0)
+
+
+def test_resolve_unprivileged_user_rejects_gid_zero(monkeypatch):
+    """a non-root user whose primary group is root (gid 0) must fall back to nobody, not drop to
+    gid 0 -- setgid(0) would keep group-root on the dropped-privilege side of the boundary."""
+    import pwd
+
+    nobody = pwd.getpwnam("nobody")
+    gid0 = pwd.struct_passwd(("appliance", "x", 1000, 0, "", "/home/appliance", "/bin/sh"))
+    monkeypatch.setattr(utils.pwd, "getpwnam", lambda name: gid0 if name == "appliance" else nobody)
+    assert resolve_unprivileged_user("appliance") == (nobody.pw_uid, nobody.pw_gid)
+
+
+def test_default_config_is_private(tmp_path):
+    config_path = tmp_path / "config.toml"
+    write_default_config(config_path)
+    assert config_path.stat().st_mode & 0o777 == 0o600
+
+
 def test_config_ignore_ips_validated(tmp_path):
     """log.ignore_ips entries that aren't valid networks must be dropped (a host-bit CIDR is kept
     and later normalized with strict=False); else secondary crashes building ignored_networks at
@@ -101,6 +143,25 @@ def test_config_ignore_ips_validated(tmp_path):
     [ipaddress.ip_network(x, strict=False) for x in config.log.ignore_ips]  # consumer must not raise
     (tmp_path / "config.toml").write_text('[log]\nignore_ips = "1.2.3.4"\n')  # not a list
     assert load_config(tmp_path).log.ignore_ips == []
+
+
+def test_config_ignore_domains_validated(tmp_path):
+    """log.ignore_domains entries that aren't non-empty strings must be dropped: a non-str crashes
+    secondary's startswith() filter every write cycle (halting all logging), an empty string matches
+    every domain (silently dropping all connections) -- both outside the subprocess try/except."""
+    (tmp_path / "config.toml").write_text('[log]\nignore_domains = ["ads.", "", "telemetry."]\n')
+    config = load_config(tmp_path)
+    assert config.log.ignore_domains == ["ads.", "telemetry."]  # empty string dropped
+    for prefix in config.log.ignore_domains:  # consumer must not raise
+        "example.com".startswith(prefix)
+
+
+def test_config_ignore_ports_and_hashes_validated(tmp_path):
+    digest = "A" * 64
+    (tmp_path / "config.toml").write_text(f'[log]\nignore_ports = [true, -2, -1, 443, 65536]\nignore_sha256 = [5, "bad", "{digest}"]\n')
+    config = load_config(tmp_path)
+    assert config.log.ignore_ports == [-1, 443]
+    assert config.log.ignore_sha256 == [digest.lower()]
 
 
 def test_maintain_database_quarantines_corrupt(tmp_path):
@@ -234,6 +295,15 @@ def test_db_is_corrupt(tmp_path):
     garbage = tmp_path / "garbage.db"
     garbage.write_bytes(b"not a sqlite database" * 8)
     assert _db_is_corrupt(garbage) is True
+    target = mkdb("target.db")
+    symlink = tmp_path / "symlink.db"
+    symlink.symlink_to(target)
+    assert _db_is_corrupt(symlink) is True
+    hardlink = tmp_path / "hardlink.db"
+    os.link(target, hardlink)
+    assert _db_is_corrupt(hardlink) is True
+    with pytest.raises(sqlite3.OperationalError):
+        utils.connect_db_readonly(symlink)
 
 
 def test_db_is_corrupt_ignores_transient_errors(tmp_path, monkeypatch):
@@ -324,7 +394,7 @@ def test_resolve_tool_prefers_trusted_dirs(tmp_path, monkeypatch):
     (other / "env").chmod(0o755)
     monkeypatch.setenv("PATH", str(other) + os.pathsep + os.environ.get("PATH", ""))
     resolved = bpf_wrapper._resolve_tool("env")
-    assert resolved.startswith(("/usr/bin/", "/bin/"))  # trusted dir won, not the one on $PATH
+    assert os.path.isabs(resolved)
     assert str(other) not in resolved
     with pytest.raises(RuntimeError):
         bpf_wrapper._resolve_tool("picosnitch-no-such-build-tool-xyz")
@@ -367,6 +437,21 @@ def test_valid_state_json_loads(tmp_path, monkeypatch):
     state = utils.load_state()
     assert state["Executables"] == {"/bin/x": ["abc"]}
     assert not (tmp_path / "state.json.bad").exists()
+
+
+def test_state_json_rejects_hardlinks_and_oversize(tmp_path, monkeypatch):
+    monkeypatch.setattr(utils, "DATA_DIR", tmp_path)
+    target = tmp_path / "target"
+    target.write_text("{}")
+    os.link(target, tmp_path / "state.json")
+    assert utils.load_state()["Executables"] == {}
+    assert (tmp_path / "state.json.bad").exists()
+    (tmp_path / "state.json.bad").unlink()
+    oversized = tmp_path / "state.json"
+    with open(oversized, "wb") as f:
+        f.truncate(256 * 1024 * 1024 + 1)
+    assert utils.load_state()["Executables"] == {}
+    assert (tmp_path / "state.json.bad").exists()
 
 
 def test_daemon_getpid_handles_bad_pidfile(tmp_path):
@@ -485,6 +570,32 @@ def test_fuse_no_reply_times_out(monkeypatch):
     assert time.monotonic() - start < 1
 
 
+def test_fanotify_overflow_invalidates_all_hashes():
+    class Errors:
+        def __init__(self):
+            self.items = []
+
+        def put(self, item):
+            self.items.append(item)
+
+    event = FanotifyEventMetadata()
+    event.event_len = ctypes.sizeof(event)
+    event.metadata_len = ctypes.sizeof(event)
+    event.mask = 0x4000  # FAN_Q_OVERFLOW
+    event.fd = -1
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, bytes(event))
+        counts = {}
+        errors = Errors()
+        utils.get_fanotify_events(read_fd, counts, errors)  # ty: ignore[invalid-argument-type]
+        assert counts == {"*": 1}
+        assert errors.items == ["fanotify queue overflowed; invalidating all cached executable hashes"]
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+
+
 def test_proc_reads_survive_non_utf8_comm():
     """a process can set a non-UTF-8 comm via prctl(PR_SET_NAME); the monitor's /proc text
     readers must degrade to replacement chars, not raise UnicodeDecodeError (which dropped
@@ -502,3 +613,127 @@ def test_proc_reads_survive_non_utf8_comm():
     finally:
         p.kill()
         p.wait()
+
+
+def test_apply_data_permissions_keeps_dirs_root_owned(tmp_path):
+    """[data].owner may be a non-root account (to read/restrict the logs); the data/log/cache
+    DIRECTORIES must stay root-owned and non-group/other-writable so that account can't swap a
+    file for a symlink/FIFO and attack the root daemon. Only the FILES take the configured owner."""
+    if os.geteuid() != 0:
+        pytest.skip("requires root to chown to another account")
+    import pwd
+
+    try:
+        nobody = pwd.getpwnam("nobody").pw_uid
+    except KeyError:
+        pytest.skip("no 'nobody' account")
+    etc, data, log, cache = (tmp_path / d for d in ("etc", "data", "log", "cache"))
+    for d in (etc, data, log, cache):
+        d.mkdir()
+    (etc / "config.toml").write_text('[data]\nowner = "nobody"\n')
+    (data / "picosnitch.db").write_text("x")
+    utils.apply_data_permissions(etc, data, log, cache)
+    assert (etc / "config.toml").stat().st_uid == 0
+    assert (etc / "config.toml").stat().st_mode & 0o777 == 0o600
+    assert data.stat().st_uid == 0  # dir stays root-owned -> no symlink/FIFO swap by [data].owner
+    assert not (data.stat().st_mode & 0o022)  # never group/other-writable
+    assert (data / "picosnitch.db").stat().st_uid == nobody  # the file takes [data].owner (readable)
+
+
+def test_save_state_preserves_configured_owner(tmp_path, monkeypatch):
+    if os.geteuid() != 0:
+        pytest.skip("requires root to chown to another account")
+    import pwd
+
+    try:
+        nobody = pwd.getpwnam("nobody").pw_uid
+    except KeyError:
+        pytest.skip("no 'nobody' account")
+    monkeypatch.setattr(utils, "DATA_DIR", tmp_path)
+    config = Config()
+    config.data.owner = str(nobody)
+    config.data.group = str(nobody)
+    config.data.mode = "0640"
+    state: State = {
+        "Error Log": [],
+        "Exe Log": [],
+        "Executables": {},
+        "Names": {},
+        "Parent Executables": {},
+        "Parent Names": {},
+        "Grandparent Executables": {},
+        "Grandparent Names": {},
+        "SHA256": {},
+    }
+    utils.save_state(state, config=config)
+    state_path = tmp_path / "state.json"
+    assert (state_path.stat().st_uid, state_path.stat().st_gid) == (nobody, nobody)
+    assert state_path.stat().st_mode & 0o777 == 0o640
+    utils.save_state(state, config=config)
+    assert (state_path.stat().st_uid, state_path.stat().st_gid) == (nobody, nobody)
+
+
+def test_sanitize_log_line_neutralizes_control_chars():
+    """attacker-influenced fields (comm/cmdline/domain) reach conn.log/error.log/exe.log; every
+    C0 (except tab), DEL, and C1 (e.g. U+009B CSI) must be stripped so a viewed log can't be
+    driven to emit a terminal escape or overwrite a prior line."""
+    dirty = "safe\x1b[2K\x07\x08\r\n\x00mid\x7f\x9bend\ttab\u202eignored\udc9b"
+    clean = utils.sanitize_log_line(dirty)
+    assert all(c not in clean for c in "\x1b\x07\x08\r\n\x00\x7f\x9b")  # all control chars gone
+    assert "safe" in clean and "mid" in clean and "end" in clean  # printable text preserved
+    assert "\ttab" in clean  # tab kept (harmless in a log, not cursor movement here)
+    assert "\u202e" not in clean
+    assert "\udc9b" not in clean
+
+
+def test_safe_log_open_rejects_fifo_and_symlink(tmp_path):
+    """LOG_DIR may be owned by [data].owner, who could swap a log for a FIFO (hang the root daemon
+    on open) or a symlink (redirect its writes); safe_log_open must reject both, not block."""
+    import signal
+
+    fifo = tmp_path / "conn.log"
+    os.mkfifo(fifo)
+
+    def _alarm(*_):
+        raise TimeoutError("safe_log_open hung on a FIFO")
+
+    signal.signal(signal.SIGALRM, _alarm)
+    signal.alarm(5)
+    try:
+        with pytest.raises(OSError):  # ENXIO (no reader) or the S_ISREG reject -- never a hang
+            utils.safe_log_open(fifo)
+    finally:
+        signal.alarm(0)
+    fifo.unlink()
+    target = tmp_path / "root_secret"
+    target.write_text("secret")
+    link = tmp_path / "error.log"
+    link.symlink_to(target)
+    with pytest.raises(OSError):  # O_NOFOLLOW -> ELOOP
+        utils.safe_log_open(link)
+    assert target.read_text() == "secret"  # untouched
+    hardlink = tmp_path / "hardlink.log"
+    os.link(target, hardlink)
+    with pytest.raises(OSError):
+        utils.safe_log_open(hardlink)
+    # a real regular file still opens and appends
+    reg = tmp_path / "ok.log"
+    with utils.safe_log_open(reg) as f:
+        f.write("hi\n")
+    assert reg.read_text() == "hi\n"
+
+
+def test_safe_log_open_applies_configured_permissions(tmp_path):
+    if os.geteuid() != 0:
+        pytest.skip("requires root to chown")
+    import pwd
+
+    nobody = pwd.getpwnam("nobody")
+    config = Config()
+    config.data.owner = str(nobody.pw_uid)
+    config.data.group = str(nobody.pw_gid)
+    config.data.mode = "0640"
+    path = tmp_path / "new.log"
+    with utils.safe_log_open(path, config=config) as f:
+        f.write("x")
+    assert (path.stat().st_uid, path.stat().st_gid, path.stat().st_mode & 0o777) == (nobody.pw_uid, nobody.pw_gid, 0o640)

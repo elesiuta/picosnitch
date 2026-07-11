@@ -144,3 +144,4 @@ def test_key_hash_injective_over_separator():
     a = ("A", "B", "C\x1fD", "e" * 64)
     b = ("A", "B\x1fC", "D", "e" * 64)
     assert executables_key_hash(a) != executables_key_hash(b)
+    assert executables_key_hash(("\udc80", "B", "C", "D")) != executables_key_hash(("\udc81", "B", "C", "D"))

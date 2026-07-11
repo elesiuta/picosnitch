@@ -7,12 +7,10 @@ name: Pages
 on:
   workflow_dispatch:
   release:
-    types: [created]
+    types: [published]
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # One deploy at a time; never cancel an in-progress publish.
 concurrency:
@@ -26,6 +24,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Install system packages (ttyd, ffmpeg, chromium deps)
         run: |
@@ -47,7 +47,8 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v8.1.0
         with:
-          enable-cache: true
+          enable-cache: false
+          version: "0.11.26"
 
       - name: Generate screenshots and videos
         run: bash docs/generate_screenshots.sh
@@ -72,6 +73,9 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write # deploy Pages
+      id-token: write # authenticate the deployment
     steps:
       - id: deployment
         uses: actions/deploy-pages@v5

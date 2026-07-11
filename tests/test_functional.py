@@ -223,9 +223,6 @@ def picosnitch_session():
     stop_existing_picosnitch()
     clean_test_dirs()
 
-    # Init directories
-    subprocess.run([PYTHON_EXE, "-m", "picosnitch", "init"], capture_output=True, timeout=30)
-
     proc = start_picosnitch()
 
     yield proc

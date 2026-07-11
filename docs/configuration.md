@@ -18,7 +18,7 @@ The block below is included verbatim from the project README.
 
 | Variable | Used by | Purpose |
 | --- | --- | --- |
-| `PICOSNITCH_HOST` | `picosnitch webui` | Override the web UI bind address (default `127.0.0.1`). |
+| `PICOSNITCH_HOST` | `picosnitch webui` | Override the web UI bind address (default `localhost`). |
 | `PICOSNITCH_PORT` | `picosnitch webui` | Override the web UI port (default `5100`). |
 | `SUDO_UID` | daemon | Used as the default `[desktop].user` for notifications. |
 
@@ -32,20 +32,27 @@ optional drivers with the `[sql]` extra:
 sudo pipx install 'picosnitch[sql]' --global
 ```
 
-Picosnitch only ever issues `INSERT` against the remote (no retention,
-no garbage collection), so it is intended as an
+Picosnitch never updates or deletes remote rows (no retention, no
+garbage collection), so it is intended as an
 [off-system copy of your logs](https://en.wikipedia.org/wiki/Host-based_intrusion_detection_system#Protecting_the_HIDS).
 The remote writer runs in an unprivileged subprocess (`[desktop].user`
 if set, otherwise `nobody`), so the database driver is never imported
 by a root process.
-Grant the daemon's database user `INSERT` only to prevent an adversary
-on the monitored host from deleting picosnitch's off-system logs.
+Grant the daemon's database user only `CREATE` (first run), `INSERT`,
+and `SELECT` (id lookups) so an adversary on the monitored host cannot
+rewrite or delete picosnitch's off-system logs.
 
 The remote schema mirrors the local SQLite layout
-([see schema](schema.md)). Only the `connections` table name is
-configurable (via `connections_table`), which lets multiple hosts share
-one server with their own `connections_<host>` table each while reusing
-the shared `executables` / `domains` / `addresses` reference tables.
+([see schema](schema.md)), except the `executables` table dedups on an
+added `key_hash` column rather than the raw text columns. Only the
+`connections` table name is configurable (via `connections_table`),
+which lets multiple hosts share one server with their own
+`connections_<host>` table each while reusing the shared `executables` /
+`domains` / `addresses` reference tables.
+
+If an existing remote `executables` table lacks `key_hash`, picosnitch
+detects the outdated schema and does not alter or drop it; back up and
+recreate the remote tables to enable remote logging.
 
 Example, ship logs to a MariaDB server with a per-host table:
 

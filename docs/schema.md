@@ -7,7 +7,11 @@ heavy metadata interned into side tables so the per-connection rows
 stay small.
 
 The remote SQL schema (`[database.remote]`) mirrors the same four
-tables, minus the `STRICT` modifier (not all servers support it).
+tables, minus the `STRICT` modifier (not all servers support it), except
+the remote `executables` table dedups on an added `key_hash CHAR(64)`
+column instead of a `UNIQUE(exe, name, cmdline, sha256)` constraint
+(remote text columns are unbounded, breaking a raw multi-column unique
+index).
 
 ## Tables
 
@@ -126,7 +130,7 @@ ORDER BY c.contime DESC;
 
 If `[database].text_log = true`, picosnitch also writes a flat CSV at
 `/var/log/picosnitch/conn.log` with these fields per row (commas,
-newlines, and NUL bytes are stripped from values):
+newlines, carriage returns, and NUL bytes are stripped from values):
 
 ```
 entry time, sent bytes, received bytes, event count,
