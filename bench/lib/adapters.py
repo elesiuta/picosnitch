@@ -41,11 +41,27 @@ class ToolAdapter:
     does_attribution = True
     settle = 2.0  # seconds to wait after a trial before collecting
     gen_prefix = []  # optional wrapper the runner applies to generator launches
+    # The version actually running is read from the installed tool after install()
+    # and recorded with the results, so reports state observed versions rather than
+    # intended ones. SOURCE distinguishes a version this harness pins (built or
+    # downloaded at a fixed tag) from a distro package, whose version is whatever
+    # the archive currently ships and is only recorded.
+    VERSION_CMD = ""
+    VERSION_SOURCE = ""
 
     def __init__(self, sess: Path):
         self.sess = sess
         self.sess.mkdir(parents=True, exist_ok=True)
         self.proc = None
+
+    def version(self) -> str:
+        """Observed version of the installed tool ('' if it cannot be read)."""
+        if not self.VERSION_CMD:
+            return ""
+        r = sh(self.VERSION_CMD)
+        out = (r.stdout or "") + (r.stderr or "")
+        m = re.search(r"\d+\.\d+(\.\d+)*(-\S+)?", out)
+        return m.group(0) if m else ""
 
     # lifecycle ---------------------------------------------------------------
     def install(self): ...
@@ -134,6 +150,8 @@ def _systemd_mainpid(service):
 # --------------------------------------------------------------------------- #
 class Picosnitch(ToolAdapter):
     name = "picosnitch"
+    VERSION_CMD = "picosnitch version"
+    VERSION_SOURCE = "pinned (PyPI via pipx)"
     layer = "socket"
     settle = 2.0  # small; collect() polls until the DB flush stabilizes
     DB = "/var/lib/picosnitch/picosnitch.db"
@@ -263,20 +281,25 @@ class Picosnitch(ToolAdapter):
 # --------------------------------------------------------------------------- #
 class Nethogs(ToolAdapter):
     name = "nethogs"
+    VERSION_CMD = "/usr/local/sbin/nethogs -V 2>&1"
+    VERSION_SOURCE = "pinned (built from source tag)"
     layer = "wire"
     settle = 2.5
 
+    VERSION = "0.9.0"
+
     def install(self):
-        if Path("/usr/local/sbin/nethogs").exists():
+        if f"version {self.VERSION}" in sh("/usr/local/sbin/nethogs -V 2>&1").stdout:
             return
         sh("apt-get install -y build-essential libpcap-dev libncurses-dev git")
         src = DL / "nethogs"
         if not src.exists():
             sh(f"git clone https://github.com/raboof/nethogs {src}", timeout=300)
-        sh(f"git -C {src} checkout v0.8.8")  # latest tagged release
-        r = sh(f"make -C {src} && make -C {src} install", timeout=600)
-        if not Path("/usr/local/sbin/nethogs").exists():
-            raise RuntimeError(f"nethogs build failed: {r.stderr[-800:]}")
+        sh(f"git -C {src} fetch --tags", timeout=300)
+        sh(f"git -C {src} checkout v{self.VERSION}")
+        r = sh(f"make -C {src} clean; make -C {src} && make -C {src} install", timeout=600)
+        if f"version {self.VERSION}" not in sh("/usr/local/sbin/nethogs -V 2>&1").stdout:
+            raise RuntimeError(f"nethogs {self.VERSION} build failed: {r.stderr[-800:]}")
 
     def start(self):
         # -t trace, -C include UDP, -v2 cumulative bytes, -a include loopback,
@@ -360,6 +383,8 @@ class Nethogs(ToolAdapter):
 # --------------------------------------------------------------------------- #
 class Bandwhich(ToolAdapter):
     name = "bandwhich"
+    VERSION_CMD = "bandwhich --version"
+    VERSION_SOURCE = "pinned (release binary)"
     layer = "wire"
     settle = 2.5
     URL = "https://github.com/imsnif/bandwhich/releases/download/v0.23.1/bandwhich-v0.23.1-x86_64-unknown-linux-musl.tar.gz"
@@ -442,6 +467,8 @@ class Bandwhich(ToolAdapter):
 # --------------------------------------------------------------------------- #
 class OpenSnitch(ToolAdapter):
     name = "opensnitch"
+    VERSION_CMD = "dpkg-query -W -f '${Version}' opensnitch"
+    VERSION_SOURCE = "pinned (release .deb)"
     layer = "socket"
     does_bandwidth = False  # firewall/detector: no byte accounting
     does_attribution = True
@@ -533,17 +560,20 @@ class OpenSnitch(ToolAdapter):
 # --------------------------------------------------------------------------- #
 class Sniffnet(ToolAdapter):
     name = "sniffnet"
+    VERSION_CMD = "dpkg-query -W -f '${Version}' sniffnet"
+    VERSION_SOURCE = "pinned (release .deb)"
     layer = "wire"
     does_attribution = True  # per-process only in the live GUI -> extracted by OCR
     settle = 2.0
     DISPLAY = ":99"
-    DEB = "https://github.com/GyulyVGC/sniffnet/releases/download/v1.5.0/Sniffnet_LinuxDEB_amd64.deb"
+    VERSION = "1.5.1"
+    DEB = f"https://github.com/GyulyVGC/sniffnet/releases/download/v{VERSION}/Sniffnet_LinuxDEB_amd64.deb"
 
     def install(self):
-        if not Path("/usr/bin/sniffnet").exists():
+        if self.VERSION not in sh("dpkg-query -W -f '${Version}' sniffnet 2>/dev/null").stdout:
             sh("apt-get install -y xvfb libpcap0.8 libasound2t64 libfontconfig1 libgtk-3-0t64 libxkbcommon-x11-0 tcpdump tesseract-ocr imagemagick")
-            deb = _download(self.DEB, DL / "sniffnet.deb")
-            sh(f"apt-get install -y {deb}", timeout=600)
+            deb = _download(self.DEB, DL / f"sniffnet-{self.VERSION}.deb")
+            sh(f"apt-get install -y --allow-downgrades {deb}", timeout=600)
 
     def start(self):
         self.pcap = self.sess / "sniffnet.pcap"
@@ -668,6 +698,8 @@ class Sniffnet(ToolAdapter):
 # --------------------------------------------------------------------------- #
 class LittleSnitch(ToolAdapter):
     name = "littlesnitch"
+    VERSION_CMD = "dpkg-query -W -f '${Version}' littlesnitch"
+    VERSION_SOURCE = "pinned (release .deb)"
     layer = "socket"
     settle = 3.0
     DEB = "https://obdev.at/downloads/littlesnitch-linux/littlesnitch_1.0.9_amd64.deb"
@@ -760,6 +792,9 @@ class LittleSnitch(ToolAdapter):
 # --------------------------------------------------------------------------- #
 class Bcc(ToolAdapter):
     name = "bcc-baseline"
+    # read the built library's soname: probing the tools themselves would attach BPF
+    VERSION_CMD = "readlink -f /usr/local/lib/libbcc.so"
+    VERSION_SOURCE = "pinned (built from source tag)"
     layer = "socket"
     settle = 2.0
 
@@ -875,6 +910,8 @@ class Bcc(ToolAdapter):
 # --------------------------------------------------------------------------- #
 class BccTcptop(ToolAdapter):
     name = "bcc-tcptop"
+    VERSION_CMD = "readlink -f /usr/local/lib/libbcc.so"
+    VERSION_SOURCE = "pinned (built from source tag)"
     layer = "socket"  # hooks tcp_sendmsg / tcp_cleanup_rbuf -> app bytes
     settle = 2.0
 
@@ -960,6 +997,8 @@ class BccTcptop(ToolAdapter):
 # --------------------------------------------------------------------------- #
 class Bpftrace(ToolAdapter):
     name = "bpftrace"
+    VERSION_CMD = "bpftrace --version"
+    VERSION_SOURCE = "distro package (recorded, not pinned)"
     layer = "socket"
     settle = 2.0
     # arg2 of tcp_sendmsg is size (bytes queued to send); arg1 of tcp_cleanup_rbuf
@@ -1018,17 +1057,22 @@ class Bpftrace(ToolAdapter):
 
 
 # --------------------------------------------------------------------------- #
-# sysdig — syscall-capture per-process network bytes (a different mechanism than
-# the socket-hook tools: it sums bytes moved by network I/O syscalls). Covers
-# tcp/udp/icmp/raw (fd.type ipv4/ipv6); not AF_PACKET.
+# Sysdig — syscall-capture per-process network bytes (a different mechanism than
+# the socket-hook tools: it sums bytes moved by network I/O syscalls).
 # --------------------------------------------------------------------------- #
 class Sysdig(ToolAdapter):
     name = "sysdig"
+    VERSION_CMD = "sysdig --version"
+    VERSION_SOURCE = "distro package (recorded, not pinned)"
     layer = "socket"  # evt.rawres = bytes moved by the syscall (app layer)
     settle = 2.5
     # kernel-side filter to only our generators keeps the captured event volume
-    # (and thus overhead + drops) low. io_dir is read/write; rawres is bytes moved.
-    FILTER = "fd.type in (ipv4,ipv6) and evt.is_io=true and evt.rawres>0 and proc.name contains bg"
+    # (and thus overhead) low. io_dir is read/write; rawres is bytes moved.
+    # Two branches, because fd.type classifies INET sockets only: packet sockets
+    # (AF_PACKET) report no fd.type, so they are matched by the socket-I/O syscall
+    # names instead. File I/O (read/write/pread/pwrite) matches neither branch.
+    SOCK_SYSCALLS = "send,sendto,sendmsg,sendmmsg,recv,recvfrom,recvmsg,recvmmsg"
+    FILTER = f"(fd.type in (ipv4,ipv6) or evt.type in ({SOCK_SYSCALLS})) and evt.is_io=true and evt.rawres>0 and proc.name contains bg"
     FMT = "%proc.name %evt.io_dir %evt.rawres"
 
     def install(self):
@@ -1054,14 +1098,7 @@ class Sysdig(ToolAdapter):
 
     def collect(self, gt: GT) -> Observation:
         if self.broken or self._broken():
-            return Observation(na=True, note="sysdig probe failed to load on this kernel")
-        if gt.proto == "afpacket":
-            # AF_PACKET (L2) bypasses the network-I/O syscalls sysdig accounts for
-            # (its fd.type ipv4/ipv6 filter never matches), so this is a real miss,
-            # scored FAIL like the other general socket/syscall monitors (picosnitch,
-            # little snitch) -- NOT N/A. bcc/bpftrace stay N/A only because they are
-            # explicitly TCP-only (N/A on every non-TCP scenario).
-            return Observation(flow_detected=False, proc_attributed=False, sent=0, recv=0, note="AF_PACKET bypasses sysdig's network syscall accounting")
+            return Observation(na=True, note="Sysdig probe failed to load on this kernel")
         sent = recv = 0.0
         attributed = False
         names = []
@@ -1092,7 +1129,7 @@ class Sysdig(ToolAdapter):
             names=names[:1],
             sent=int(sent) if attributed else 0,
             recv=int(recv) if attributed else 0,
-            note="sysdig network I/O syscall bytes, per process",
+            note="Sysdig network I/O syscall bytes, per process",
         )
 
     def stop(self):

@@ -3,7 +3,7 @@
 #
 # Builds a dedicated "remote peer" inside its own network namespace connected to
 # the host over a veth pair, so benchmark traffic crosses a real interface
-# (vbench0) with exact, drop-free wire accounting via nftables counters — no
+# (vbench0) with exact wire accounting via dedicated nftables counters: no
 # external network, no CDN variance, fully reproducible.
 #
 #   host (default netns)                     peer netns (BENCH_NS)
@@ -15,7 +15,7 @@
 # Ground truth is captured at TWO layers so the comparison is fair to tools that
 # measure at different points in the stack:
 #   * application bytes  — counted by the traffic generators themselves (exact)
-#   * wire bytes (L3+L4) — nftables counters in the peer netns (drop-free, exact)
+#   * wire bytes (L3+L4): dedicated nftables counters in the peer netns
 # pcap tools additionally see the 14-byte Ethernet header per packet; the packet
 # count is recorded so that delta is computable.
 set -euo pipefail

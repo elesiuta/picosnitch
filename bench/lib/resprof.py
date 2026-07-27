@@ -1,5 +1,5 @@
 """Resource profiler for the benchmark: sample a tool's whole process tree
-(CPU + PSS memory) at a fixed cadence and report avg/peak.
+(CPU + PSS memory) at a fixed cadence and report the mean, percentiles and peak.
 
 Uniform across every tool because it profiles by PID subtree, not by any
 tool-specific mechanism: each adapter reports its root PID(s) (its subprocess

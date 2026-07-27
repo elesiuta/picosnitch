@@ -1,4 +1,4 @@
-"""Core benchmark infrastructure: network lab control, dual-layer ground-truth
+"""Core benchmark infrastructure: network lab control, dual-layer reference
 capture, the scenario framework, the per-trial data model, and scoring.
 
 Everything here is tool-agnostic. Tool adapters live in adapters.py; scenario
@@ -302,7 +302,8 @@ def gt_directions(gt: GT):
 
 def combine_trials(verdicts):
     """Reduce N per-trial verdicts to a cell verdict + flakiness flag.
-    PASS if all-but-one PASS; else the modal/worst; flaky if not unanimous."""
+    PASS if at least four of five trials PASS; else the modal/worst verdict.
+    The second return value flags trials that did not all agree."""
     from collections import Counter
 
     c = Counter(verdicts)

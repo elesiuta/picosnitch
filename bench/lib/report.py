@@ -12,15 +12,15 @@ SHORT = {"PASS": "✅", "PARTIAL": "🟡", "FAIL": "❌", "N/A": "⬜", "ERROR":
 TOOL_ORDER = ["picosnitch", "nethogs", "bandwhich", "opensnitch", "sniffnet", "littlesnitch", "bcc-baseline", "bcc-tcptop", "bpftrace", "sysdig"]
 TOOL_LABEL = {
     "picosnitch": "picosnitch",
-    "nethogs": "nethogs",
+    "nethogs": "NetHogs",
     "bandwhich": "bandwhich",
-    "opensnitch": "opensnitch",
-    "sniffnet": "sniffnet",
-    "littlesnitch": "little-snitch",
-    "bcc-baseline": "bcc",
-    "bcc-tcptop": "bcc tcptop",
-    "bpftrace": "bpftrace",
-    "sysdig": "sysdig",
+    "opensnitch": "OpenSnitch",
+    "sniffnet": "Sniffnet",
+    "littlesnitch": "Little Snitch",
+    "bcc-baseline": "BCC tcplife/tcpconnect",
+    "bcc-tcptop": "BCC tcptop",
+    "bpftrace": "bpftrace script",
+    "sysdig": "Sysdig",
 }
 
 
@@ -62,9 +62,19 @@ def _cell(rec, kind, tool):
     return SHORT.get(v, "?"), flaky
 
 
-def _matrix(data, kind, title, tools):
+BW_SUBTITLE = (
+    "Scored on the bytes reported, independently of attribution. A configuration that measured the traffic but "
+    "bucketed it as unknown instead of naming the process is still scored here on those bytes; that attribution "
+    "miss is what the detection grid records as PARTIAL, so the two grids are meant to be read together."
+)
+
+
+def _matrix(data, kind, title, tools, subtitle=""):
     scn = build_scenarios()
-    lines = [f"## {title}", "", "| # | Scenario | " + " | ".join(TOOL_LABEL[t] for t in tools) + " |", "|---|---|" + "|".join(["---"] * len(tools)) + "|"]
+    lines = [f"## {title}", ""]
+    if subtitle:
+        lines += [subtitle, ""]
+    lines += ["| # | Scenario | " + " | ".join(TOOL_LABEL[t] for t in tools) + " |", "|---|---|" + "|".join(["---"] * len(tools)) + "|"]
     for s in scn:
         row = [s.sid, s.name]
         for t in tools:
@@ -73,13 +83,13 @@ def _matrix(data, kind, title, tools):
             mark = ("*" if t in BESTOF else "⚡") if flaky else ""
             row.append(sym + mark)
         lines.append("| " + " | ".join(row) + " |")
-    lines += ["", "Legend: ✅ PASS · 🟡 PARTIAL · ❌ FAIL · ⬜ N/A · ⚠️ error · ⚡ flaky across trials · \\* sniffnet OCR-flaky (scored best-of-5)", ""]
+    lines += ["", "Legend: ✅ PASS · 🟡 PARTIAL · ❌ FAIL · ⬜ N/A · ⚠️ error · ⚡ trials disagreed · \\* Sniffnet OCR, scored best of 5 trials", ""]
     return "\n".join(lines)
 
 
 def _footnotes(data, tools):
     scn = {s.sid: s for s in build_scenarios()}
-    lines = ["## Notes & partial/flaky explanations", ""]
+    lines = ["## Result notes", ""]
     for t in tools:
         d = data.get(t, {})
         sc = d.get("scenarios", {})
@@ -131,7 +141,6 @@ def _per_tool(data, tool):
         f"# {TOOL_LABEL.get(tool, tool)} — detailed results",
         "",
         f"- layer scored against: **{d.get('layer')}** ({'app-layer bytes' if d.get('layer') == 'socket' else 'wire bytes'})",
-        f"- does bandwidth: {d.get('does_bandwidth')} · does per-process attribution: {d.get('does_attribution')}",
         "",
     ]
     ctrl = d.get("control")
@@ -172,7 +181,7 @@ def _per_tool(data, tool):
         note = (obs.get("note", "") or "")[:80]
         lines.append(f"| {sid} | {s.name} | {det} | {bw} | {gtapp} | {gtwire} | {rep} | {ratio} | {note} |")
     if any_flaky:
-        lines += ["", "⚡/\\* rows: trials disagreed; the table shows the first trial's numbers, while the verdict combines all trials (best-of-5 for sniffnet)."]
+        lines += ["", "⚡/\\* rows: trials disagreed; the table shows the first trial's numbers, while the verdict combines all trials (best of 5 for Sniffnet)."]
     return "\n".join(lines) + "\n"
 
 
@@ -209,6 +218,8 @@ def write_findings():
         return
     scn = build_scenarios()
     C = {t: _counts(data[t], t) for t in tools}
+    dates = sorted({d.get("run_date", "") for d in data.values() if d.get("run_date")})
+    RUN_DATE = dates[0] if len(dates) == 1 else (f"{dates[0]} to {dates[-1]}" if dates else "date not recorded")
     # neutral ordering for the scoreboard: by detection then bandwidth PASS
     order = sorted(tools, key=lambda t: (-C[t]["det_pass"], -C[t]["bw_pass"]))
 
@@ -220,25 +231,26 @@ def write_findings():
         "A comparison of per-process (per-executable) network and bandwidth "
         "monitors on Linux, measuring **completeness** (is traffic seen and "
         "attributed to the right process) and **accuracy** (are the byte counts "
-        "correct).\n",
+        "correct). Nine projects in ten configurations.\n",
         # NOTE: the host line below describes the recorded runs; update it if
         # re-running the matrix elsewhere.
-        f"{len(scn)} scenarios × 5 trials, each tool run in isolation on Ubuntu "
-        f"26.04 (kernel 7.0) on a GCP e2-standard-4 (4 vCPUs, 16 GB), scored against "
-        f"independent ground truth. Detection = "
+        f"{len(scn)} scenarios × 5 trials, each configuration run in isolation on Ubuntu "
+        f"26.04 (kernel 7.0) on a GCP e2-standard-4 (4 vCPUs, 16 GB), run {RUN_DATE}, "
+        f"scored against tool-independent reference measurements. Detection = "
         f"*seen and attributed to the right process*; Bandwidth = *bytes within "
         f"±10% (PASS) / ±25% (PARTIAL)* of the tool's measurement layer. Method, "
-        f"harness, and how to reproduce: [the `bench/` directory]({REPO}).\n",
-        "## Scoreboard\n",
-        f"Each cell counts scenarios (of {len(scn)}). N/A marks a capability a tool "
-        "does not offer: opensnitch does no bandwidth accounting; the bcc tools and "
-        "`bpftrace` hook TCP only. sniffnet has no per-process export, so its figures "
-        "are read by OCR of its GUI and scored **best-of-5** — a scenario passes if "
-        "any of its 5 trials passes; `*` marks cells where its trials disagreed — and "
-        "it reports one combined per-program total, so the two full-duplex scenarios "
-        "it cannot split by direction are N/A. The Flaky column counts scenarios "
-        "whose 5 trials did not all agree.\n",
-        "| Tool | Detection: PASS / PART / FAIL / N-A | Bandwidth: PASS / PART / FAIL / N-A | Flaky |",
+        f"harness, versions, and how to reproduce: [the `bench/` directory]({REPO}).\n",
+        "## Results summary\n",
+        f"Each cell counts scenarios (of {len(scn)}). N/A marks a capability a "
+        "configuration does not offer: OpenSnitch does no bandwidth accounting; the BCC "
+        "utilities and the bpftrace script used here hook TCP only. Sniffnet has no "
+        "per-process export, so its figures are read by OCR of its GUI and scored "
+        "**best of 5 trials**: a scenario passes if any of its 5 trials passes, and `*` "
+        "marks cells where its trials disagreed. Sniffnet also reports one combined "
+        "per-program total, so the two full-duplex scenarios it cannot split by "
+        "direction are N/A. The trial-disagreement column counts scenarios whose 5 "
+        "trials did not all agree.\n",
+        "| Tool | Detection: PASS / PART / FAIL / N/A | Bandwidth: PASS / PART / FAIL / N/A | Trial disagreement |",
         "|---|---|---|---|",
     ]
     for t in order:
@@ -247,17 +259,34 @@ def write_findings():
         bwfail = c["bw_fail"] + c["bw_err"]
         L.append(f"| {TOOL_LABEL[t]} | **{c['det_pass']}** / {c['det_part']} / {detfail} / {c['det_na']} | **{c['bw_pass']}** / {c['bw_part']} / {bwfail} / {c['bw_na']} | {c['flaky']} |")
 
+    # versions actually observed at run time, with how each was obtained
+    if any(data[t].get("version") for t in order):
+        L += [
+            "",
+            "## Versions",
+            "",
+            "Read from each installed tool during the run. Pinned entries are built or "
+            "downloaded at a fixed version by the harness; distro packages are whatever "
+            "the Ubuntu archive shipped on the run date and are recorded, not pinned.",
+            "",
+            "| Tool | Version observed | Source |",
+            "|---|---|---|",
+        ]
+        for t in order:
+            L.append(f"| {TOOL_LABEL[t]} | {data[t].get('version') or 'not recorded'} | {data[t].get('version_source') or 'not recorded'} |")
+
     # resource usage (present only when the run was profiled)
     res_rows = [(t, data[t].get("resources")) for t in order]
     if any(r and "pss_peak_mb" in r for _, r in res_rows):
         L += [
             "",
-            "## Resource usage\n",
-            "Each tool's whole process tree, sampled at 1 Hz across its session. "
-            "CPU is % of one core (can exceed 100% across cores); p95 is the 95th "
-            "percentile of the per-second samples. PSS (proportional set size) "
-            "charges each shared page once, split across its sharers.\n",
-            "| Tool | CPU avg % | CPU p95 % | PSS avg MB | PSS peak MB |",
+            "## Observed footprint\n",
+            "Each configuration's whole process tree, sampled at 1 Hz across its "
+            "session: the footprint observed under these specific configurations and "
+            "capture scopes, not a controlled performance comparison. CPU is % of one "
+            "core (can exceed 100% across cores). PSS (proportional set size) charges "
+            "each shared page once, split across its sharers.\n",
+            "| Tool | CPU mean % | CPU 95th pct % | PSS mean MB | PSS peak MB |",
             "|---|---|---|---|---|",
         ]
         for t, r in res_rows:
@@ -321,7 +350,7 @@ def write_reports():
     (REPORTS / "scorecard-bandwidth.md").write_text(
         "# Bandwidth scorecard — *are the bytes measured accurately (±10% PASS / ±25% PARTIAL)?*\n\n"
         + "<!-- --8<-- [start:grid] -->\n"
-        + _matrix(data, "bw", "Bandwidth accuracy", tools)
+        + _matrix(data, "bw", "Bandwidth accuracy", tools, subtitle=BW_SUBTITLE)
         + "\n"
         + "<!-- --8<-- [end:grid] -->\n"
         + _footnotes(data, tools)

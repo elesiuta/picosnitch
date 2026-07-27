@@ -189,9 +189,9 @@ def build_scenarios():
         single("bg_icmp", "benchicmp", lambda p, c: ["-H", PEER4, "-b", str(6 * MB), "-s", "1000"], "icmp"),
         "bg_icmp", desc="ICMP echo w/ payload; invisible to TCP/UDP-only monitors.",
         note="ICMP is neither TCP nor UDP; monitors that only parse TCP/UDP miss it entirely.")
-    add("s06", "QUIC-style UDP:443 bulk", "protocol", ["egress"], "udp",
+    add("s06", "UDP/443 bulk", "protocol", ["egress"], "udp",
         single("bg_quic", "benchgen", lambda p, c: ["-H", PEER4, "-t", "udp", "-d", "up", "-P", "443", *rate, "-b", str(24 * MB)], "udp"),
-        "bg_quic", rport=443, desc="Encrypted-UDP-style flow on port 443.")
+        "bg_quic", rport=443, desc="Bulk UDP egress on port 443.")
     add("s07", "IPv6 TCP transfer", "protocol", ["ingress"], "tcp",
         single("bg_tcp6", "benchgen", lambda p, c: ["-6", "-H", PEER6, "-t", "tcp", "-d", "down", *rate, "-b", str(24 * MB)], "tcp", family=10, peer=PEER6),
         "bg_tcp6", rport=PORT_TCP, family=10, peer=PEER6, desc="IPv6 download; v6 support/attribution.")
@@ -199,9 +199,9 @@ def build_scenarios():
         single("bg_sctp", "benchgen", lambda p, c: ["-H", PEER4, "-t", "sctp", "-d", "down", *rate, "-b", str(24 * MB)], "sctp"),
         "bg_sctp", rport=PORT_SCTP, desc="SCTP download; TCP/UDP-only parsers miss it.",
         note="SCTP is neither TCP nor UDP; TCP/UDP-only parsers miss it.")
-    add("s09", "DNS-style small UDP:53 flood", "protocol", ["egress"], "udp",
+    add("s09", "Small-packet UDP/53 flood", "protocol", ["egress"], "udp",
         single("bg_dns", "benchgen", lambda p, c: ["-H", PEER4, "-t", "udp", "-d", "up", "-P", "53", "-z", "64", "-r", str(2 * MB), "-b", str(4 * MB)], "udp"),
-        "bg_dns", rport=53, desc="Many tiny UDP:53 datagrams (exfil pattern).")
+        "bg_dns", rport=53, desc="Many small UDP datagrams on port 53.")
     add("s10", "Raw IP socket (proto 253) egress", "protocol", ["egress"], "raw253",
         single("bg_rawip", "benchraw", lambda p, c: ["-H", PEER4, "-b", str(4 * MB), "-p", "253"], "raw253"),
         "bg_rawip", desc="Custom-protocol raw IP; pcap TCP/UDP parsers miss it.",
@@ -215,9 +215,10 @@ def build_scenarios():
     add("s12", "AF_PACKET raw-frame injection", "evasion", ["egress"], "afpacket",
         afpacket("bg_afpkt"), "bg_afpkt", rport=PORT_UDP,
         desc="Raw L2 injection bypassing the socket layer.",
-        note="AF_PACKET hands complete L2 frames to the driver, bypassing the inet socket path, so socket- and "
-             "syscall-layer monitors record nothing; pcap taps see the frames but have no /proc/net/{tcp,udp} "
-             "entry to attribute them to a process.")
+        note="AF_PACKET hands complete L2 frames to the driver, bypassing the INET socket path, so monitors "
+             "hooking the INET socket functions record nothing; the writes are ordinary syscalls, so syscall "
+             "tracing still sees them; pcap taps see the frames but have no /proc/net/{tcp,udp} entry to "
+             "attribute them to a process.")
     add("s13", "io_uring data path", "evasion", ["egress"], "tcp",
         single("bg_uring", "benchuring", lambda p, c: ["-H", PEER4, "-d", "up", "-b", str(24 * MB)], "tcp"),
         "bg_uring", rport=PORT_TCP, desc="Upload via io_uring; kernel-fn hooks catch it, per-syscall byte counting misses it.")
@@ -229,8 +230,8 @@ def build_scenarios():
         "bg_smmsg", rport=PORT_UDP, desc="Batched sendmmsg UDP egress.")
     add("s16", "Loopback-only transfer", "evasion", ["ingress"], "tcp",
         loopback("bg_loop"), "bg_loop", rport=PORT_TCP, peer="127.0.0.1",
-        desc="Transfer over lo (exfil to a local proxy); many tools skip loopback by default.",
-        note="traffic never leaves lo, which many monitors skip by default (nethogs needs -a; sniffnet must capture the lo adapter).")
+        desc="Transfer over lo; many tools skip loopback by default.",
+        note="traffic never leaves lo, which many monitors skip by default (NetHogs needs -a; Sniffnet must capture the lo adapter).")
     add("s17", "In-container (docker) egress", "evasion", ["egress"], "tcp",
         container("bg_ctr"), "bg_ctr", rport=PORT_TCP,
         desc="Upload from inside a docker container; container attribution.")
@@ -245,7 +246,7 @@ def build_scenarios():
     add("s20", "High-rate parallel burst", "bandwidth", ["egress"], "tcp",
         concurrent("bg_burst", "benchgen",
                    [["-H", PEER4, "-t", "tcp", "-d", "up", "-b", str(256 * 1024)] for _ in range(30)], "tcp"),
-        "bg_burst", rport=PORT_TCP, desc="30 concurrent connections at once; dropped-event behavior.")
+        "bg_burst", rport=PORT_TCP, desc="30 concurrent connections at once; accounting during a high-rate burst.")
 
     # ingress counterparts of the technique scenarios
     add("s21", "io_uring download (recv)", "evasion", ["ingress"], "tcp",

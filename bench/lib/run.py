@@ -122,12 +122,27 @@ def run_tool(toolname, scenarios, netlab, trials, profile=True):
     Adapter = ADAPTERS[toolname]
     sess = RESULTS / toolname
     ad = Adapter(sess)
-    out = {"tool": toolname, "layer": ad.layer, "does_bandwidth": ad.does_bandwidth, "does_attribution": ad.does_attribution, "scenarios": {}, "control": None, "errors": []}
+    out = {
+        "tool": toolname,
+        "layer": ad.layer,
+        "does_bandwidth": ad.does_bandwidth,
+        "does_attribution": ad.does_attribution,
+        "run_date": time.strftime("%Y-%m-%d"),
+        "version": "",
+        "version_source": ad.VERSION_SOURCE,
+        "scenarios": {},
+        "control": None,
+        "errors": [],
+    }
     print(f"\n########## {toolname} ##########", flush=True)
     quiesce_other_monitors(toolname)  # this tool must be the only monitor running
     try:
         print(f"[{toolname}] install ...", flush=True)
         ad.install()
+        # read the version from the tool that is actually installed, so reports
+        # state observed versions rather than intended ones
+        out["version"] = ad.version()
+        print(f"[{toolname}] version {out['version'] or 'unknown'} ({ad.VERSION_SOURCE})", flush=True)
         # fresh peer server per tool so protocol state (e.g. SCTP associations)
         # can't accumulate across tools and wedge later transfers.
         netlab.start_servers()
@@ -164,17 +179,26 @@ def run_tool(toolname, scenarios, netlab, trials, profile=True):
     # would sail through a download-only control and corrupt every egress
     # scenario (accuracy is NOT gated -- a coarse but nonzero measurement
     # passes; the scenarios score it).
+    # Retried once: some monitors miss the first session after their probes
+    # attach (BCC's tcplife emits a row only when the session closes), and a
+    # single warm-up miss must not invalidate a run. A setup that is genuinely
+    # blind fails both attempts.
     control_ok = False
     try:
         ctl_dl, ctl_ul = build_scenarios()[:2]  # s01 download, s02 upload
-        cd = run_trial(ad, ctl_dl, ctx)
-        out["control"] = {"det": cd["det"], "bw": cd["bw"], "gt": cd["gt"], "obs": cd["obs"]}
-        print(f"[{toolname}] control s01 -> det={cd['det']} bw={cd['bw']} (gt recv={cd['gt']['app_recv']} reported={cd['obs']['recv']})", flush=True)
-        cu = run_trial(ad, ctl_ul, ctx)
-        out["control_up"] = {"det": cu["det"], "bw": cu["bw"], "gt": cu["gt"], "obs": cu["obs"]}
-        print(f"[{toolname}] control s02 -> det={cu['det']} bw={cu['bw']} (gt sent={cu['gt']['app_sent']} reported={cu['obs']['sent']})", flush=True)
-        zero_egress = ad.does_bandwidth and (cu["obs"]["sent"] or 0) <= 0
-        control_ok = cd["det"] not in (FAIL, ERROR) and cu["det"] not in (FAIL, ERROR) and not zero_egress
+        for attempt in (1, 2):
+            cd = run_trial(ad, ctl_dl, ctx)
+            out["control"] = {"det": cd["det"], "bw": cd["bw"], "gt": cd["gt"], "obs": cd["obs"]}
+            print(f"[{toolname}] control s01 (attempt {attempt}) -> det={cd['det']} bw={cd['bw']} (gt recv={cd['gt']['app_recv']} reported={cd['obs']['recv']})", flush=True)
+            cu = run_trial(ad, ctl_ul, ctx)
+            out["control_up"] = {"det": cu["det"], "bw": cu["bw"], "gt": cu["gt"], "obs": cu["obs"]}
+            print(f"[{toolname}] control s02 (attempt {attempt}) -> det={cu['det']} bw={cu['bw']} (gt sent={cu['gt']['app_sent']} reported={cu['obs']['sent']})", flush=True)
+            zero_egress = ad.does_bandwidth and (cu["obs"]["sent"] or 0) <= 0
+            control_ok = cd["det"] not in (FAIL, ERROR) and cu["det"] not in (FAIL, ERROR) and not zero_egress
+            if control_ok:
+                if attempt > 1:
+                    out["errors"].append("control passed on the second attempt (first attempt missed; probe warm-up)")
+                break
     except Exception as e:
         out["errors"].append(f"control: {e}")
         print(f"[{toolname}] control error: {e}", flush=True)
@@ -195,7 +219,7 @@ def run_tool(toolname, scenarios, netlab, trials, profile=True):
         rec["det_final"], rec["det_flaky"] = combine_trials(det_v)
         rec["bw_final"], rec["bw_flaky"] = combine_trials(bw_v)
         out["scenarios"][scn.sid] = rec
-        print(f"[{toolname}] {scn.sid} {scn.name[:34]:34} det={rec['det_final']:7} bw={rec['bw_final']:7}{' FLAKY' if rec['det_flaky'] or rec['bw_flaky'] else ''}", flush=True)
+        print(f"[{toolname}] {scn.sid} {scn.name[:34]:34} det={rec['det_final']:7} bw={rec['bw_final']:7}{' TRIALS-DISAGREED' if rec['det_flaky'] or rec['bw_flaky'] else ''}", flush=True)
 
     if prof:
         prof.stop()

@@ -211,7 +211,7 @@ int main(void) {
     int t6 = listen_stream(AF_INET6, IPPROTO_TCP, PORT_TCP);
     int s4 = listen_stream(AF_INET, IPPROTO_SCTP_, PORT_SCTP);   /* may be -1 if sctp absent */
     int s6 = listen_stream(AF_INET6, IPPROTO_SCTP_, PORT_SCTP);
-    /* UDP sinks on the benchmark port plus 443 (QUIC-style) and 53 (DNS-style) */
+    /* UDP sinks on the benchmark port plus 443 and 53 (small-packet scenarios) */
     int udp_ports[] = {PORT_UDP, 443, 53};
     int u4[3], u6[3];
     for (int i = 0; i < 3; i++) {
