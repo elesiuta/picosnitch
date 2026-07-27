@@ -1,0 +1,13 @@
+# pinned tool debs + built bcc source tree (multi-GB)
+downloads/
+# compiled C helpers (rebuild with lib/build.sh)
+bin/
+# generated intermediate artifacts
+results/
+
+# The repo-root .gitignore ignores "lib/" (Python venv); re-include ours
+!lib/
+!lib/**
+# ...but never compiled caches, even under the re-included lib/
+__pycache__/
+*.pyc

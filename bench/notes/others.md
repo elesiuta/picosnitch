@@ -1,0 +1,5 @@
+## Additional tools included
+- **bcc-tools eBPF baseline** (`tcpconnect`, `tcplife`) — per-PID eBPF, TCP-only. The **Ubuntu package (0.35.0) fails to JIT-compile** against the 7.0 kernel headers (`undeclared BPF_F_CPU`, `no member 'ns_id'`). **Upstream v0.37.0 built from source compiles and runs** and is byte-exact on TCP (needs `libpolly-21-dev` + `zip` to build, and `PYTHONUNBUFFERED=1` or tcplife's low-volume output stays buffered).
+
+## Explicitly excluded (per-interface / per-host only — not per-process)
+`iftop` (host-pairs), `vnstat` (interface totals), `bmon` (interface rates), `iptraf-ng` (interface/port), `jnettop` (host:port streams), `tcptrack` (per-connection, no pid), `pktstat` (per-socket, upstream dead), `nload`/`speedometer`/`slurm`/`cbm` (interface graphs), standalone `ntopng` (flow/host; per-process only with commercial nProbe), `ss` (socket identity, no byte accounting), `conntrack` (per-flow bytes, no pid). None attribute bandwidth or detection to a *process*, so all are out of scope.
