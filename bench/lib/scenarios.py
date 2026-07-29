@@ -214,7 +214,7 @@ def build_scenarios():
         note="/proc-scan attribution loses processes that exit before the next scan; their traffic lands in an unknown bucket.")
     add("s12", "AF_PACKET raw-frame injection", "evasion", ["egress"], "afpacket",
         afpacket("bg_afpkt"), "bg_afpkt", rport=PORT_UDP,
-        desc="Raw L2 injection bypassing the socket layer.",
+        desc="Raw L2 injection bypassing the INET socket path.",
         note="AF_PACKET hands complete L2 frames to the driver, bypassing the INET socket path, so monitors "
              "hooking the INET socket functions record nothing; the writes are ordinary syscalls, so syscall "
              "tracing still sees them; pcap taps see the frames but have no /proc/net/{tcp,udp} entry to "
@@ -231,7 +231,7 @@ def build_scenarios():
     add("s16", "Loopback-only transfer", "evasion", ["ingress"], "tcp",
         loopback("bg_loop"), "bg_loop", rport=PORT_TCP, peer="127.0.0.1",
         desc="Transfer over lo; many tools skip loopback by default.",
-        note="traffic never leaves lo, which many monitors skip by default (NetHogs needs -a; Sniffnet must capture the lo adapter).")
+        note="traffic never leaves lo, which many monitors skip by default.")
     add("s17", "In-container (docker) egress", "evasion", ["egress"], "tcp",
         container("bg_ctr"), "bg_ctr", rport=PORT_TCP,
         desc="Upload from inside a docker container; container attribution.")
@@ -260,7 +260,7 @@ def build_scenarios():
     add("s23", "recvmmsg batched UDP (recv)", "evasion", ["ingress"], "udp",
         single("bg_rmmsg", "benchgen", lambda p, c: ["-H", PEER4, "-t", "udp", "-d", "down", "-m", "recvmmsg", *rate, "-b", str(24 * MB)], "udp"),
         "bg_rmmsg", rport=PORT_UDP,
-        desc="Batched recvmmsg UDP ingress; the recv counterpart of sendmmsg (s15). Per-recv-syscall counters undercount.")
+        desc="Batched recvmmsg UDP ingress; the recv counterpart of sendmmsg (s15).")
     add("s24", "IPv6 UDP download", "protocol", ["ingress"], "udp",
         single("bg_udp6", "benchgen", lambda p, c: ["-6", "-H", PEER6, "-t", "udp", "-d", "down", *rate, "-b", str(24 * MB)], "udp", family=10, peer=PEER6),
         "bg_udp6", rport=PORT_UDP, family=10, peer=PEER6, desc="IPv6 UDP download; fills the IPv6 x UDP gap.")

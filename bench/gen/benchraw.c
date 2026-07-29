@@ -1,7 +1,7 @@
-/* benchraw — raw IP socket egress with a custom protocol number.
+/* benchraw: raw IP socket egress with a custom protocol number.
  *
  * socket(AF_INET, SOCK_RAW, proto) sends via inet_sendmsg -> raw_sendmsg, so a
- * socket-layer monitor sees it, but tools that only parse /proc/net/{tcp,udp}
+ * monitor hooking that path sees it, but tools that only parse /proc/net/{tcp,udp}
  * or match TCP/UDP on the wire do not attribute it.
  * Egress only (the peer has no listener for the custom proto).
  *

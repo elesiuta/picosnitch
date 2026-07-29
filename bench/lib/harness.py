@@ -301,24 +301,19 @@ def gt_directions(gt: GT):
 
 
 def combine_trials(verdicts):
-    """Reduce N per-trial verdicts to a cell verdict + flakiness flag.
-    PASS if at least four of five trials PASS; else the modal/worst verdict.
-    The second return value flags trials that did not all agree."""
+    """Reduce N per-trial verdicts to a cell verdict + a disagreement flag.
+    The verdict is the modal one, ties broken toward the worse. The flag is set
+    whenever the trials were not unanimous."""
     from collections import Counter
 
     c = Counter(verdicts)
-    n = len(verdicts)
     flaky = len(set(verdicts)) > 1
     order = {ERROR: -1, FAIL: 0, PARTIAL: 1, NA: 2, PASS: 3}
     # N/A dominates only if every trial is N/A
     if all(v == NA for v in verdicts):
         return NA, False
     non_na = [v for v in verdicts if v != NA]
-    if c[PASS] >= n - 1 and c[PASS] > 0:
-        return PASS, flaky
-    # otherwise take the most common non-N/A, tie-break to the worse
-    best = sorted(non_na, key=lambda v: (-c[v], order[v]))[0]
-    return best, flaky
+    return sorted(non_na, key=lambda v: (-c[v], order[v]))[0], flaky
 
 
 def save_json(path: Path, obj):

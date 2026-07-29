@@ -35,22 +35,10 @@ def _load():
     return data
 
 
-# tools whose per-trial results are scored "best-of-N" (pass if any trial passes)
-# because their extraction is inherently noisy — here, sniffnet via GUI OCR.
-BESTOF = {"sniffnet"}
-_ORD = {"PASS": 3, "PARTIAL": 2, "FAIL": 1, "ERROR": 0}
-
-
 def _resolve(rec, kind, tool):
-    """Return (verdict, flaky). For best-of-N tools, take the best trial verdict."""
+    """Return (verdict, disagreement flag) for a cell."""
     if rec is None:
         return "N/A", False
-    if tool in BESTOF:
-        vs = [t.get(kind) for t in rec.get("trials", []) if t.get(kind) not in (None, "N/A")]
-        if not vs:
-            return "N/A", False
-        best = max(vs, key=lambda v: _ORD.get(v, -1))
-        return best, len(set(vs)) > 1
     return rec.get(f"{kind}_final", "N/A"), rec.get(f"{kind}_flaky", False)
 
 
@@ -63,9 +51,8 @@ def _cell(rec, kind, tool):
 
 
 BW_SUBTITLE = (
-    "Scored on the bytes reported, independently of attribution. A configuration that measured the traffic but "
-    "bucketed it as unknown instead of naming the process is still scored here on those bytes; that attribution "
-    "miss is what the detection grid records as PARTIAL, so the two grids are meant to be read together."
+    "Scored on bytes reported, independently of attribution: a tool that measured the traffic but bucketed it as "
+    "unknown is scored here on those bytes, and the detection grid records that miss as PARTIAL."
 )
 
 
@@ -80,11 +67,27 @@ def _matrix(data, kind, title, tools, subtitle=""):
         for t in tools:
             rec = data.get(t, {}).get("scenarios", {}).get(s.sid)
             sym, flaky = _cell(rec, kind, t)
-            mark = ("*" if t in BESTOF else "⚡") if flaky else ""
+            mark = "*" if flaky else ""
             row.append(sym + mark)
         lines.append("| " + " | ".join(row) + " |")
-    lines += ["", "Legend: ✅ PASS · 🟡 PARTIAL · ❌ FAIL · ⬜ N/A · ⚠️ error · ⚡ trials disagreed · \\* Sniffnet OCR, scored best of 5 trials", ""]
+    lines += ["", "Legend: ✅ PASS · 🟡 PARTIAL · ❌ FAIL · ⬜ N/A · ⚠️ error · \\* trials disagreed, see the note", ""]
     return "\n".join(lines)
+
+
+def _evidence(rec, base):
+    """What the tool reported, tallied over the trials: the generator it named,
+    the bucket it used instead, or nothing. Trials run uniquely named copies of
+    the generator, so a matched name is reported as the scenario's generator."""
+    from collections import Counter
+
+    c = Counter()
+    for tr in rec.get("trials", []):
+        nm = (tr.get("obs") or {}).get("names") or []
+        if not nm:
+            c["nothing"] += 1
+            continue
+        c[base if (tr.get("obs") or {}).get("attributed") else str(nm[0])] += 1
+    return ", ".join(f"{k} x{v}" for k, v in c.most_common())
 
 
 def _footnotes(data, tools):
@@ -95,13 +98,14 @@ def _footnotes(data, tools):
         sc = d.get("scenarios", {})
         items = []
         for sid, rec in sc.items():
-            notes = []
             dv, dfl = _resolve(rec, "det", t)
             bv, bfl = _resolve(rec, "bw", t)
-            if dv in ("PARTIAL", "FAIL") or bv in ("PARTIAL", "FAIL"):
-                tr = [x for x in rec.get("trials", []) if "obs" in x]
-                onote = tr[0]["obs"]["note"] if tr else ""
-                ratio = ""
+            if dv not in ("PARTIAL", "FAIL") and bv not in ("PARTIAL", "FAIL") and not (dfl or bfl):
+                continue
+            tr = [x for x in rec.get("trials", []) if "obs" in x]
+            onote = tr[0]["obs"]["note"] if tr else ""
+            ratio = ""
+            if not (dfl or bfl):  # a first-trial ratio would contradict a combined verdict
                 for x in tr:
                     dtl = x.get("bw_detail", {})
                     for dcol in ("egress", "ingress"):
@@ -110,18 +114,16 @@ def _footnotes(data, tools):
                             break
                     if ratio:
                         break
-                seg = f"det={dv} bw={bv}"
-                extra = "; ".join(x for x in [onote, ratio, scn[sid].note] if x)
-                notes.append(f"    - **{sid} {scn[sid].name}** — {seg}. {extra}")
+            seg = f"det={dv} bw={bv}. recorded: {_evidence(rec, scn[sid].exe)}"
             if dfl or bfl:
-                mk = "*" if t in BESTOF else "⚡"
-                notes.append(f"    - **{sid}** {mk} inconsistent across trials (det {[x.get('det') for x in rec.get('trials', [])]}, bw {[x.get('bw') for x in rec.get('trials', [])]}).")
-            items += notes
+                seg += f" (det {[x.get('det') for x in rec.get('trials', [])]}, bw {[x.get('bw') for x in rec.get('trials', [])]})"
+            extra = "; ".join(x for x in [onote, ratio] if x)
+            items.append(f"    - **{sid} {scn[sid].name}**: {seg}. {extra}".rstrip().rstrip(".") + ".")
         if items:
             lines.append(f"- **{TOOL_LABEL[t]}**")
             lines += items
         if d.get("errors"):
-            lines.append(f"    - _setup/runtime errors:_ {d['errors'][0][:200]}")
+            lines.append(f"    - _run note:_ {d['errors'][0][:200]}")
     return "\n".join(lines) + "\n"
 
 
@@ -138,19 +140,15 @@ def _per_tool(data, tool):
     scn = {s.sid: s for s in build_scenarios()}
     d = data.get(tool, {})
     lines = [
-        f"# {TOOL_LABEL.get(tool, tool)} — detailed results",
+        f"# {TOOL_LABEL.get(tool, tool)}: detailed results",
         "",
         f"- layer scored against: **{d.get('layer')}** ({'app-layer bytes' if d.get('layer') == 'socket' else 'wire bytes'})",
         "",
     ]
     ctrl = d.get("control")
     if ctrl:
-        lines.append(
-            f"- **control (bulk TCP download smoke transfer, separate from the s01 row):** "
-            f"det={ctrl['det']} bw={ctrl['bw']} "
-            f"(gt recv={ctrl['gt']['app_recv']}, reported recv={_fmtb(ctrl['obs']['recv'])})"
-        )
-    lines += ["", "| # | Scenario | Det | BW | GT app s/r | GT wire s/r | reported s/r | ratio | note |", "|---|---|---|---|---|---|---|---|---|"]
+        lines.append(f"- **control (separate from the s01 row):** det={ctrl['det']} bw={ctrl['bw']} (ref recv={ctrl['gt']['app_recv']}, reported recv={_fmtb(ctrl['obs']['recv'])})")
+    lines += ["", "| # | Scenario | Det | BW | ref app s/r | ref wire s/r | reported s/r | ratio | note |", "|---|---|---|---|---|---|---|---|---|"]
     any_flaky = False
     for sid, s in scn.items():
         rec = d.get("scenarios", {}).get(sid)
@@ -172,16 +170,15 @@ def _per_tool(data, tool):
         dv, dfl = _resolve(rec, "det", tool)
         bv, bfl = _resolve(rec, "bw", tool)
         any_flaky = any_flaky or dfl or bfl
-        mk = "*" if tool in BESTOF else "⚡"
-        det = SYM.get(dv, "?") + (mk if dfl else "")
-        bw = SYM.get(bv, "?") + (mk if bfl else "")
+        det = SYM.get(dv, "?") + ("*" if dfl else "")
+        bw = SYM.get(bv, "?") + ("*" if bfl else "")
         gtapp = f"{gt.get('app_sent', 0)}/{gt.get('app_recv', 0)}"
         gtwire = f"{gt.get('wire_egress', 0)}/{gt.get('wire_ingress', 0)}"
         rep = f"{_fmtb(obs.get('sent'))}/{_fmtb(obs.get('recv'))}"
         note = (obs.get("note", "") or "")[:80]
         lines.append(f"| {sid} | {s.name} | {det} | {bw} | {gtapp} | {gtwire} | {rep} | {ratio} | {note} |")
     if any_flaky:
-        lines += ["", "⚡/\\* rows: trials disagreed; the table shows the first trial's numbers, while the verdict combines all trials (best of 5 for Sniffnet)."]
+        lines += ["", "Rows show the first trial's numbers; verdicts combine all trials. \\* = trials disagreed."]
     return "\n".join(lines) + "\n"
 
 
@@ -232,24 +229,19 @@ def write_findings():
         "monitors on Linux, measuring **completeness** (is traffic seen and "
         "attributed to the right process) and **accuracy** (are the byte counts "
         "correct). Nine projects in ten configurations.\n",
-        # NOTE: the host line below describes the recorded runs; update it if
-        # re-running the matrix elsewhere.
+        # hardcoded; update when running on another host
         f"{len(scn)} scenarios × 5 trials, each configuration run in isolation on Ubuntu "
         f"26.04 (kernel 7.0) on a GCP e2-standard-4 (4 vCPUs, 16 GB), run {RUN_DATE}, "
         f"scored against tool-independent reference measurements. Detection = "
         f"*seen and attributed to the right process*; Bandwidth = *bytes within "
-        f"±10% (PASS) / ±25% (PARTIAL)* of the tool's measurement layer. Method, "
+        f"±10% (PASS) / ±25% (PARTIAL)* of the reference for the tool's layer. Method, "
         f"harness, versions, and how to reproduce: [the `bench/` directory]({REPO}).\n",
         "## Results summary\n",
-        f"Each cell counts scenarios (of {len(scn)}). N/A marks a capability a "
-        "configuration does not offer: OpenSnitch does no bandwidth accounting; the BCC "
-        "utilities and the bpftrace script used here hook TCP only. Sniffnet has no "
-        "per-process export, so its figures are read by OCR of its GUI and scored "
-        "**best of 5 trials**: a scenario passes if any of its 5 trials passes, and `*` "
-        "marks cells where its trials disagreed. Sniffnet also reports one combined "
-        "per-program total, so the two full-duplex scenarios it cannot split by "
-        "direction are N/A. The trial-disagreement column counts scenarios whose 5 "
-        "trials did not all agree.\n",
+        f"Each cell counts scenarios (of {len(scn)}). N/A marks a missing capability: "
+        "OpenSnitch does no bandwidth accounting; the BCC utilities and the bpftrace "
+        "script used here hook TCP only; Sniffnet reports one combined per-program "
+        "total, so the two full-duplex scenarios it cannot split by direction are "
+        "N/A.\n",
         "| Tool | Detection: PASS / PART / FAIL / N/A | Bandwidth: PASS / PART / FAIL / N/A | Trial disagreement |",
         "|---|---|---|---|",
     ]
@@ -281,9 +273,8 @@ def write_findings():
         L += [
             "",
             "## Observed footprint\n",
-            "Each configuration's whole process tree, sampled at 1 Hz across its "
-            "session: the footprint observed under these specific configurations and "
-            "capture scopes, not a controlled performance comparison. CPU is % of one "
+            "Each tool's whole process tree, sampled at 1 Hz across its session under its "
+            "own capture scope; not a controlled performance comparison. CPU is % of one "
             "core (can exceed 100% across cores). PSS (proportional set size) charges "
             "each shared page once, split across its sharers.\n",
             "| Tool | CPU mean % | CPU 95th pct % | PSS mean MB | PSS peak MB |",
@@ -299,13 +290,13 @@ def write_findings():
     L += ["", "<!-- --8<-- [end:overview] -->"]
 
     # per-scenario notes: the factual mechanism note each scenario carries
-    notes = [f"- **{s.sid} {s.name}** — {s.note}" for s in scn if s.note]
+    notes = [f"- **{s.sid} {s.name}**: {s.note}" for s in scn if s.note]
     if notes:
         L += ["", "## Per-scenario notes\n"] + notes
 
     L += [
         "",
-        "## Ground truth per scenario\n",
+        "## Reference bytes per scenario\n",
         "App bytes are the generators' own counts. Wire bytes include per-run "
         "variance (handshakes, retransmits); this table shows one session's "
         "capture, and each tool page records its own run's values.\n",
@@ -339,7 +330,7 @@ def write_reports():
 
     # detection scorecard ([start:grid]/[end:grid] wrap the grid for the docs page)
     (REPORTS / "scorecard-detection.md").write_text(
-        "# Detection scorecard — *is the activity seen and attributed to the process?*\n\n"
+        "# Detection scorecard: is the activity seen and attributed to the process?\n\n"
         + "<!-- --8<-- [start:grid] -->\n"
         + _matrix(data, "det", "Detection", tools)
         + "\n"
@@ -348,7 +339,7 @@ def write_reports():
     )
     # bandwidth scorecard
     (REPORTS / "scorecard-bandwidth.md").write_text(
-        "# Bandwidth scorecard — *are the bytes measured accurately (±10% PASS / ±25% PARTIAL)?*\n\n"
+        "# Bandwidth scorecard: are the bytes measured accurately (±10% PASS, ±25% PARTIAL)?\n\n"
         + "<!-- --8<-- [start:grid] -->\n"
         + _matrix(data, "bw", "Bandwidth accuracy", tools, subtitle=BW_SUBTITLE)
         + "\n"

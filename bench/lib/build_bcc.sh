@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Build and install iovisor/bcc v0.37.0 from source.
+# Build and install iovisor/bcc from source at the pinned tag below.
 #
-# The Ubuntu package (0.35.0) fails to JIT-compile against the 7.0 kernel headers
-# (undeclared BPF_F_CPU, no member 'ns_id'); v0.37.0 (supports kernel up to 7.1)
+# The Ubuntu package fails to JIT-compile against the 7.0 kernel headers
+# (undeclared BPF_F_CPU, no member 'ns_id'); the pinned tag
 # compiles and runs. Installs libbcc, the tools, and the python bindings to
 # system paths. Targets Ubuntu 26.04 (LLVM 21). Idempotent: no-op if already
 # installed. Invoked by the bcc adapters in adapters.py.

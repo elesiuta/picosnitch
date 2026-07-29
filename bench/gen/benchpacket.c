@@ -1,8 +1,8 @@
-/* benchpacket — AF_PACKET raw-frame egress (bypasses the socket layer).
+/* benchpacket: AF_PACKET raw-frame egress (bypasses the INET socket path).
  *
  * Crafts complete Ethernet+IP+UDP frames and injects them with a raw AF_PACKET
- * socket. This bypasses the INET socket send path (inet_sendmsg), so a
- * socket-layer monitor does not see it. pcap-based tools that tap the device
+ * socket. This bypasses the INET socket send path (inet_sendmsg), so a monitor
+ * hooking that path does not see it. pcap-based tools that tap the device
  * still see the frames, though attribution is harder (the sender holds an
  * AF_PACKET fd, not a /proc/net/{tcp,udp} entry).
  * Egress only; frames are valid UDP to the peer.

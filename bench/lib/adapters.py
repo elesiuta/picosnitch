@@ -1,5 +1,5 @@
-"""Per-tool adapters. Each wraps one monitor at a pinned version with a uniform
-interface: install() / start() / pre_trial() / collect(gt) / stop().
+"""Per-tool adapters. Each wraps one monitor with a uniform interface:
+install() / start() / pre_trial() / collect(gt) / stop().
 
 The runner runs as root, so sh() calls here already have privileges.
 
@@ -146,10 +146,11 @@ def _systemd_mainpid(service):
 
 
 # --------------------------------------------------------------------------- #
-# picosnitch — PyPI 2.2.1 via pipx (NOT the source tree)
+# picosnitch: installed from PyPI via pipx, NOT the source tree
 # --------------------------------------------------------------------------- #
 class Picosnitch(ToolAdapter):
     name = "picosnitch"
+    VERSION = "2.2.1"
     VERSION_CMD = "picosnitch version"
     VERSION_SOURCE = "pinned (PyPI via pipx)"
     layer = "socket"
@@ -169,12 +170,12 @@ class Picosnitch(ToolAdapter):
             "[monitoring]\nevery_exe = false\n"
         )
         # early return only for the PINNED version (any other install would be
-        # silently benchmarked while the report claims 2.2.1)
-        if sh("picosnitch version 2>/dev/null | grep -qF '2.2.1'").returncode == 0 and Path("/usr/local/bin/picosnitch").exists():
+        # silently benchmarked while the report claims the pinned one)
+        if self.version() == self.VERSION and Path("/usr/local/bin/picosnitch").exists():
             return
         if sh("command -v pipx").returncode != 0:
             sh("apt-get install -y pipx")
-        r = sh("pipx install 'picosnitch==2.2.1' --global", timeout=600)
+        r = sh(f"pipx install 'picosnitch=={self.VERSION}' --global", timeout=600)
         if r.returncode != 0:
             raise RuntimeError(f"picosnitch install failed: {r.stderr}\n{r.stdout}")
 
@@ -225,7 +226,7 @@ class Picosnitch(ToolAdapter):
         # (e.g. a hash-pending row then the hashed row) over several seconds, so
         # the sum can look "stable" mid-flush and a single stable read can miss a
         # late-flushing row. Wait until it has plainly captured everything
-        # (reached ~the known amount — its socket layer counts app bytes) OR has
+        # (reached ~the known amount, since its hooks count app bytes) OR has
         # held steady over a long window OR is genuinely zero.
         target = 0.97 * (gt.app_sent + gt.app_recv)
         prev = None
@@ -277,7 +278,7 @@ class Picosnitch(ToolAdapter):
 
 
 # --------------------------------------------------------------------------- #
-# nethogs — v0.8.8 (latest release) built from source
+# nethogs: built from source at the pinned tag
 # --------------------------------------------------------------------------- #
 class Nethogs(ToolAdapter):
     name = "nethogs"
@@ -379,7 +380,7 @@ class Nethogs(ToolAdapter):
 
 
 # --------------------------------------------------------------------------- #
-# bandwhich — 0.23.1 static musl binary
+# bandwhich: static musl release binary
 # --------------------------------------------------------------------------- #
 class Bandwhich(ToolAdapter):
     name = "bandwhich"
@@ -387,14 +388,17 @@ class Bandwhich(ToolAdapter):
     VERSION_SOURCE = "pinned (release binary)"
     layer = "wire"
     settle = 2.5
-    URL = "https://github.com/imsnif/bandwhich/releases/download/v0.23.1/bandwhich-v0.23.1-x86_64-unknown-linux-musl.tar.gz"
+    VERSION = "0.23.1"
+    URL = f"https://github.com/imsnif/bandwhich/releases/download/v{VERSION}/bandwhich-v{VERSION}-x86_64-unknown-linux-musl.tar.gz"
 
     def install(self):
-        if Path("/usr/local/bin/bandwhich").exists():
+        if self.version() == self.VERSION:
             return
-        tgz = _download(self.URL, DL / "bandwhich.tar.gz")
+        tgz = _download(self.URL, DL / f"bandwhich-{self.VERSION}.tar.gz")
         sh(f"tar xzf {tgz} -C {DL}")
         sh(f"install -m0755 {DL}/bandwhich /usr/local/bin/bandwhich")
+        if self.version() != self.VERSION:
+            raise RuntimeError(f"bandwhich {self.VERSION} install failed, found {self.version() or 'nothing'}")
 
     def start(self):
         self.log = self.sess / "bandwhich.log"
@@ -463,7 +467,7 @@ class Bandwhich(ToolAdapter):
 
 
 # --------------------------------------------------------------------------- #
-# opensnitch — 1.8.0, detection only (JSON logger -> journald)
+# opensnitch: detection only; connection log read from journald
 # --------------------------------------------------------------------------- #
 class OpenSnitch(ToolAdapter):
     name = "opensnitch"
@@ -479,7 +483,7 @@ class OpenSnitch(ToolAdapter):
         if sh("dpkg -s opensnitch 2>/dev/null | grep -q '1.8.0'").returncode != 0:
             deb = _download(self.DEB, DL / "opensnitch.deb")
             sh(f"apt-get install -y {deb}", timeout=600)
-        # syslog logger; in 1.8.0 the daemon's own bracketed CONNECTION lines land
+        # syslog logger; the daemon's own bracketed CONNECTION lines land
         # in journald under identifier "opensnitch" (the json Format/Tag here are
         # not honored) -- collect() parses those. Default action allow (non-blocking).
         cfg = json.loads(Path("/etc/opensnitchd/default-config.json").read_text())
@@ -556,7 +560,7 @@ class OpenSnitch(ToolAdapter):
 
 
 # --------------------------------------------------------------------------- #
-# sniffnet — 1.5.0, GUI-only; flow-level via PCAP export (no per-process)
+# sniffnet: GUI only, no per-process export; read by OCR of its Program panel
 # --------------------------------------------------------------------------- #
 class Sniffnet(ToolAdapter):
     name = "sniffnet"
@@ -571,130 +575,125 @@ class Sniffnet(ToolAdapter):
 
     def install(self):
         if self.VERSION not in sh("dpkg-query -W -f '${Version}' sniffnet 2>/dev/null").stdout:
-            sh("apt-get install -y xvfb libpcap0.8 libasound2t64 libfontconfig1 libgtk-3-0t64 libxkbcommon-x11-0 tcpdump tesseract-ocr imagemagick")
+            sh("apt-get install -y xvfb libpcap0.8 libasound2t64 libfontconfig1 libgtk-3-0t64 libxkbcommon-x11-0 tesseract-ocr imagemagick")
             deb = _download(self.DEB, DL / f"sniffnet-{self.VERSION}.deb")
             sh(f"apt-get install -y --allow-downgrades {deb}", timeout=600)
 
     def start(self):
-        self.pcap = self.sess / "sniffnet.pcap"
-        # flow-level ground truth of what a pcap tap captures (fallback + wire ref)
-        self.tcpdump = subprocess.Popen(f"tcpdump -i any -w {self.pcap} -s0 -U", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # sniffnet is a native GPU GUI with no export, so run it under Xvfb and
         # OCR its Overview "Program" panel for per-process attribution.
         sh("pkill -x Xvfb; rm -f /tmp/.X99-lock")
         self.xvfb = subprocess.Popen(["Xvfb", self.DISPLAY, "-screen", "0", "1600x1000x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(2)
+        self._launch()
+
+    def _launch(self):
         env = {**os.environ, "DISPLAY": self.DISPLAY, "ICED_BACKEND": "tiny-skia"}
         self.proc = subprocess.Popen(["sniffnet", "--adapter", "vbench0"], env=env, stdout=open(self.sess / "sniffnet.log", "w"), stderr=subprocess.STDOUT)
         time.sleep(6)
 
     def pre_trial(self):
         self._snap = {}
+        # the Program panel accumulates a row per program for the whole session
+        # and shows only a few at a time; a fresh instance lists only this trial
+        super().stop()
+        sh("pkill -x sniffnet")
+        time.sleep(1)
+        self._launch()
 
     _units = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
+    # Program panel: right-hand column of the lower panel row of the app window
+    PROG_PANEL = "300x220+890+400"
 
     def _ocr(self):
         # import (X screenshot) or tesseract can hang if Xvfb wedges; run both
         # without a shell and cap them so a stuck OCR falls back to flow level
         # instead of blocking the whole run indefinitely.
         png = self.sess / "sniffnet.png"
+        crop = self.sess / "sniffnet_program.png"
         try:
             sh(["import", "-window", "root", str(png)], timeout=30, env={**os.environ, "DISPLAY": self.DISPLAY})
-            r = sh(["tesseract", str(png), "-", "--psm", "6"], timeout=30)
+            # the three panels share text lines in a full-window OCR
+            sh(["convert", str(png), "-crop", self.PROG_PANEL, "+repage", "-colorspace", "gray", "-resize", "300%", str(crop)], timeout=30)
+            r = sh(["tesseract", str(crop if crop.exists() else png), "-", "--psm", "6"], timeout=30)
             return r.stdout
         except subprocess.TimeoutExpired:
             sh("pkill -x import 2>/dev/null")
             return ""
 
-    def _ocr_process(self, gt, text):
-        """Find our process (fuzzy) in the OCR'd Program column + its byte total."""
-        import difflib
-
-        best_bytes = None
+    def _ocr_rows(self, text):
+        """Program-panel rows as (label, bytes). Sniffnet lists traffic it cannot
+        attribute under a '?' row: a byte figure with no program name."""
+        rows = []
         for line in text.splitlines():
-            toks = line.replace("(", " ").replace(")", " ").replace("_}", " ").split()
-            # a byte figure on this line?
             figs = re.findall(r"([\d.]+)\s*(TB|GB|MB|KB|B)\b", line)
             if not figs:
                 continue
-            # does any token fuzzy-match our unique exe name? (OCR garbles chars)
-            hit = any(
-                difflib.SequenceMatcher(None, t.lower(), gt.exe.lower()).ratio() > 0.62 or gt.exe.split(".")[0][3:] in t.lower()  # scenario stem, e.g. "tcp_dl"
-                for t in toks
-            )
-            if hit:
-                vals = [float(v) * self._units[u] for v, u in figs]
-                best_bytes = max(vals)  # the program's total figure
-        return best_bytes
+            head = re.sub(r"([\d.]+)\s*(TB|GB|MB|KB|B)\b.*$", "", line)
+            name = ""
+            for tok in head.replace("(", " ").replace(")", " ").split():
+                if len(re.sub(r"[^A-Za-z0-9]", "", tok)) >= 3:
+                    name = tok.strip("_.,:")
+            rows.append((name or "?", float(figs[-1][0]) * self._units[figs[-1][1]]))
+        return rows
+
+    def _ocr_process(self, gt, text):
+        """(bytes, label) for our process, or (None, "?") when Sniffnet listed the
+        traffic without naming a program, or (None, "") when nothing was read."""
+        import difflib
+
+        rows = self._ocr_rows(text)
+        for label, nbytes in rows:
+            if label != "?" and (difflib.SequenceMatcher(None, label.lower(), gt.exe.lower()).ratio() > 0.62 or gt.exe.split(".")[0][3:] in label.lower()):
+                return nbytes, label
+        return (None, "?") if any(lbl == "?" for lbl, _ in rows) else (None, "")
 
     def collect(self, gt: GT) -> Observation:
-        # flow-level wire bytes (the reference / fallback), from the pcap tap
-        flt = self._filter(gt)
-        r = sh(["tcpdump", "-nr", str(self.pcap), "-tt", flt])
-        f_sent = f_recv = 0
-        flow_seen = False
-        for line in r.stdout.splitlines():
-            mt = re.match(r"(\d+\.\d+)", line)
-            if not mt:
-                continue
-            ts = float(mt.group(1))
-            if ts < gt.t0 - 1 or ts > gt.t1 + self.settle + 1:
-                continue
-            lm = re.search(r"length (\d+)", line)
-            ln = int(lm.group(1)) if lm else 0
-            flow_seen = True
-            if f"> {gt.peer}." in line or f"> {gt.peer}:" in line:
-                f_sent += ln
-            else:
-                f_recv += ln
         # per-process via OCR of the live GUI
-        ocr_bytes = None
+        ocr_bytes, label = None, ""
         try:
-            ocr_bytes = self._ocr_process(gt, self._ocr())
+            ocr_bytes, label = self._ocr_process(gt, self._ocr())
         except Exception:
-            ocr_bytes = None
+            ocr_bytes, label = None, ""
+        # sniffnet shows ONE combined per-program total, not a per-direction
+        # split: for a single-direction scenario that total IS that direction; a
+        # duplex total cannot be split, so the untestable direction is N/A.
+        dirs = gt.test_dirs or ["ingress"]
+        single = len(dirs) == 1
         if ocr_bytes is not None:
-            # sniffnet shows ONE combined per-program total (rounded to ~2 sig figs),
-            # not a per-direction split. For a single-direction scenario that total
-            # IS that direction, so score it. For a duplex scenario it is egress+
-            # ingress combined and cannot be split, so report the direction it cannot
-            # measure as N/A rather than dumping the whole total into one side (which
-            # would guarantee a spurious ~2x FAIL there).
-            dirs = gt.test_dirs or ["ingress"]
-            if len(dirs) == 1:
-                sent = ocr_bytes if dirs[0] == "egress" else None
-                recv = ocr_bytes if dirs[0] == "ingress" else None
-                note = "per-process via GUI OCR (coarse, rounded)"
-            else:
-                sent = recv = None
-                note = "per-process via GUI OCR; one combined total, cannot split direction"
-            return Observation(flow_detected=True, proc_attributed=True, names=[gt.exe], sent=sent, recv=recv, note=note)
-        # OCR miss -> flow-level only (process not attributed)
-        return Observation(flow_detected=flow_seen, proc_attributed=False if flow_seen else None, names=[], sent=f_sent, recv=f_recv, note="flow-level (pcap); process not read from GUI")
-
-    def _filter(self, gt):
-        p = gt.proto
-        if p.startswith("raw") or p == "afpacket":
-            return f"host {gt.peer}"
-        if p == "icmp":
-            return "icmp"
-        if p in ("tcp", "udp", "sctp"):
-            base = "tcp" if p == "tcp" else ("udp" if p == "udp" else "sctp")
-            if gt.rport:
-                return f"{base} and host {gt.peer} and port {gt.rport}"
-            return f"{base} and host {gt.peer}"
-        return f"host {gt.peer}"
+            note = "per-program total from the GUI" if single else "per-program total from the GUI; one combined figure, cannot split direction"
+            return Observation(
+                flow_detected=True,
+                proc_attributed=True,
+                names=[label],
+                sent=ocr_bytes if single and dirs[0] == "egress" else None,
+                recv=ocr_bytes if single and dirs[0] == "ingress" else None,
+                note=note,
+            )
+        if label == "?":
+            # Sniffnet counted the traffic but named no program: its own
+            # unattributed row.
+            unattr = next((b for lbl, b in self._ocr_rows(self._ocr()) if lbl == "?"), 0)
+            return Observation(
+                flow_detected=True,
+                proc_attributed=False,
+                names=["?"],
+                sent=unattr if single and dirs[0] == "egress" else None,
+                recv=unattr if single and dirs[0] == "ingress" else None,
+                note="listed unattributed (?) by Sniffnet",
+            )
+        return Observation(flow_detected=False, proc_attributed=False, names=[], sent=0, recv=0, note="no Program row")
 
     def stop(self):
-        for p in (getattr(self, "proc", None), getattr(self, "tcpdump", None), getattr(self, "xvfb", None)):
+        for p in (getattr(self, "proc", None), getattr(self, "xvfb", None)):
             if p and p.poll() is None:
                 p.terminate()
-        sh("pkill -x sniffnet; pkill -f 'tcpdump -i any'; pkill -x Xvfb")
+        sh("pkill -x sniffnet; pkill -x Xvfb")
         time.sleep(1)
 
 
 # --------------------------------------------------------------------------- #
-# Little Snitch for Linux — 1.0.9; best-effort web API on :3031
+# Little Snitch for Linux: undocumented local WebSocket used by its web UI
 # --------------------------------------------------------------------------- #
 class LittleSnitch(ToolAdapter):
     name = "littlesnitch"
@@ -702,7 +701,8 @@ class LittleSnitch(ToolAdapter):
     VERSION_SOURCE = "pinned (release .deb)"
     layer = "socket"
     settle = 3.0
-    DEB = "https://obdev.at/downloads/littlesnitch-linux/littlesnitch_1.0.9_amd64.deb"
+    VERSION = "1.0.9"
+    DEB = f"https://obdev.at/downloads/littlesnitch-linux/littlesnitch_{VERSION}_amd64.deb"
     # little-snitch attributes traffic to the top-level "responsible" app, not the
     # leaf process, so each generator must run as its own detached transient
     # systemd service to get a distinct app row. --pipe keeps stdout (the RESULT
@@ -711,7 +711,7 @@ class LittleSnitch(ToolAdapter):
 
     def install(self):
         self.available = False
-        if any(Path(p).exists() for p in ("/usr/bin/littlesnitch", "/usr/bin/littlesnitchd", "/usr/sbin/littlesnitchd", "/opt/littlesnitch")):
+        if self.version() == self.VERSION:
             self.available = True
             return
         try:
@@ -751,7 +751,7 @@ class LittleSnitch(ToolAdapter):
             return Observation(na=True, note="not installable in this environment")
         stream = getattr(self, "stream", None)
         if not stream:
-            return Observation(na=True, note="web-socket stream unavailable")
+            return Observation(na=True, note="WebSocket stream unavailable")
         # each generator ran as its own transient systemd service under a globally
         # unique name (little-snitch aggregates by process name over history), so
         # its distinct app row's cumulative stats equal this trial's bytes. Poll
@@ -774,8 +774,8 @@ class LittleSnitch(ToolAdapter):
                 prev = found
             time.sleep(0.6)
         if found is None:
-            return Observation(flow_detected=False, proc_attributed=False, sent=0, recv=0, note="no app row (attributed to a parent app)")
-        return Observation(flow_detected=True, proc_attributed=True, names=[gt.exe], sent=found[0], recv=found[1], note="web-socket per-app stats")
+            return Observation(flow_detected=False, proc_attributed=False, sent=0, recv=0, note="no matching app row")
+        return Observation(flow_detected=True, proc_attributed=True, names=[gt.exe], sent=found[0], recv=found[1], note="WebSocket per-app stats")
 
     def pids(self):
         return _systemd_mainpid("littlesnitch")
@@ -793,13 +793,14 @@ class LittleSnitch(ToolAdapter):
 class Bcc(ToolAdapter):
     name = "bcc-baseline"
     # read the built library's soname: probing the tools themselves would attach BPF
+    VERSION = "0.37.0"  # must match BCC_VER in lib/build_bcc.sh
     VERSION_CMD = "readlink -f /usr/local/lib/libbcc.so"
     VERSION_SOURCE = "pinned (built from source tag)"
     layer = "socket"
     settle = 2.0
 
-    # upstream v0.37.0 built from source by lib/build_bcc.sh (the distro 0.35.0
-    # fails to JIT-compile against the 7.0 kernel headers). make install puts
+    # built from source by lib/build_bcc.sh (the distro package fails to
+    # JIT-compile against the 7.0 kernel headers). make install puts
     # libbcc.so in /usr/local/lib, the tools in /usr/local/share/bcc/tools, and
     # the python bindings on the system path -- no PYTHONPATH override needed.
     UP_TOOLS = "/usr/local/share/bcc/tools"
@@ -808,10 +809,12 @@ class Bcc(ToolAdapter):
         self.env = dict(os.environ)
         self.env["PYTHONUNBUFFERED"] = "1"  # else tcplife's low-volume output stays buffered
         self.env["LD_LIBRARY_PATH"] = "/usr/local/lib"
-        if not (Path("/usr/local/lib/libbcc.so").exists() and Path(f"{self.UP_TOOLS}/tcplife").exists()):
+        if self.version() != self.VERSION or not Path(f"{self.UP_TOOLS}/tcplife").exists():
             r = sh(f"bash {BENCH}/lib/build_bcc.sh", timeout=3600)
             if r.returncode != 0:
                 raise RuntimeError(f"bcc build failed: {r.stderr[-800:]}")
+            if self.version() != self.VERSION:
+                raise RuntimeError(f"bcc {self.VERSION} build failed, found {self.version() or 'nothing'}")
         self.tcplife = f"{self.UP_TOOLS}/tcplife"
         self.tcpconnect = f"{self.UP_TOOLS}/tcpconnect"
 
@@ -906,10 +909,11 @@ class Bcc(ToolAdapter):
 
 # --------------------------------------------------------------------------- #
 # bcc tcptop — per-process TCP throughput (eBPF), the bandwidth sibling of the
-# tcplife/tcpconnect baseline. Same upstream 0.37.0 build. TCP-only.
+# tcplife/tcpconnect baseline. Same upstream build. TCP-only.
 # --------------------------------------------------------------------------- #
 class BccTcptop(ToolAdapter):
     name = "bcc-tcptop"
+    VERSION = "0.37.0"  # must match BCC_VER in lib/build_bcc.sh
     VERSION_CMD = "readlink -f /usr/local/lib/libbcc.so"
     VERSION_SOURCE = "pinned (built from source tag)"
     layer = "socket"  # hooks tcp_sendmsg / tcp_cleanup_rbuf -> app bytes
@@ -920,10 +924,12 @@ class BccTcptop(ToolAdapter):
         self.env["PYTHONUNBUFFERED"] = "1"
         self.env["LD_LIBRARY_PATH"] = "/usr/local/lib"
         up = f"{Bcc.UP_TOOLS}/tcptop"
-        if not (Path("/usr/local/lib/libbcc.so").exists() and Path(up).exists()):
+        if self.version() != self.VERSION or not Path(up).exists():
             r = sh(f"bash {BENCH}/lib/build_bcc.sh", timeout=3600)
             if r.returncode != 0:
                 raise RuntimeError(f"bcc build failed: {r.stderr[-800:]}")
+            if self.version() != self.VERSION:
+                raise RuntimeError(f"bcc {self.VERSION} build failed, found {self.version() or 'nothing'}")
         self.tcptop = up
 
     def start(self):
@@ -992,7 +998,7 @@ class BccTcptop(ToolAdapter):
 
 
 # --------------------------------------------------------------------------- #
-# bpftrace — a ~10-line hand-rolled per-process TCP bandwidth monitor.
+# bpftrace: a hand-rolled per-process TCP bandwidth monitor.
 # Same hooks as tcptop. TCP-only.
 # --------------------------------------------------------------------------- #
 class Bpftrace(ToolAdapter):
@@ -1081,7 +1087,7 @@ class Sysdig(ToolAdapter):
 
     def start(self):
         self.log = self.sess / "sysdig.log"
-        # modern sysdig (>=0.38) defaults to the CO-RE eBPF probe, no kmod build.
+        # modern sysdig defaults to the CO-RE eBPF probe, no kmod build.
         self.proc = subprocess.Popen(["sysdig", "-p", self.FMT, self.FILTER], stdout=open(self.log, "w"), stderr=subprocess.STDOUT)
         time.sleep(8)
         self.broken = self._broken()
