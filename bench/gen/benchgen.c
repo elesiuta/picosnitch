@@ -246,8 +246,11 @@ int main(int argc, char **argv) {
     for (int i = 0; i < nconns; i++)
         do_transfer(&app_sent, &app_recv, &lport, &rport);
 
-    printf("RESULT app_sent=%llu app_recv=%llu proto=%s dir=%s peer=%s lport=%d rport=%d pid=%d exe=%s\n",
-           (unsigned long long)app_sent, (unsigned long long)app_recv, C.proto, C.dir, C.host,
+    /* want = bytes requested, so the harness can tell a short reliable transfer
+       (a failed run) from a monitor that under-reports */
+    printf("RESULT app_sent=%llu app_recv=%llu want=%llu proto=%s dir=%s peer=%s lport=%d rport=%d pid=%d exe=%s\n",
+           (unsigned long long)app_sent, (unsigned long long)app_recv,
+           (unsigned long long)C.nbytes * (unsigned long long)nconns, C.proto, C.dir, C.host,
            lport, rport, (int)getpid(), argv[0]);
     return 0;
 }

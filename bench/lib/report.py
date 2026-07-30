@@ -8,6 +8,11 @@ from harness import REPORTS, RESULTS
 from scenarios import build_scenarios
 
 SYM = {"PASS": "✅ PASS", "PARTIAL": "🟡 PART", "FAIL": "❌ FAIL", "N/A": "⬜ N/A", "ERROR": "⚠️ ERR"}
+LAYER_REF = {
+    "socket": "application bytes",
+    "frame": "wire bytes (L3 + Ethernet header per packet)",
+    "ippayload": "IP payload bytes (L3 minus the IP header per packet)",
+}
 SHORT = {"PASS": "✅", "PARTIAL": "🟡", "FAIL": "❌", "N/A": "⬜", "ERROR": "⚠️"}
 TOOL_ORDER = ["picosnitch", "nethogs", "bandwhich", "opensnitch", "sniffnet", "littlesnitch", "bcc-baseline", "bcc-tcptop", "bpftrace", "sysdig"]
 TOOL_LABEL = {
@@ -103,7 +108,7 @@ def _footnotes(data, tools):
             if dv not in ("PARTIAL", "FAIL") and bv not in ("PARTIAL", "FAIL") and not (dfl or bfl):
                 continue
             tr = [x for x in rec.get("trials", []) if "obs" in x]
-            onote = tr[0]["obs"]["note"] if tr else ""
+            onote = tr[0]["obs"]["note"] if tr and not (dfl or bfl) else ""
             ratio = ""
             if not (dfl or bfl):  # a first-trial ratio would contradict a combined verdict
                 for x in tr:
@@ -122,8 +127,11 @@ def _footnotes(data, tools):
         if items:
             lines.append(f"- **{TOOL_LABEL[t]}**")
             lines += items
-        if d.get("errors"):
-            lines.append(f"    - _run note:_ {d['errors'][0][:200]}")
+        errs = d.get("errors", [])
+        for e in errs[:5]:
+            lines.append(f"    - _run note:_ {e[:200]}")
+        if len(errs) > 5:
+            lines.append(f"    - _run note:_ (+{len(errs) - 5} further notes not shown)")
     return "\n".join(lines) + "\n"
 
 
@@ -142,43 +150,37 @@ def _per_tool(data, tool):
     lines = [
         f"# {TOOL_LABEL.get(tool, tool)}: detailed results",
         "",
-        f"- layer scored against: **{d.get('layer')}** ({'app-layer bytes' if d.get('layer') == 'socket' else 'wire bytes'})",
+        f"- scored against: **{LAYER_REF.get(d.get('layer'), d.get('layer'))}**",
         "",
     ]
     ctrl = d.get("control")
     if ctrl:
-        lines.append(f"- **control (separate from the s01 row):** det={ctrl['det']} bw={ctrl['bw']} (ref recv={ctrl['gt']['app_recv']}, reported recv={_fmtb(ctrl['obs']['recv'])})")
-    lines += ["", "| # | Scenario | Det | BW | ref app s/r | ref wire s/r | reported s/r | ratio | note |", "|---|---|---|---|---|---|---|---|---|"]
-    any_flaky = False
+        lines.append(f"- **control (separate from the s01 row):** det={ctrl['det']} bw={ctrl['bw']} (reference recv={ctrl['gt']['app_recv']}, reported recv={_fmtb(ctrl['obs']['recv'])})")
+    lines += [
+        "",
+        "Rows show the first trial's numbers; verdicts combine all trials. \\* = trials disagreed.",
+        "",
+        "| # | Scenario | Det | BW | reference s/r | reported s/r | ratio | note |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
     for sid, s in scn.items():
         rec = d.get("scenarios", {}).get(sid)
         if not rec:
             continue
         tr = [x for x in rec.get("trials", []) if "gt" in x]
-        gt = tr[0]["gt"] if tr else {}
         obs = tr[0]["obs"] if tr else {}
-        ratio = ""
-        for x in tr:
-            dtl = x.get("bw_detail", {})
-            if isinstance(dtl, dict):
-                for dcol in ("egress", "ingress"):
-                    if dcol in dtl:
-                        ratio = f"{dcol} {dtl[dcol]['ratio']}"
-                        break
-            if ratio:
-                break
+        dtl = tr[0].get("bw_detail") if tr else None
+        dtl = dtl if isinstance(dtl, dict) else {}
+        # the reference actually scored against, per direction, at this tool's layer
+        ref = "/".join(str(dtl[c]["ref"]) if c in dtl else "-" for c in ("egress", "ingress"))
+        ratio = " ".join(f"{c} {dtl[c]['ratio']}" for c in ("egress", "ingress") if c in dtl)
         dv, dfl = _resolve(rec, "det", tool)
         bv, bfl = _resolve(rec, "bw", tool)
-        any_flaky = any_flaky or dfl or bfl
         det = SYM.get(dv, "?") + ("*" if dfl else "")
         bw = SYM.get(bv, "?") + ("*" if bfl else "")
-        gtapp = f"{gt.get('app_sent', 0)}/{gt.get('app_recv', 0)}"
-        gtwire = f"{gt.get('wire_egress', 0)}/{gt.get('wire_ingress', 0)}"
         rep = f"{_fmtb(obs.get('sent'))}/{_fmtb(obs.get('recv'))}"
         note = (obs.get("note", "") or "")[:80]
-        lines.append(f"| {sid} | {s.name} | {det} | {bw} | {gtapp} | {gtwire} | {rep} | {ratio} | {note} |")
-    if any_flaky:
-        lines += ["", "Rows show the first trial's numbers; verdicts combine all trials. \\* = trials disagreed."]
+        lines.append(f"| {sid} | {s.name} | {det} | {bw} | {ref} | {rep} | {ratio} | {note} |")
     return "\n".join(lines) + "\n"
 
 
@@ -215,6 +217,7 @@ def write_findings():
         return
     scn = build_scenarios()
     C = {t: _counts(data[t], t) for t in tools}
+    ntrials = max((len(r.get("trials", [])) for d in data.values() for r in d.get("scenarios", {}).values()), default=0)
     dates = sorted({d.get("run_date", "") for d in data.values() if d.get("run_date")})
     RUN_DATE = dates[0] if len(dates) == 1 else (f"{dates[0]} to {dates[-1]}" if dates else "date not recorded")
     # neutral ordering for the scoreboard: by detection then bandwidth PASS
@@ -223,33 +226,39 @@ def write_findings():
     REPO = "https://github.com/elesiuta/picosnitch/tree/master/bench"
     L = [
         "# Per-process network & bandwidth monitors on Linux\n",
-        "<!-- --8<-- [start:findings] -->",
         "<!-- --8<-- [start:overview] -->",
         "A comparison of per-process (per-executable) network and bandwidth "
         "monitors on Linux, measuring **completeness** (is traffic seen and "
         "attributed to the right process) and **accuracy** (are the byte counts "
         "correct). Nine projects in ten configurations.\n",
         # hardcoded; update when running on another host
-        f"{len(scn)} scenarios × 5 trials, each configuration run in isolation on Ubuntu "
+        f"{len(scn)} scenarios × {ntrials} trials, each configuration run in isolation on Ubuntu "
         f"26.04 (kernel 7.0) on a GCP e2-standard-4 (4 vCPUs, 16 GB), run {RUN_DATE}, "
         f"scored against tool-independent reference measurements. Detection = "
         f"*seen and attributed to the right process*; Bandwidth = *bytes within "
         f"±10% (PASS) / ±25% (PARTIAL)* of the reference for the tool's layer. Method, "
         f"harness, versions, and how to reproduce: [the `bench/` directory]({REPO}).\n",
         "## Results summary\n",
-        f"Each cell counts scenarios (of {len(scn)}). N/A marks a missing capability: "
-        "OpenSnitch does no bandwidth accounting; the BCC utilities and the bpftrace "
-        "script used here hook TCP only; Sniffnet reports one combined per-program "
-        "total, so the two full-duplex scenarios it cannot split by direction are "
-        "N/A.\n",
+        "Each row counts scenarios covered, unweighted; the scenarios are not equally important and the totals are not an overall ranking.\n",
+        f"Each cell counts scenarios (of {len(scn)}). N/A marks a missing capability "
+        "or reference: OpenSnitch does no bandwidth accounting; the BCC utilities and "
+        "the bpftrace script used here hook TCP only; Sniffnet reports one combined "
+        "per-program total, so full-duplex scenarios it cannot split by direction are "
+        "N/A; the loopback scenario has no wire measurement, so tools counting at a "
+        "packet layer are N/A on its bandwidth.\n",
         "| Tool | Detection: PASS / PART / FAIL / N/A | Bandwidth: PASS / PART / FAIL / N/A | Trial disagreement |",
         "|---|---|---|---|",
     ]
+
+    def err(n):
+        return f" (+{n} ERR)" if n else ""
+
     for t in order:
         c = C[t]
-        detfail = c["det_fail"] + c["det_err"]
-        bwfail = c["bw_fail"] + c["bw_err"]
-        L.append(f"| {TOOL_LABEL[t]} | **{c['det_pass']}** / {c['det_part']} / {detfail} / {c['det_na']} | **{c['bw_pass']}** / {c['bw_part']} / {bwfail} / {c['bw_na']} | {c['flaky']} |")
+        L.append(
+            f"| {TOOL_LABEL[t]} | **{c['det_pass']}** / {c['det_part']} / {c['det_fail']} / {c['det_na']}{err(c['det_err'])} "
+            f"| **{c['bw_pass']}** / {c['bw_part']} / {c['bw_fail']} / {c['bw_na']}{err(c['bw_err'])} | {c['flaky']} |"
+        )
 
     # versions actually observed at run time, with how each was obtained
     if any(data[t].get("version") for t in order):
@@ -315,7 +324,6 @@ def write_findings():
                 break
         if tr:
             L.append(f"| {s.sid} | {s.name} | {tr['app_sent']}/{tr['app_recv']} | {tr['wire_egress']}/{tr['wire_ingress']} |")
-    L.append("<!-- --8<-- [end:findings] -->")
     (REPORTS / "findings.md").write_text("\n".join(L) + "\n")
     print(f"wrote findings.md ({len(order)} tools, {len(scn)} scenarios)")
 

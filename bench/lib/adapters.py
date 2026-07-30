@@ -6,7 +6,7 @@ The runner runs as root, so sh() calls here already have privileges.
 Collection model: every monitor runs continuously for its whole session. For
 cumulative-total tools (nethogs, bandwhich) we snapshot per-process totals in
 pre_trial() and take the delta in collect(). For event/log tools (picosnitch
-rowid, opensnitch journald, sniffnet pcap, bcc) we window by the trial's exe /
+rowid, opensnitch journald, bcc) we window by the trial's exe /
 time / rowid. Failures degrade to a noted Observation rather than aborting.
 """
 
@@ -21,7 +21,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from harness import BENCH, GT, Observation, sh
+from harness import BENCH, GT, Observation, layer_ref, sh
 
 DL = BENCH / "downloads"
 DL.mkdir(exist_ok=True)
@@ -36,7 +36,7 @@ def _download(url, dest):
 
 class ToolAdapter:
     name = "base"
-    layer = "socket"  # socket | wire  (which ground-truth reference to score against)
+    layer = "socket"  # socket | frame | ippayload: the layer this tool counts at
     does_bandwidth = True
     does_attribution = True
     settle = 2.0  # seconds to wait after a trial before collecting
@@ -71,6 +71,11 @@ class ToolAdapter:
     def pre_trial(self):
         self._snap = {}
 
+    def alive(self):
+        """False once a process-launched monitor has exited (its trials become
+        ERROR, not FAIL); service tools have no self.proc and stay True."""
+        return self.proc is None or self.proc.poll() is None
+
     def collect(self, gt: GT) -> Observation:
         raise NotImplementedError
 
@@ -80,23 +85,27 @@ class ToolAdapter:
     # window: poll until the known ground-truth amount is reached (fast path),
     # the value plateaus, or the deadline. Returns the MAX seen for each
     # direction, so a transient dip or a premature plateau can never lose a value
-    # the tool did report. `sample` returns (sent, recv, names, attr, unknown).
+    # the tool did report. `sample` returns (a_sent, a_recv, u_sent, u_recv, names).
     POLL = 0.6
     STABLE_HITS = 25  # ~15s of no growth -> settled
     ZERO_HITS = 25  # ~15s of nothing -> genuinely zero (must match STABLE_HITS)
     DEADLINE_HITS = 90  # ~54s hard cap
 
     def _poll_cumulative(self, sample, target):
-        best_s = best_r = 0.0
-        names, attributed, unknown = [], False, False
+        """Poll a cumulative tool. Named and unknown byte counts are tracked
+        separately so a total from one provenance is never reported under the
+        other. `sample` returns (a_sent, a_recv, u_sent, u_recv, names)."""
+        a_s = a_r = u_s = u_r = 0.0
+        names = []
         prev, stable, zero = None, 0, 0
         for _ in range(self.DEADLINE_HITS):
-            s, r, nm, attr, unk = sample()
-            best_s, best_r = max(best_s, s), max(best_r, r)
+            s, r, us, ur, nm = sample()
+            a_s, a_r = max(a_s, s), max(a_r, r)
+            u_s, u_r = max(u_s, us), max(u_r, ur)
             if nm:
                 names = nm
-            attributed = attributed or attr
-            unknown = unknown or unk
+            best_s = a_s if (a_s or a_r) else u_s
+            best_r = a_r if (a_s or a_r) else u_r
             total = best_s + best_r
             if target > 0 and total >= target:
                 break  # captured the known amount -> done fast
@@ -113,7 +122,7 @@ class ToolAdapter:
                 stable = 0
             prev = cur
             time.sleep(self.POLL)
-        return best_s, best_r, names, attributed, unknown
+        return a_s, a_r, u_s, u_r, names
 
     def stop(self):
         if self.proc and self.proc.poll() is None:
@@ -206,19 +215,28 @@ class Picosnitch(ToolAdapter):
     def pre_trial(self):
         self._snap = {"rowid": self._maxrowid()}
 
-    def _query(self, snap, exe):
+    def _query(self, snap, exe, peer="", rport=0):
         con = sqlite3.connect(f"file:{self.DB}?mode=ro", uri=True, timeout=10)
-        rows = con.execute("SELECT e.name, e.exe, SUM(c.send), SUM(c.recv) FROM connections c JOIN executables e ON c.exe_id=e.id WHERE c.rowid > ? GROUP BY e.id", (snap,)).fetchall()
+        rows = con.execute(
+            "SELECT e.name, e.exe, SUM(c.send), SUM(c.recv), a.addr, c.rport "
+            "FROM connections c JOIN executables e ON c.exe_id=e.id "
+            "JOIN addresses a ON c.raddr_id=a.id WHERE c.rowid > ? GROUP BY e.id, a.addr, c.rport",
+            (snap,),
+        ).fetchall()
         con.close()
         sent = recv = 0
-        names, attributed = [], False
-        for nm, exe_, s, r in rows:
+        names, attributed, elsewhere = [], False, False
+        for nm, exe_, s, r, addr, rp in rows:
             if exe in (nm or "") or exe in (exe_ or ""):
                 sent += s or 0
                 recv += r or 0
-                names.append(nm)
+                if nm not in names:
+                    names.append(nm)
                 attributed = True
-        return sent, recv, names, attributed
+            elif addr == peer and (not rport or rp == rport):
+                # this trial's flow recorded under a different executable
+                elsewhere = True
+        return sent, recv, names, attributed, elsewhere
 
     def collect(self, gt: GT) -> Observation:
         snap = self._snap["rowid"]
@@ -232,7 +250,7 @@ class Picosnitch(ToolAdapter):
         prev = None
         stable = zero = 0
         sent = recv = 0
-        names, attributed = [], False
+        names, attributed, elsewhere = [], False, False
         # Poll cadence + thresholds. picosnitch eventually reports the full byte
         # count, but its flush-to-SQLite latency after a transfer is bursty and long
         # (measured up to ~10s on a full-duplex trial: the writer pipeline plus
@@ -249,9 +267,9 @@ class Picosnitch(ToolAdapter):
         DEADLINE_HITS = 90  # ~54s hard cap (headroom above the two ~15s windows)
         for _ in range(DEADLINE_HITS):
             try:
-                sent, recv, names, attributed = self._query(snap, gt.exe)
+                sent, recv, names, attributed, elsewhere = self._query(snap, gt.exe, gt.peer, gt.rport)
             except Exception as e:
-                return Observation(note=f"db error: {e}")
+                return Observation(invalid=True, note=f"database read failed: {e}")
             total = sent + recv
             if target > 0 and total >= target:
                 break  # captured ~everything -> done fast
@@ -268,7 +286,14 @@ class Picosnitch(ToolAdapter):
                 stable = 0
             prev = cur
             time.sleep(POLL)
-        return Observation(flow_detected=attributed, proc_attributed=attributed, names=names, sent=sent, recv=recv)
+        return Observation(
+            flow_detected=attributed or elsewhere,
+            proc_attributed=attributed,
+            names=names,
+            sent=sent,
+            recv=recv,
+            note="" if attributed else ("recorded under another executable" if elsewhere else ""),
+        )
 
     def pids(self):
         return _systemd_mainpid("picosnitch")
@@ -284,7 +309,7 @@ class Nethogs(ToolAdapter):
     name = "nethogs"
     VERSION_CMD = "/usr/local/sbin/nethogs -V 2>&1"
     VERSION_SOURCE = "pinned (built from source tag)"
-    layer = "wire"
+    layer = "frame"
     settle = 2.5
 
     VERSION = "0.9.0"
@@ -316,66 +341,75 @@ class Nethogs(ToolAdapter):
         super().stop()
         sh("pkill -9 -x nethogs")
 
-    def _cumulative(self):
-        """name-substr -> (sent,recv) from the latest values (max, monotonic)."""
+    @staticmethod
+    def parse_cumulative(text):
+        """(name, pid) -> (sent, recv). nethogs prints one cumulative row per PID,
+        so the PID is part of the key: a scenario that runs many processes under
+        one executable name would otherwise collapse to a single process."""
         best = {}
-        try:
-            for line in open(self.log, errors="replace"):
-                if "\t" not in line:
-                    continue
-                parts = line.rstrip("\n").split("\t")
-                if len(parts) < 3:
-                    continue
-                key = parts[0]
-                try:
-                    s = float(parts[1])
-                    r = float(parts[2])
-                except ValueError:
-                    continue
-                # key = <name>/<pid>/<uid>
-                m = key.rsplit("/", 2)
-                nm = m[0] if len(m) == 3 else key
-                cur = best.get(nm, (0.0, 0.0))
-                best[nm] = (max(cur[0], s), max(cur[1], r))
-        except FileNotFoundError:
-            pass
+        for line in text.splitlines():
+            if "\t" not in line:
+                continue
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 3:
+                continue
+            m = parts[0].rsplit("/", 2)  # <name>/<pid>/<uid>
+            nm, pid = (m[0], m[1]) if len(m) == 3 else (parts[0], "")
+            try:
+                s, r = float(parts[1]), float(parts[2])
+            except ValueError:
+                continue
+            cur = best.get((nm, pid), (0.0, 0.0))
+            best[(nm, pid)] = (max(cur[0], s), max(cur[1], r))
         return best
+
+    def _cumulative(self):
+        try:
+            return self.parse_cumulative(open(self.log, errors="replace").read())
+        except FileNotFoundError:
+            return {}
 
     def pre_trial(self):
         self._snap = self._cumulative()
 
-    def _delta(self, gt):
-        now = self._cumulative()
+    @staticmethod
+    def delta_from(now, snap, exe):
+        """Per-PID deltas summed over the PIDs of one executable, and separately
+        over the unknown buckets."""
         a_s = a_r = u_s = u_r = 0.0
-        names, attributed, unknown = [], False, False
-        for nm, (s, r) in now.items():
-            ps, pr = self._snap.get(nm, (0.0, 0.0))
+        names = []
+        for (nm, pid), (s, r) in now.items():
+            ps, pr = snap.get((nm, pid), (0.0, 0.0))
             ds, dr = s - ps, r - pr
             if ds < 1 and dr < 1:
                 continue
-            if gt.exe in nm:
+            if exe in nm:
                 a_s += ds
                 a_r += dr
-                names.append(nm)
-                attributed = True
+                if nm not in names:
+                    names.append(nm)
             elif "unknown" in nm.lower():
                 u_s += ds
                 u_r += dr
-                unknown = True
-        # Score THIS process's bytes only: the attributed delta when we have it, else
-        # the unknown bucket -- never both, so background unattributed traffic on the
-        # monitored interface can't inflate an otherwise-clean measurement.
-        if attributed:
-            return a_s, a_r, names, True, unknown
-        return u_s, u_r, names, False, unknown
+        return a_s, a_r, u_s, u_r, names
+
+    def _delta(self, gt):
+        return self.delta_from(self._cumulative(), self._snap, gt.exe)
 
     def collect(self, gt: GT) -> Observation:
         # nethogs' -v2 totals are monotonic-cumulative; use the shared target/plateau
         # poll so it gets the same collection budget as the other cumulative tools.
-        target = 0.97 * (gt.app_sent + gt.app_recv)
-        sent, recv, names, attributed, unknown = self._poll_cumulative(lambda: self._delta(gt), target)
+        target = 0.97 * sum(layer_ref(gt, self.layer, d) for d in (gt.test_dirs or []))
+        a_s, a_r, u_s, u_r, names = self._poll_cumulative(lambda: self._delta(gt), target)
+        attributed = bool(a_s or a_r)
+        unknown = bool(u_s or u_r)
         detected = attributed or unknown
-        note = "" if attributed else ("bucketed as unknown" if unknown else "not detected")
+        # score the named bytes when the tool named the process, otherwise its
+        # unknown bucket; never a mix, and both amounts are reported
+        sent, recv = (a_s, a_r) if attributed else (u_s, u_r)
+        note = f"named {int(a_s)}/{int(a_r)}, unknown {int(u_s)}/{int(u_r)}" if unknown else ""
+        if not attributed and unknown:
+            names = ["unknown"]
         return Observation(flow_detected=detected, proc_attributed=attributed, names=names, sent=int(sent), recv=int(recv), note=note)
 
 
@@ -386,7 +420,7 @@ class Bandwhich(ToolAdapter):
     name = "bandwhich"
     VERSION_CMD = "bandwhich --version"
     VERSION_SOURCE = "pinned (release binary)"
-    layer = "wire"
+    layer = "ippayload"  # counts ip_packet.payload(): the L4 segment, no IP or Ethernet header
     settle = 2.5
     VERSION = "0.23.1"
     URL = f"https://github.com/imsnif/bandwhich/releases/download/v{VERSION}/bandwhich-v{VERSION}-x86_64-unknown-linux-musl.tar.gz"
@@ -402,7 +436,7 @@ class Bandwhich(ToolAdapter):
 
     def start(self):
         self.log = self.sess / "bandwhich.log"
-        self.proc = subprocess.Popen(["/usr/local/bin/bandwhich", "--raw", "--total-utilization", "--no-resolve"], stdout=open(self.log, "w"), stderr=subprocess.STDOUT)
+        self.proc = subprocess.Popen(["/usr/local/bin/bandwhich", "--raw", "--total-utilization", "--no-resolve", "--show-dns"], stdout=open(self.log, "w"), stderr=subprocess.STDOUT)
         time.sleep(3)
 
     def stop(self):
@@ -413,56 +447,78 @@ class Bandwhich(ToolAdapter):
 
     _re = re.compile(r'process: <\d+> "(.*?)" up/down Bps: (\d+)/(\d+)')
 
-    def _cumulative(self):
-        best = {}
-        try:
-            for line in open(self.log, errors="replace"):
-                m = self._re.search(line)
-                if not m:
-                    continue
-                nm, s, r = m.group(1), int(m.group(2)), int(m.group(3))
+    @staticmethod
+    def parse_cumulative(text):
+        """name -> (sent, recv). bandwhich prints a block per refresh and omits the
+        PID, so same-named processes appear as separate rows within one block:
+        sum inside a block, then keep the largest block total."""
+        best, block = {}, {}
+
+        def flush():
+            for nm, (s, r) in block.items():
                 cur = best.get(nm, (0, 0))
                 best[nm] = (max(cur[0], s), max(cur[1], r))
-        except FileNotFoundError:
-            pass
+            block.clear()
+
+        for line in text.splitlines():
+            if line.startswith("Refreshing:"):
+                flush()
+                continue
+            m = Bandwhich._re.search(line)
+            if not m:
+                continue
+            nm, s, r = m.group(1), int(m.group(2)), int(m.group(3))
+            cs, cr = block.get(nm, (0, 0))
+            block[nm] = (cs + s, cr + r)
+        flush()
         return best
+
+    def _cumulative(self):
+        try:
+            return self.parse_cumulative(open(self.log, errors="replace").read())
+        except FileNotFoundError:
+            return {}
+
+    @staticmethod
+    def delta_from(now, snap, exe):
+        a_s = a_r = u_s = u_r = 0
+        names = []
+        for nm, (s, r) in now.items():
+            ps, pr = snap.get(nm, (0, 0))
+            ds, dr = s - ps, r - pr
+            if ds < 1 and dr < 1:
+                continue
+            if exe in nm:
+                a_s += ds
+                a_r += dr
+                if nm not in names:
+                    names.append(nm)
+            elif "UNKNOWN" in nm.upper():
+                u_s += ds
+                u_r += dr
+        return a_s, a_r, u_s, u_r, names
 
     def pre_trial(self):
         self._snap = self._cumulative()
 
     def _delta(self, gt):
-        now = self._cumulative()
-        a_s = a_r = u_s = u_r = 0
-        names, attributed, unknown = [], False, False
-        for nm, (s, r) in now.items():
-            ps, pr = self._snap.get(nm, (0, 0))
-            ds, dr = s - ps, r - pr
-            if ds < 1 and dr < 1:
-                continue
-            if gt.exe in nm:
-                a_s += ds
-                a_r += dr
-                names.append(nm)
-                attributed = True
-            elif "UNKNOWN" in nm.upper():
-                u_s += ds
-                u_r += dr
-                unknown = True
-        # Score THIS process's bytes: the attributed delta when we have it, else the
-        # <UNKNOWN> bucket -- never both, so background unattributed traffic on the
-        # monitored interface can't inflate an otherwise-clean measurement.
-        if attributed:
-            return a_s, a_r, names, True, unknown
-        return u_s, u_r, names, False, unknown
+        return self.delta_from(self._cumulative(), self._snap, gt.exe)
 
     def collect(self, gt: GT) -> Observation:
         # bandwhich's --total-utilization value is monotonic-cumulative but its
         # egress attribution to short-lived processes can lag well past a short
         # window; the shared target/plateau poll waits it out and takes the max.
-        target = 0.97 * (gt.app_sent + gt.app_recv)
-        sent, recv, names, attributed, unknown = self._poll_cumulative(lambda: self._delta(gt), target)
+        target = 0.97 * sum(layer_ref(gt, self.layer, d) for d in (gt.test_dirs or []))
+        a_s, a_r, u_s, u_r, names = self._poll_cumulative(lambda: self._delta(gt), target)
+        attributed = bool(a_s or a_r)
+        unknown = bool(u_s or u_r)
         detected = attributed or unknown
-        note = "" if attributed else ("bucketed as <UNKNOWN>" if unknown else "not detected")
+        # score the named bytes when the tool named the process, otherwise its
+        # unknown bucket; never a mix, and both amounts are reported
+        sent, recv = (a_s, a_r) if attributed else (u_s, u_r)
+        note = f"named {int(a_s)}/{int(a_r)}, <UNKNOWN> {int(u_s)}/{int(u_r)}" if unknown else ""
+        if not attributed and unknown:
+            names = ["<UNKNOWN>"]
         return Observation(flow_detected=detected, proc_attributed=attributed, names=names, sent=sent, recv=recv, note=note)
 
 
@@ -566,7 +622,7 @@ class Sniffnet(ToolAdapter):
     name = "sniffnet"
     VERSION_CMD = "dpkg-query -W -f '${Version}' sniffnet"
     VERSION_SOURCE = "pinned (release .deb)"
-    layer = "wire"
+    layer = "frame"
     does_attribution = True  # per-process only in the live GUI -> extracted by OCR
     settle = 2.0
     DISPLAY = ":99"
@@ -599,9 +655,17 @@ class Sniffnet(ToolAdapter):
         super().stop()
         sh("pkill -x sniffnet")
         time.sleep(1)
+        # a dead or wedged Xvfb turns every later read invalid; relaunch it (the
+        # fresh sniffnet instance follows) after a failed read or if it died
+        if getattr(self, "xvfb", None) is None or self.xvfb.poll() is not None or getattr(self, "_x_suspect", False):
+            sh("pkill -x Xvfb; rm -f /tmp/.X99-lock")
+            self.xvfb = subprocess.Popen(["Xvfb", self.DISPLAY, "-screen", "0", "1600x1000x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(2)
+            self._x_suspect = False
         self._launch()
 
-    _units = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
+    # sniffnet formats with decimal SI multipliers, not binary ones
+    _units = {"B": 1, "KB": 1000, "MB": 1000**2, "GB": 1000**3, "TB": 1000**4}
     # Program panel: right-hand column of the lower panel row of the app window
     PROG_PANEL = "300x220+890+400"
 
@@ -611,8 +675,14 @@ class Sniffnet(ToolAdapter):
         # instead of blocking the whole run indefinitely.
         png = self.sess / "sniffnet.png"
         crop = self.sess / "sniffnet_program.png"
+        # constant paths: remove first so a failed screenshot can never hand
+        # tesseract the previous trial's panel
+        png.unlink(missing_ok=True)
+        crop.unlink(missing_ok=True)
         try:
-            sh(["import", "-window", "root", str(png)], timeout=30, env={**os.environ, "DISPLAY": self.DISPLAY})
+            r = sh(["import", "-window", "root", str(png)], timeout=30, env={**os.environ, "DISPLAY": self.DISPLAY})
+            if r.returncode != 0 or not png.exists():
+                raise RuntimeError(f"screenshot failed (rc={r.returncode}); X server unreachable?")
             # the three panels share text lines in a full-window OCR
             sh(["convert", str(png), "-crop", self.PROG_PANEL, "+repage", "-colorspace", "gray", "-resize", "300%", str(crop)], timeout=30)
             r = sh(["tesseract", str(crop if crop.exists() else png), "-", "--psm", "6"], timeout=30)
@@ -650,11 +720,16 @@ class Sniffnet(ToolAdapter):
 
     def collect(self, gt: GT) -> Observation:
         # per-process via OCR of the live GUI
-        ocr_bytes, label = None, ""
         try:
-            ocr_bytes, label = self._ocr_process(gt, self._ocr())
-        except Exception:
-            ocr_bytes, label = None, ""
+            text = self._ocr()
+        except Exception as e:
+            self._x_suspect = True  # revive Xvfb before the next trial
+            return Observation(invalid=True, note=f"OCR failed: {e}")
+        if not text.strip():
+            self._x_suspect = True
+            return Observation(invalid=True, note="OCR produced no text")
+        self._x_suspect = False
+        ocr_bytes, label = self._ocr_process(gt, text)
         # sniffnet shows ONE combined per-program total, not a per-direction
         # split: for a single-direction scenario that total IS that direction; a
         # duplex total cannot be split, so the untestable direction is N/A.
@@ -673,7 +748,7 @@ class Sniffnet(ToolAdapter):
         if label == "?":
             # Sniffnet counted the traffic but named no program: its own
             # unattributed row.
-            unattr = next((b for lbl, b in self._ocr_rows(self._ocr()) if lbl == "?"), 0)
+            unattr = next((b for lbl, b in self._ocr_rows(text) if lbl == "?"), 0)
             return Observation(
                 flow_detected=True,
                 proc_attributed=False,
@@ -707,7 +782,8 @@ class LittleSnitch(ToolAdapter):
     # leaf process, so each generator must run as its own detached transient
     # systemd service to get a distinct app row. --pipe keeps stdout (the RESULT
     # line) flowing back to the harness.
-    gen_prefix = ["systemd-run", "--pipe", "--quiet", "--collect"]
+    # RuntimeMaxSec bounds the detached generator if the harness kills the --pipe client
+    gen_prefix = ["systemd-run", "--pipe", "--quiet", "--collect", "--property=RuntimeMaxSec=120"]
 
     def install(self):
         self.available = False
@@ -744,36 +820,37 @@ class LittleSnitch(ToolAdapter):
         time.sleep(1)
 
     def pre_trial(self):
-        self._snap = {}
+        stream = getattr(self, "stream", None)
+        self._snap = stream.totals() if stream else {}
 
     def collect(self, gt: GT) -> Observation:
         if not getattr(self, "available", False):
             return Observation(na=True, note="not installable in this environment")
         stream = getattr(self, "stream", None)
         if not stream:
-            return Observation(na=True, note="WebSocket stream unavailable")
+            return Observation(invalid=True, note="WebSocket stream unavailable")
+
         # each generator ran as its own transient systemd service under a globally
         # unique name (little-snitch aggregates by process name over history), so
-        # its distinct app row's cumulative stats equal this trial's bytes. Poll
-        # until the app appears and its bytes reach the known amount or stabilize.
-        target = 0.95 * (gt.app_sent + gt.app_recv)
-        prev = None
-        stable = 0
-        found = None
-        for _ in range(35):
-            found = stream.find(gt.exe)
-            if found is not None:
-                if target > 0 and (found[0] + found[1]) >= target:
-                    break
-                if found == prev:
-                    stable += 1
-                    if stable >= 4:
-                        break
-                else:
-                    stable = 0
-                prev = found
-            time.sleep(0.6)
+        # its distinct app row's cumulative stats equal this trial's bytes, read
+        # with the shared cumulative-poll budget. names records whether the row
+        # ever appeared, so a row stuck at zero is still a (zero-byte) sighting.
+        def sample():
+            cur = stream.find(gt.exe)
+            return (cur[0], cur[1], 0, 0, [gt.exe]) if cur else (0, 0, 0, 0, [])
+
+        a_s, a_r, _, _, names = self._poll_cumulative(sample, 0.97 * (gt.app_sent + gt.app_recv))
+        found = (a_s, a_r) if names else None
         if found is None:
+            # no row for this generator: check whether another app's row grew by
+            # about this trial's traffic, which is traffic seen but misattributed
+            want = gt.app_sent + gt.app_recv
+            grew = 0
+            for title, (s, r) in stream.totals().items():
+                ps, pr = self._snap.get(title, (0, 0))
+                grew = max(grew, (s - ps) + (r - pr))
+            if want and grew >= 0.5 * want:
+                return Observation(flow_detected=True, proc_attributed=False, names=["another app"], sent=0, recv=0, note="recorded under another application")
             return Observation(flow_detected=False, proc_attributed=False, sent=0, recv=0, note="no matching app row")
         return Observation(flow_detected=True, proc_attributed=True, names=[gt.exe], sent=found[0], recv=found[1], note="WebSocket per-app stats")
 
@@ -889,6 +966,9 @@ class Bcc(ToolAdapter):
                             sent += float(parts[-3]) * 1024
                             recv += float(parts[-2]) * 1024
                             seen = True
+                            attributed = True
+                            if gt.exe not in names:
+                                names.append(gt.exe)
                         except ValueError:
                             continue
             except FileNotFoundError:
@@ -916,7 +996,7 @@ class BccTcptop(ToolAdapter):
     VERSION = "0.37.0"  # must match BCC_VER in lib/build_bcc.sh
     VERSION_CMD = "readlink -f /usr/local/lib/libbcc.so"
     VERSION_SOURCE = "pinned (built from source tag)"
-    layer = "socket"  # hooks tcp_sendmsg / tcp_cleanup_rbuf -> app bytes
+    layer = "socket"  # fentry/fexit on tcp_sendmsg / tcp_recvmsg -> app bytes
     settle = 2.0
 
     def install(self):
@@ -999,7 +1079,7 @@ class BccTcptop(ToolAdapter):
 
 # --------------------------------------------------------------------------- #
 # bpftrace: a hand-rolled per-process TCP bandwidth monitor.
-# Same hooks as tcptop. TCP-only.
+# Socket-layer like tcptop, but via tcp_sendmsg / tcp_cleanup_rbuf. TCP-only.
 # --------------------------------------------------------------------------- #
 class Bpftrace(ToolAdapter):
     name = "bpftrace"
@@ -1008,8 +1088,9 @@ class Bpftrace(ToolAdapter):
     layer = "socket"
     settle = 2.0
     # arg2 of tcp_sendmsg is size (bytes queued to send); arg1 of tcp_cleanup_rbuf
-    # is copied (bytes handed to userspace). key by comm; print+clear each second.
-    SCRIPT = "kprobe:tcp_sendmsg { @s[comm] = sum(arg2); } kprobe:tcp_cleanup_rbuf /arg1 > 0/ { @r[comm] = sum(arg1); } interval:s:1 { print(@s); print(@r); clear(@s); clear(@r); }"
+    # is copied (bytes handed to userspace), a signed int that must be cast before
+    # comparing. key by comm; print+clear each second.
+    SCRIPT = "kprobe:tcp_sendmsg { @s[comm] = sum(arg2); } kprobe:tcp_cleanup_rbuf /(int32)arg1 > 0/ { @r[comm] = sum((int32)arg1); } interval:s:1 { print(@s); print(@r); clear(@s); clear(@r); }"
     _rowre = re.compile(r"@([sr])\[(.+?)\]: (\d+)")
 
     def install(self):

@@ -84,8 +84,8 @@ class Observation:
     sent: object = None  # bytes egress (None = no bandwidth capability)
     recv: object = None  # bytes ingress
     note: str = ""
-    na: bool = False  # tool genuinely N/A here (uninstallable, or
-    # capability absent) -> score N/A, not FAIL
+    na: bool = False  # tool genuinely N/A here (uninstallable, or capability absent) -> score N/A, not FAIL
+    invalid: bool = False  # the harness could not extract a measurement (not a tool result)
 
 
 # --------------------------------------------------------------------------- #
@@ -111,7 +111,9 @@ class Netlab:
         self._run("down")
 
     def reset(self):
-        self._run("reset")
+        r = self._run("reset")
+        if r.returncode != 0:
+            raise RuntimeError(f"netlab reset failed (wire reference would be wrong): {r.stderr}")
 
     def read(self):
         """Return (egress_bytes, egress_pkts, ingress_bytes, ingress_pkts).
@@ -223,7 +225,9 @@ class Scenario:
 # --------------------------------------------------------------------------- #
 PASS, PARTIAL, FAIL, NA, ERROR = "PASS", "PARTIAL", "FAIL", "N/A", "ERROR"
 BW_PASS, BW_PARTIAL = 0.10, 0.25  # ±10% pass, ±25% partial
-MAC_HDR = 14  # Ethernet header (dst6+src6+type2), added per packet for wire-layer tools
+MAC_HDR = 14  # Ethernet header (dst6+src6+type2)
+IP4_HDR = 20
+IP6_HDR = 40
 
 
 def _bw_verdict(ratio):
@@ -239,6 +243,8 @@ def score_detection(obs: Observation, gt: GT):
     """Return (verdict, note)."""
     if obs is None:
         return ERROR, "collection error"
+    if obs.invalid:
+        return ERROR, obs.note or "measurement could not be extracted"
     if obs.na:
         return NA, obs.note or "not applicable"
     if obs.proc_attributed is None:
@@ -253,23 +259,35 @@ def score_detection(obs: Observation, gt: GT):
     return PARTIAL, "traffic seen but not attributed to the process (unknown bucket)"
 
 
+def layer_ref(gt: GT, layer: str, d: str) -> int:
+    """Reference bytes for one direction, at the layer a tool counts at.
+
+    socket: application bytes the generator moved.
+    frame:  whole Ethernet frames, so the L3 nft count plus one MAC header per
+            packet (no FCS on the veth capture path).
+    ippayload: the IP payload, so the L3 count minus one IP header per packet.
+    """
+    if layer == "socket":
+        return gt.app_ref(d)
+    pkts = gt.wire_egress_pkts if d == "egress" else gt.wire_ingress_pkts
+    if layer == "ippayload":
+        return gt.wire_ref(d) - (IP6_HDR if gt.family == 10 else IP4_HDR) * pkts
+    return gt.wire_ref(d) + MAC_HDR * pkts
+
+
 def score_bandwidth(obs: Observation, gt: GT, layer: str):
-    """Return (verdict, detail-dict). layer in {socket, wire}."""
+    """Return (verdict, detail-dict). layer in {socket, frame, ippayload}."""
     if obs is None:
         return ERROR, {"note": "collection error"}
+    if obs.invalid:
+        return ERROR, {"note": obs.note or "measurement could not be extracted"}
     if obs.na or (obs.sent is None and obs.recv is None):
         return NA, {"note": obs.note or "no bandwidth capability"}
     verdicts, detail = [], {}
     for d in gt_directions(gt):
-        if layer == "socket":
-            ref = gt.app_ref(d)
-        else:
-            # pcap / AF_PACKET monitors capture the whole Ethernet frame, while the
-            # nft counters count at L3 (IP). Their correct reference is therefore
-            # L3 + one MAC header per packet (no FCS on the veth capture path).
-            pkts = gt.wire_egress_pkts if d == "egress" else gt.wire_ingress_pkts
-            ref = gt.wire_ref(d) + MAC_HDR * pkts
-        val = (obs.sent if d == "egress" else obs.recv) or 0
+        ref = layer_ref(gt, layer, d)
+        raw = obs.sent if d == "egress" else obs.recv
+        val = float(raw) if isinstance(raw, (int, float)) else 0.0
         if ref <= 0:
             continue
         ratio = val / ref
@@ -309,6 +327,9 @@ def combine_trials(verdicts):
     c = Counter(verdicts)
     flaky = len(set(verdicts)) > 1
     order = {ERROR: -1, FAIL: 0, PARTIAL: 1, NA: 2, PASS: 3}
+    # an unresolved trial is not outvoted by the ones that did produce a result
+    if ERROR in c:
+        return ERROR, flaky
     # N/A dominates only if every trial is N/A
     if all(v == NA for v in verdicts):
         return NA, False

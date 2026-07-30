@@ -75,8 +75,8 @@ int main(int argc, char **argv) {
     struct sockaddr_in la; socklen_t ll = sizeof la; int lport = 0;
     if (getsockname(fd, (void *)&la, &ll) == 0) lport = ntohs(la.sin_port);
     close(fd);
-    printf("RESULT app_sent=%llu app_recv=%llu proto=tcp dir=%s peer=%s lport=%d rport=%d pid=%d exe=%s\n",
-           (unsigned long long)app_sent, (unsigned long long)app_recv, dir, host, lport, PORT_TCP,
-           (int)getpid(), argv[0]);
+    printf("RESULT app_sent=%llu app_recv=%llu want=%llu proto=tcp dir=%s peer=%s lport=%d rport=%d pid=%d exe=%s\n",
+           (unsigned long long)app_sent, (unsigned long long)app_recv, (unsigned long long)nbytes,
+           dir, host, lport, PORT_TCP, (int)getpid(), argv[0]);
     return 0;
 }

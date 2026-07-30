@@ -129,6 +129,16 @@ class LittleSnitchStream:
         except Exception:
             pass
 
+    def totals(self):
+        """{title: (sent, recv)} over the top-level app rows."""
+        with self.lock:
+            out = {}
+            for e in self.rows.values():
+                title = e.get("title") or ""
+                s, r = out.get(title, (0, 0))
+                out[title] = (max(s, e["sent"]), max(r, e["recv"]))
+            return out
+
     def find(self, name_substr):
         """Return (sent, recv) for the top-level app row whose title contains
         name_substr, or None if not seen."""

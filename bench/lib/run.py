@@ -67,14 +67,30 @@ def quiesce_other_monitors(current):
             break
         time.sleep(0.5)
     if stray:
-        print(f"[{current}] WARNING: competing monitor(s) still running: {stray}", flush=True)
+        raise RuntimeError(f"competing monitor(s) still running: {stray}; this tool would not be measured alone")
     else:
         print(f"[{current}] isolation OK: no other monitor daemon running", flush=True)
+
+
+def unscored(ad, gtd, note):
+    """Trial the harness could not measure (its fault domain, e.g. dead monitor
+    or broken ground truth): ERROR, never a tool verdict; N/A stays N/A."""
+    return {
+        "gt": gtd,
+        "obs": {"detected": False, "attributed": None, "names": [], "sent": None, "recv": None, "note": note},
+        "det": ERROR,
+        "det_note": note,
+        "bw": ERROR if ad.does_bandwidth else NA,
+        "bw_detail": {"note": note if ad.does_bandwidth else "no bandwidth capability"},
+    }
 
 
 def run_trial(ad, scn, ctx):
     """One trial: snapshot -> run traffic -> settle -> collect -> score."""
     ad.pre_trial()
+    if not ad.alive():
+        # a dead monitor observes nothing; running traffic would score that as a tool FAIL
+        return unscored(ad, {"app_sent": 0, "app_recv": 0, "ok": False}, "monitor process not running at trial start")
     gt = scn.run(ctx)
     gt.test_dirs = scn.directions  # score only the directions this scenario tests
     gtd = {
@@ -91,18 +107,14 @@ def run_trial(ad, scn, ctx):
         "raw": gt.raw,
     }
     if not gt.ok:
-        # generator/harness failure: never score the tool against broken ground
-        # truth -- a harness problem must surface as ERROR, not as a tool FAIL.
-        return {
-            "gt": gtd,
-            "obs": {"detected": False, "attributed": None, "names": [], "sent": None, "recv": None, "note": "generator failed"},
-            "det": ERROR,
-            "det_note": "generator failed; see gt.raw",
-            "bw": ERROR,
-            "bw_detail": {"note": "generator failed"},
-        }
+        return unscored(ad, gtd, "generator failed; see gt.raw")
     time.sleep(ad.settle)
     obs = ad.collect(gt)
+    if obs is not None and obs.invalid:
+        # the harness could not read a measurement; give the extraction one more
+        # chance before recording the trial as unresolved
+        time.sleep(ad.settle)
+        obs = ad.collect(gt)
     det, detnote = score_detection(obs, gt)
     if ad.does_bandwidth:
         bw, bwdetail = score_bandwidth(obs, gt, ad.layer)
@@ -135,8 +147,8 @@ def run_tool(toolname, scenarios, netlab, trials, profile=True):
         "errors": [],
     }
     print(f"\n########## {toolname} ##########", flush=True)
-    quiesce_other_monitors(toolname)  # this tool must be the only monitor running
     try:
+        quiesce_other_monitors(toolname)  # a stuck competing daemon = this tool's setup error; later tools re-check
         print(f"[{toolname}] install ...", flush=True)
         ad.install()
         # read the version from the tool that is actually installed, so reports
@@ -180,9 +192,8 @@ def run_tool(toolname, scenarios, netlab, trials, profile=True):
     # scenario (accuracy is NOT gated -- a coarse but nonzero measurement
     # passes; the scenarios score it).
     # Retried once: some monitors miss the first session after their probes
-    # attach (BCC's tcplife emits a row only when the session closes), and a
-    # single warm-up miss must not invalidate a run. A setup that is genuinely
-    # blind fails both attempts.
+    # attach (BCC's tcplife emits a row only when the session closes). A control
+    # that fails both attempts is recorded and published with the tool's results.
     control_ok = False
     try:
         ctl_dl, ctl_ul = build_scenarios()[:2]  # s01 download, s02 upload
@@ -193,8 +204,9 @@ def run_tool(toolname, scenarios, netlab, trials, profile=True):
             cu = run_trial(ad, ctl_ul, ctx)
             out["control_up"] = {"det": cu["det"], "bw": cu["bw"], "gt": cu["gt"], "obs": cu["obs"]}
             print(f"[{toolname}] control s02 (attempt {attempt}) -> det={cu['det']} bw={cu['bw']} (gt sent={cu['gt']['app_sent']} reported={cu['obs']['sent']})", flush=True)
-            zero_egress = ad.does_bandwidth and (cu["obs"]["sent"] or 0) <= 0
-            control_ok = cd["det"] not in (FAIL, ERROR) and cu["det"] not in (FAIL, ERROR) and not zero_egress
+            # a bandwidth-capable tool must report bytes in both directions
+            zero_bytes = ad.does_bandwidth and ((cu["obs"]["sent"] or 0) <= 0 or (cd["obs"]["recv"] or 0) <= 0)
+            control_ok = cd["det"] not in (FAIL, ERROR) and cu["det"] not in (FAIL, ERROR) and not zero_bytes
             if control_ok:
                 if attempt > 1:
                     out["errors"].append("control passed on the second attempt (first attempt missed; probe warm-up)")
@@ -203,10 +215,13 @@ def run_tool(toolname, scenarios, netlab, trials, profile=True):
         out["errors"].append(f"control: {e}")
         print(f"[{toolname}] control error: {e}", flush=True)
     if not control_ok:
-        out["errors"].append("control transfer failed: setup treated as broken, scenarios skipped")
-        print(f"[{toolname}] CONTROL FAILED -- skipping scenarios", flush=True)
+        # A control can fail because the tool genuinely does not report the
+        # transfer, which is a result rather than a broken setup, so the
+        # scenarios still run and the failure is published with them.
+        out["errors"].append("control transfer was not reported by this tool on either attempt; its results are published with this caveat")
+        print(f"[{toolname}] CONTROL FAILED -- continuing, recorded as a run note", flush=True)
 
-    for scn in scenarios if control_ok else []:
+    for scn in scenarios:
         rec = {"sid": scn.sid, "name": scn.name, "category": scn.category, "note": scn.note, "desc": scn.desc, "trials": []}
         for t in range(trials):
             try:
@@ -257,7 +272,11 @@ def main():
     netlab.up()
     try:
         for tool in tools:
-            run_tool(tool, all_scn, netlab, args.trials, profile=not args.no_profile)
+            try:
+                run_tool(tool, all_scn, netlab, args.trials, profile=not args.no_profile)
+            except Exception:
+                # no single tool's failure may take down the rest of a multi-hour run
+                print(f"[{tool}] TOOL ABORTED:\n{traceback.format_exc()}", flush=True)
     finally:
         netlab.down()
         print("=== netlab down ===", flush=True)

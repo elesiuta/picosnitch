@@ -35,15 +35,21 @@ def _parse_result(out, rc):
 
 
 def _finalize(ctx, exe, proto, family, t0, t1, results, peer=PEER4, wire_from="peer"):
+    # wire_from="loop": traffic never reaches the peer namespace, so there is no
+    # wire measurement and wire-layer tools score N/A on bandwidth
     if wire_from == "peer":
         we, wep, wi, wip = ctx.netlab.read()
     else:
         we = wep = wi = wip = 0
     app_sent = sum(int(r.get("app_sent", 0)) for r in results)
     app_recv = sum(int(r.get("app_recv", 0)) for r in results)
-    if wire_from == "loop":  # loopback: app bytes ~= wire (lo, negligible overhead)
-        we, wi = app_sent, app_recv
     ok = all(r.get("_rc") == 0 for r in results) and (app_sent + app_recv) > 0
+    if proto in ("tcp", "sctp"):
+        # reliable transports move exactly what was asked for; a short transfer
+        # means the generator failed and the trial cannot be scored
+        want = sum(int(r.get("want", 0)) for r in results)
+        if want and app_sent + app_recv < want * 0.99:
+            ok = False
     last = results[-1] if results else {}
     return GT(
         app_sent=app_sent,
@@ -184,7 +190,7 @@ def build_scenarios():
         concurrent("bg_udp", "benchgen",
                    [["-H", PEER4, "-t", "udp", "-d", "up", *rate, "-b", str(24 * MB)],
                     ["-H", PEER4, "-t", "udp", "-d", "down", *rate, "-b", str(24 * MB)]], "udp"),
-        "bg_udp", rport=PORT_UDP, desc="UDP both directions (nethogs needs -C to see UDP).")
+        "bg_udp", rport=PORT_UDP, desc="UDP both directions.")
     add("s05", "ICMP echo flood w/ payload", "protocol", ["egress", "ingress"], "icmp",
         single("bg_icmp", "benchicmp", lambda p, c: ["-H", PEER4, "-b", str(6 * MB), "-s", "1000"], "icmp"),
         "bg_icmp", desc="ICMP echo w/ payload; invisible to TCP/UDP-only monitors.",

@@ -18,13 +18,13 @@ picosnitch is installed from PyPI, not from the source tree in this repository.
 | --- | --- | --- |
 | picosnitch | pinned (PyPI via pipx) | SQLite `/var/lib/picosnitch/picosnitch.db` (`connections`) |
 | OpenSnitch | pinned (release .deb) | connection log via journald (`journalctl -t opensnitch`) |
-| bandwhich | pinned (release binary) | `--raw --total-utilization --no-resolve` stdout |
+| bandwhich | pinned (release binary) | `--raw --total-utilization --no-resolve --show-dns` stdout |
 | NetHogs | pinned (built from source) | `-t -C -v 2 -a -d 1 vbench0 lo` trace stdout |
 | Sniffnet¹ | pinned (release .deb) | GUI OCR under Xvfb (tesseract) |
 | Little Snitch² | pinned (release .deb) | local WebSocket `ws://localhost:3031/stream` |
 | BCC `tcplife`/`tcpconnect` | pinned (built from source)³ | `tcplife`/`tcpconnect` stdout |
-| BCC `tcptop` | pinned (built from source) | `tcptop -C 1` per-interval throughput (`tcp_sendmsg`/`tcp_cleanup_rbuf`) |
-| bpftrace script | Ubuntu package, recorded | a `bpftrace -e` program in `lib/adapters.py`, on the same two hooks |
+| BCC `tcptop` | pinned (built from source) | `tcptop -C 1` per-interval throughput (return probes on `tcp_sendmsg`/`tcp_recvmsg`) |
+| bpftrace script | Ubuntu package, recorded | a `bpftrace -e` program in `lib/adapters.py`, on `tcp_sendmsg`/`tcp_cleanup_rbuf` |
 | Sysdig⁴ | Ubuntu package, recorded | syscall capture (`evt.rawres` summed over network I/O syscalls) |
 
 ¹ Sniffnet is a desktop GUI with no per-process export, so its per-process figures are read by OCR (tesseract) of its Overview "Program" panel, rendered headlessly under Xvfb.
@@ -50,33 +50,36 @@ host (default netns)                       peer netns "benchpeer"
   vbench0  10.99.0.1 / fd00:be0c::1  <====>  vbench1 10.99.0.2 / fd00:be0c::2
 ```
 
-Two references, independent of the tools under test, are captured for **every trial**, because different monitors measure at different layers:
+Two references, independent of the tools under test, are captured for each trial, because different monitors count at different layers:
 
 * **Application bytes**: counted by the traffic generators themselves (exact); the reference for socket-layer monitors.
-* **Wire bytes**: dedicated nftables counters in the peer namespace, which carries only benchmark traffic; the reference for pcap-layer monitors (payload plus L3/L4 headers plus retransmits).
+* **Wire bytes**: dedicated nftables counters in the peer namespace, which carries only benchmark traffic; the reference for packet-capturing monitors, adjusted per packet to the layer each one counts at.
+The loopback scenario has no peer namespace and therefore no wire measurement, so tools scored at a packet layer are N/A on its bandwidth.
 
 
 ## Scoring
 
 Each (tool × scenario) cell is **PASS / PARTIAL / FAIL / N/A**, decided from **5 trials** (configurable).
 A footnote is attached to every PARTIAL or FAIL and to any cell whose trials did not all agree.
+A trial whose measurement could not be extracted (a failed screen read, an unreadable log or database) is retried once and otherwise recorded as ERROR, which is never outvoted by the trials that did produce a result; it is a harness failure, not a result for the tool.
 
 * **Detection** (was the activity seen and attributed to the right process?)
   * PASS: attributed to the correct executable.
-  * PARTIAL: traffic seen but mis-attributed or unattributed (for example bucketed as "unknown").
+  * PARTIAL: traffic seen but mis-attributed or unattributed (for example bucketed as "unknown"). Distinguishing a misattribution from a miss requires output the tool keys by flow or by an unknown bucket rather than by process name alone; the extractions that read name-keyed logs (the BCC utilities, the bpftrace script, Sysdig with its process-name capture filter) have nothing to check when the name does not match, so a mis-named flow there scores FAIL.
   * FAIL: not seen at all.
 * **Bandwidth** (reported bytes against the reference for that tool's layer)
   * PASS: within **±10%** of the appropriate reference.
   * PARTIAL: within **±25%**.
   * FAIL: outside **±25%**.
-  * The wire reference for pcap and AF_PACKET tools is the L3 nftables count **plus one 14-byte Ethernet header per packet** (no FCS on the veth capture path), since those tools measure whole frames. This only matters for small-packet scenarios such as s09, where the per-packet framing exceeds the ±10% band; it washes out (< 1%) for bulk transfers. Socket-layer tools are scored against the exact application byte count.
-* **N/A**: the tool does not offer this capability.
+  * Packet-capturing tools are scored at the layer they count: NetHogs and Sniffnet against whole frames (the L3 nftables count **plus one 14-byte Ethernet header per packet**, no FCS on the veth capture path), bandwhich against the IP payload it counts (the L3 count **minus one IP header per packet**). This only matters for small-packet scenarios such as s09; on bulk transfers the adjustment is a few percent at most, well inside the ±10% PASS band. Socket-layer tools are scored against the exact application byte count.
+* **N/A**: the tool does not offer the capability, so there is nothing to measure. A configuration that hooks TCP only is N/A on every non-TCP scenario; a general-purpose monitor that does claim a protocol and misses it scores FAIL.
 
 A cell passes without disagreement when all trials pass; otherwise it takes the modal (most common) verdict, tie-broken toward the worse one.
+N/A trials are set aside from that vote unless every trial is N/A.
 Any cell whose trials did not all agree is marked `*` to indicate disagreement between trials.
 
-Each tool run begins with **control transfers in both directions** (bulk TCP download and upload, which every tool must pass; a bandwidth-capable tool reporting zero egress bytes on the upload also fails).
-A failed control invalidates that tool's run.
+Each tool run begins with **control transfers in both directions** (bulk TCP download and upload, which every tool must pass; a bandwidth-capable tool reporting zero bytes in either direction also fails).
+A control that fails both attempts is recorded and published alongside that tool's results.
 
 ## Scenario catalog
 
@@ -139,12 +142,19 @@ bench/
   lib/       adapters (install/start/collect/stop per tool), scenarios,
              netlab (netns+veth+nft reference counters), runner, resource profiler,
              standalone smoke / reference validation scripts
-  results/   per-run artifacts (raw results.json + OCR pcap/png); not committed,
+  results/   per-run artifacts (raw results.json, tool logs, OCR screenshots); not committed,
              regenerated by running the matrix, the generated reports/ are the record
   reports/   generated markdown scorecards + findings
 ```
 
 ## Running
+
+**Run this on a disposable machine.**
+As root it installs packages, replaces the configuration of every monitor it tests, deletes picosnitch and Little Snitch history, starts and stops system services, kills processes by name, and binds the peer server's ports.
+It is not safe on a workstation.
+
+Prerequisites beyond a stock Ubuntu 26.04 install: `docker` (s17 pulls `alpine:3.20`), the kernel SCTP module (s08), and internet access for the pinned downloads.
+`lib/build.sh` installs its own build dependencies.
 
 On Ubuntu 26.04 (kernel 7.0):
 

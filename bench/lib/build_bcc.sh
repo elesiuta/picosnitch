@@ -4,15 +4,16 @@
 # The Ubuntu package fails to JIT-compile against the 7.0 kernel headers
 # (undeclared BPF_F_CPU, no member 'ns_id'); the pinned tag
 # compiles and runs. Installs libbcc, the tools, and the python bindings to
-# system paths. Targets Ubuntu 26.04 (LLVM 21). Idempotent: no-op if already
-# installed. Invoked by the bcc adapters in adapters.py.
+# system paths. Targets Ubuntu 26.04 (LLVM 21). Idempotent: no-op when the
+# pinned version is already installed. Invoked by the bcc adapters in adapters.py.
 set -euo pipefail
 BCC_VER=v0.37.0
 SRC="${1:-$(cd "$(dirname "$0")/.." && pwd)/downloads/bcc-src}"
 
-if [ -f /usr/local/lib/libbcc.so ] && [ -f /usr/local/share/bcc/tools/tcplife ] \
-   && python3 -c "import bcc" 2>/dev/null; then
-    echo "bcc already installed"
+# skip only when the installed library is the pinned version
+if [ -f /usr/local/share/bcc/tools/tcplife ] && python3 -c "import bcc" 2>/dev/null \
+   && [ "$(readlink -f /usr/local/lib/libbcc.so 2>/dev/null)" = "/usr/local/lib/libbcc.so.${BCC_VER#v}" ]; then
+    echo "bcc ${BCC_VER} already installed"
     exit 0
 fi
 
