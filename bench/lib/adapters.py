@@ -71,6 +71,9 @@ class ToolAdapter:
     def pre_trial(self):
         self._snap = {}
 
+    def bandwidth_layer(self, gt: GT) -> str:
+        return self.layer
+
     def alive(self):
         """False once a process-launched monitor has exited (its trials become
         ERROR, not FAIL); service tools have no self.proc and stay True."""
@@ -83,37 +86,36 @@ class ToolAdapter:
     # collect() applies the same budget to its database reads). Every monotonic-
     # cumulative tool gets the SAME budget so none is advantaged by a longer
     # window: poll until the known ground-truth amount is reached (fast path),
-    # the value plateaus, or the deadline. Returns the MAX seen for each
-    # direction, so a transient dip or a premature plateau can never lose a value
-    # the tool did report. `sample` returns (a_sent, a_recv, u_sent, u_recv, names).
+    # the value plateaus, or the deadline. Retains the whole sample with the
+    # largest total in the trial's declared direction(s). `sample` returns
+    # (a_sent, a_recv, u_sent, u_recv, names).
     POLL = 0.6
     STABLE_HITS = 25  # ~15s of no growth -> settled
     ZERO_HITS = 25  # ~15s of nothing -> genuinely zero (must match STABLE_HITS)
     DEADLINE_HITS = 90  # ~54s hard cap
 
-    def _poll_cumulative(self, sample, target):
+    def _poll_cumulative(self, sample, target, directions):
         """Poll a cumulative tool. Named and unknown byte counts are tracked
-        separately so a total from one provenance is never reported under the
-        other. `sample` returns (a_sent, a_recv, u_sent, u_recv, names)."""
-        a_s = a_r = u_s = u_r = 0.0
-        names = []
+        separately and the best whole sample is retained, so maxima from two
+        different refreshes are never added together."""
+        directions = set(directions or ("egress", "ingress"))
+        best = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, [])
+        best_total = 0.0
         prev, stable, zero = None, 0, 0
         for _ in range(self.DEADLINE_HITS):
             s, r, us, ur, nm = sample()
-            a_s, a_r = max(a_s, s), max(a_r, r)
-            u_s, u_r = max(u_s, us), max(u_r, ur)
-            if nm:
-                names = nm
-            best_s = a_s if (a_s or a_r) else u_s
-            best_r = a_r if (a_s or a_r) else u_r
-            total = best_s + best_r
+            total_s, total_r = s + us, r + ur
+            total = (total_s if "egress" in directions else 0) + (total_r if "ingress" in directions else 0)
+            if total >= best_total:
+                best = (s, r, us, ur, total_s, total_r, nm)
+                best_total = total
             if target > 0 and total >= target:
                 break  # captured the known amount -> done fast
             if total == 0:
                 zero += 1
                 if zero >= self.ZERO_HITS:
                     break
-            cur = (round(best_s), round(best_r))
+            cur = (round(total_s) if "egress" in directions else 0, round(total_r) if "ingress" in directions else 0)
             if cur == prev and total > 0:
                 stable += 1
                 if stable >= self.STABLE_HITS:
@@ -122,7 +124,7 @@ class ToolAdapter:
                 stable = 0
             prev = cur
             time.sleep(self.POLL)
-        return a_s, a_r, u_s, u_r, names
+        return best
 
     def stop(self):
         if self.proc and self.proc.poll() is None:
@@ -342,12 +344,18 @@ class Nethogs(ToolAdapter):
         sh("pkill -9 -x nethogs")
 
     @staticmethod
-    def parse_cumulative(text):
-        """(name, pid) -> (sent, recv). nethogs prints one cumulative row per PID,
-        so the PID is part of the key: a scenario that runs many processes under
-        one executable name would otherwise collapse to a single process."""
-        best = {}
+    def parse_blocks(text):
+        """Return complete refresh blocks keyed by (name, pid). The PID remains
+        part of the key so same-named processes are aggregated independently."""
+        blocks, block = [], None
         for line in text.splitlines():
+            if line.startswith("Refreshing:"):
+                if block is not None:
+                    blocks.append(block)
+                block = {}
+                continue
+            if block is None:
+                continue
             if "\t" not in line:
                 continue
             parts = line.rstrip("\n").split("\t")
@@ -359,18 +367,25 @@ class Nethogs(ToolAdapter):
                 s, r = float(parts[1]), float(parts[2])
             except ValueError:
                 continue
-            cur = best.get((nm, pid), (0.0, 0.0))
-            best[(nm, pid)] = (max(cur[0], s), max(cur[1], r))
-        return best
+            cur = block.get((nm, pid), (0.0, 0.0))
+            block[(nm, pid)] = (max(cur[0], s), max(cur[1], r))
+        return blocks
 
-    def _cumulative(self):
+    @classmethod
+    def parse_cumulative(cls, text):
+        blocks = cls.parse_blocks(text)
+        return blocks[-1] if blocks else {}
+
+    def _blocks(self):
         try:
-            return self.parse_cumulative(open(self.log, errors="replace").read())
+            return self.parse_blocks(open(self.log, errors="replace").read())
         except FileNotFoundError:
-            return {}
+            return []
 
     def pre_trial(self):
-        self._snap = self._cumulative()
+        blocks = self._blocks()
+        self._snap = blocks[-1] if blocks else {}
+        self._block0 = len(blocks)
 
     @staticmethod
     def delta_from(now, snap, exe):
@@ -394,23 +409,28 @@ class Nethogs(ToolAdapter):
         return a_s, a_r, u_s, u_r, names
 
     def _delta(self, gt):
-        return self.delta_from(self._cumulative(), self._snap, gt.exe)
+        best = (0.0, 0.0, 0.0, 0.0, [])
+        best_total = 0.0
+        directions = set(gt.test_dirs or ("egress", "ingress"))
+        for block in self._blocks()[self._block0 :]:
+            cur = self.delta_from(block, self._snap, gt.exe)
+            total = (cur[0] + cur[2] if "egress" in directions else 0) + (cur[1] + cur[3] if "ingress" in directions else 0)
+            if total >= best_total:
+                best, best_total = cur, total
+        return best
 
     def collect(self, gt: GT) -> Observation:
         # nethogs' -v2 totals are monotonic-cumulative; use the shared target/plateau
         # poll so it gets the same collection budget as the other cumulative tools.
         target = 0.97 * sum(layer_ref(gt, self.layer, d) for d in (gt.test_dirs or []))
-        a_s, a_r, u_s, u_r, names = self._poll_cumulative(lambda: self._delta(gt), target)
+        a_s, a_r, u_s, u_r, total_s, total_r, names = self._poll_cumulative(lambda: self._delta(gt), target, gt.test_dirs)
         attributed = bool(a_s or a_r)
         unknown = bool(u_s or u_r)
         detected = attributed or unknown
-        # score the named bytes when the tool named the process, otherwise its
-        # unknown bucket; never a mix, and both amounts are reported
-        sent, recv = (a_s, a_r) if attributed else (u_s, u_r)
         note = f"named {int(a_s)}/{int(a_r)}, unknown {int(u_s)}/{int(u_r)}" if unknown else ""
         if not attributed and unknown:
             names = ["unknown"]
-        return Observation(flow_detected=detected, proc_attributed=attributed, names=names, sent=int(sent), recv=int(recv), note=note)
+        return Observation(flow_detected=detected, proc_attributed=attributed, names=names, sent=int(total_s), recv=int(total_r), note=note)
 
 
 # --------------------------------------------------------------------------- #
@@ -448,21 +468,17 @@ class Bandwhich(ToolAdapter):
     _re = re.compile(r'process: <\d+> "(.*?)" up/down Bps: (\d+)/(\d+)')
 
     @staticmethod
-    def parse_cumulative(text):
-        """name -> (sent, recv). bandwhich prints a block per refresh and omits the
-        PID, so same-named processes appear as separate rows within one block:
-        sum inside a block, then keep the largest block total."""
-        best, block = {}, {}
-
-        def flush():
-            for nm, (s, r) in block.items():
-                cur = best.get(nm, (0, 0))
-                best[nm] = (max(cur[0], s), max(cur[1], r))
-            block.clear()
-
+    def parse_blocks(text):
+        """Return complete refresh blocks. Rows for duplicate process names are
+        summed within their block because bandwhich omits the PID."""
+        blocks, block = [], None
         for line in text.splitlines():
             if line.startswith("Refreshing:"):
-                flush()
+                if block is not None:
+                    blocks.append(block)
+                block = {}
+                continue
+            if block is None:
                 continue
             m = Bandwhich._re.search(line)
             if not m:
@@ -470,14 +486,18 @@ class Bandwhich(ToolAdapter):
             nm, s, r = m.group(1), int(m.group(2)), int(m.group(3))
             cs, cr = block.get(nm, (0, 0))
             block[nm] = (cs + s, cr + r)
-        flush()
-        return best
+        return blocks
 
-    def _cumulative(self):
+    @classmethod
+    def parse_cumulative(cls, text):
+        blocks = cls.parse_blocks(text)
+        return blocks[-1] if blocks else {}
+
+    def _blocks(self):
         try:
-            return self.parse_cumulative(open(self.log, errors="replace").read())
+            return self.parse_blocks(open(self.log, errors="replace").read())
         except FileNotFoundError:
-            return {}
+            return []
 
     @staticmethod
     def delta_from(now, snap, exe):
@@ -499,27 +519,34 @@ class Bandwhich(ToolAdapter):
         return a_s, a_r, u_s, u_r, names
 
     def pre_trial(self):
-        self._snap = self._cumulative()
+        blocks = self._blocks()
+        self._snap = blocks[-1] if blocks else {}
+        self._block0 = len(blocks)
 
     def _delta(self, gt):
-        return self.delta_from(self._cumulative(), self._snap, gt.exe)
+        best = (0, 0, 0, 0, [])
+        best_total = 0
+        directions = set(gt.test_dirs or ("egress", "ingress"))
+        for block in self._blocks()[self._block0 :]:
+            cur = self.delta_from(block, self._snap, gt.exe)
+            total = (cur[0] + cur[2] if "egress" in directions else 0) + (cur[1] + cur[3] if "ingress" in directions else 0)
+            if total >= best_total:
+                best, best_total = cur, total
+        return best
 
     def collect(self, gt: GT) -> Observation:
         # bandwhich's --total-utilization value is monotonic-cumulative but its
         # egress attribution to short-lived processes can lag well past a short
         # window; the shared target/plateau poll waits it out and takes the max.
         target = 0.97 * sum(layer_ref(gt, self.layer, d) for d in (gt.test_dirs or []))
-        a_s, a_r, u_s, u_r, names = self._poll_cumulative(lambda: self._delta(gt), target)
+        a_s, a_r, u_s, u_r, total_s, total_r, names = self._poll_cumulative(lambda: self._delta(gt), target, gt.test_dirs)
         attributed = bool(a_s or a_r)
         unknown = bool(u_s or u_r)
         detected = attributed or unknown
-        # score the named bytes when the tool named the process, otherwise its
-        # unknown bucket; never a mix, and both amounts are reported
-        sent, recv = (a_s, a_r) if attributed else (u_s, u_r)
         note = f"named {int(a_s)}/{int(a_r)}, <UNKNOWN> {int(u_s)}/{int(u_r)}" if unknown else ""
         if not attributed and unknown:
             names = ["<UNKNOWN>"]
-        return Observation(flow_detected=detected, proc_attributed=attributed, names=names, sent=sent, recv=recv, note=note)
+        return Observation(flow_detected=detected, proc_attributed=attributed, names=names, sent=total_s, recv=total_r, note=note)
 
 
 # --------------------------------------------------------------------------- #
@@ -562,50 +589,98 @@ class OpenSnitch(ToolAdapter):
             time.sleep(4)
 
     def pre_trial(self):
-        self._snap = {"t": time.time()}
+        self._journal_error = ""
+        r = sh(["journalctl", "-t", "opensnitch", "-n", "0", "--show-cursor", "--no-pager"])
+        if r.returncode != 0:
+            self._journal_error = f"journal cursor query failed: {(r.stderr or '').strip()}"
+            self._cursor = ""
+            return
+        m = re.search(r"^-- cursor: (.+)$", r.stdout, re.MULTILINE)
+        if not m:
+            self._journal_error = "journal cursor parser failed"
+            self._cursor = ""
+            return
+        self._cursor = m.group(1).strip()
 
-    _re_path = re.compile(r'PATH="([^"]*)"')
-    _re_dst = re.compile(r'DST="([^"]*)"')
-    _re_dpt = re.compile(r'DPT="([^"]*)"')
+    _re_field = re.compile(r'([A-Z]+)="([^"]*)"')
+    JOURNAL_WAIT = 12.0
+    JOURNAL_POLL = 0.8
+
+    @staticmethod
+    def _protocol_values(proto):
+        return {
+            "tcp": {"tcp", "tcp6", "6"},
+            "udp": {"udp", "udp6", "17"},
+            "sctp": {"sctp", "132"},
+            "icmp": {"icmp", "1"},
+            "raw253": {"raw253", "253"},
+            "afpacket": {"udp", "17"},
+        }.get(proto.lower(), {proto.lower()})
+
+    @classmethod
+    def _parse_connection(cls, line):
+        fields = dict(cls._re_field.findall(line))
+        required = {"SRC", "DST", "PROTO", "PATH"}
+        if not required.issubset(fields):
+            raise ValueError("missing connection fields")
+        return fields
+
+    @classmethod
+    def _matches_endpoint(cls, fields, gt):
+        if fields["PROTO"].lower() not in cls._protocol_values(gt.proto):
+            return False
+        port = str(gt.rport) if gt.rport else ""
+        if port and ("SPT" not in fields or "DPT" not in fields):
+            raise ValueError("missing connection port fields")
+        return (fields["SRC"] == gt.peer and (not port or fields["SPT"] == port)) or (fields["DST"] == gt.peer and (not port or fields["DPT"] == port))
+
+    def _invalid_journal(self, note):
+        self._journal_error = note
+        return Observation(invalid=True, note=note)
 
     def collect(self, gt: GT) -> Observation:
         # opensnitch logs every intercepted connection to syslog (identifier
         # "opensnitch") in a bracketed format: CONNECTION - [SRC=".." DST=".."
         # DPT=".." PROTO=".." PID=".." PATH=".."]. Match our unique exe in PATH.
         # The log reaches journald via SIEM-logger -> syslog -> journald, which can
-        # lag the connection by several seconds. Poll (widening the window to 'now')
-        # until our exe appears or a deadline, so a slow flush is not a spurious miss
-        # -- this only waits out latency; a genuine non-interception still fails.
-        since = f"@{gt.t0 - 2:.0f}"
-        attributed, names, count, by_dst = False, [], 0, False
-        deadline = time.time() + 12
+        # lag the connection by several seconds. Poll entries strictly after the
+        # cursor captured immediately before the trial.
+        if self._journal_error:
+            return self._invalid_journal(self._journal_error)
+        attributed, names, count, by_endpoint = False, [], 0, False
+        deadline = time.time() + self.JOURNAL_WAIT
         while True:
-            until = f"@{time.time():.0f}"
-            r = sh(["journalctl", "-t", "opensnitch", "-o", "cat", "--since", since, "--until", until])
-            attributed, names, count, by_dst = False, [], 0, False
+            r = sh(["journalctl", "-t", "opensnitch", "-o", "cat", "--after-cursor", self._cursor, "--no-pager"])
+            if r.returncode != 0:
+                return self._invalid_journal(f"journal query failed: {(r.stderr or '').strip()}")
+            attributed, names, count, by_endpoint = False, [], 0, False
             for line in r.stdout.splitlines():
                 if "CONNECTION" not in line:
                     continue
-                pm = self._re_path.search(line)
-                path = pm.group(1) if pm else ""
+                try:
+                    fields = self._parse_connection(line)
+                    endpoint = self._matches_endpoint(fields, gt)
+                except (KeyError, ValueError) as e:
+                    return self._invalid_journal(f"journal parser failed: {e}")
+                if not endpoint:
+                    continue
+                by_endpoint = True
+                path = fields["PATH"]
                 if gt.exe in path:
                     attributed = True
-                    names.append(path)
+                    if path not in names:
+                        names.append(path)
                     count += 1
-                else:
-                    dm = self._re_dst.search(line)
-                    if dm and dm.group(1) == gt.peer:
-                        by_dst = True
             if attributed or time.time() >= deadline:
                 break
-            time.sleep(0.8)
+            time.sleep(self.JOURNAL_POLL)
         return Observation(
-            flow_detected=attributed or by_dst,
+            flow_detected=attributed or by_endpoint,
             proc_attributed=attributed,
             names=names[:3],
             sent=None,
             recv=None,
-            note=f"{count} connection record(s) matched process" + ("" if attributed else "; flow seen by dst only" if by_dst else ""),
+            note=f"{count} connection record(s) matched process" + ("" if attributed else "; endpoint seen under another process" if by_endpoint else ""),
         )
 
     def pids(self):
@@ -839,7 +914,7 @@ class LittleSnitch(ToolAdapter):
             cur = stream.find(gt.exe)
             return (cur[0], cur[1], 0, 0, [gt.exe]) if cur else (0, 0, 0, 0, [])
 
-        a_s, a_r, _, _, names = self._poll_cumulative(sample, 0.97 * (gt.app_sent + gt.app_recv))
+        a_s, a_r, _, _, _, _, names = self._poll_cumulative(sample, 0.97 * (gt.app_sent + gt.app_recv), gt.test_dirs)
         found = (a_s, a_r) if names else None
         if found is None:
             # no row for this generator: check whether another app's row grew by
@@ -1162,6 +1237,9 @@ class Sysdig(ToolAdapter):
     FILTER = f"(fd.type in (ipv4,ipv6) or evt.type in ({SOCK_SYSCALLS})) and evt.is_io=true and evt.rawres>0 and proc.name contains bg"
     FMT = "%proc.name %evt.io_dir %evt.rawres"
 
+    def bandwidth_layer(self, gt: GT) -> str:
+        return "frame" if gt.proto == "afpacket" else self.layer
+
     def install(self):
         if sh("command -v sysdig").returncode != 0:
             sh("apt-get install -y sysdig", timeout=600)
@@ -1214,9 +1292,9 @@ class Sysdig(ToolAdapter):
             flow_detected=attributed,
             proc_attributed=attributed,
             names=names[:1],
-            sent=int(sent) if attributed else 0,
-            recv=int(recv) if attributed else 0,
-            note="Sysdig network I/O syscall bytes, per process",
+            sent=None if gt.syscall_result_unit != "bytes" else int(sent) if attributed else 0,
+            recv=None if gt.syscall_result_unit != "bytes" else int(recv) if attributed else 0,
+            note="Sysdig syscall detection; sendmmsg/recvmmsg results count messages, not bytes" if gt.syscall_result_unit != "bytes" else "Sysdig network I/O syscall bytes, per process",
         )
 
     def stop(self):

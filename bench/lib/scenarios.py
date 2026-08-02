@@ -34,7 +34,7 @@ def _parse_result(out, rc):
     return res
 
 
-def _finalize(ctx, exe, proto, family, t0, t1, results, peer=PEER4, wire_from="peer"):
+def _finalize(ctx, exe, proto, family, t0, t1, results, peer=PEER4, wire_from="peer", syscall_result_unit="bytes"):
     # wire_from="loop": traffic never reaches the peer namespace, so there is no
     # wire measurement and wire-layer tools score N/A on bandwidth
     if wire_from == "peer":
@@ -49,6 +49,10 @@ def _finalize(ctx, exe, proto, family, t0, t1, results, peer=PEER4, wire_from="p
         # means the generator failed and the trial cannot be scored
         want = sum(int(r.get("want", 0)) for r in results)
         if want and app_sent + app_recv < want * 0.99:
+            ok = False
+    if proto.startswith("raw"):
+        want = sum(int(r.get("want", 0)) for r in results)
+        if want and app_sent + app_recv < want:
             ok = False
     last = results[-1] if results else {}
     return GT(
@@ -68,11 +72,12 @@ def _finalize(ctx, exe, proto, family, t0, t1, results, peer=PEER4, wire_from="p
         peer=peer,
         ok=ok,
         raw=" || ".join(r.get("_out", "") for r in results),
+        syscall_result_unit=syscall_result_unit,
     )
 
 
 # --- run-function builders (each derives the UNIQUE per-trial name) ---------- #
-def single(base, gen, argv_fn, proto, family=2, peer=PEER4):
+def single(base, gen, argv_fn, proto, family=2, peer=PEER4, syscall_result_unit="bytes"):
     def run(ctx):
         path = ctx.named_gen(gen, base)
         exe = Path(path).name
@@ -80,7 +85,7 @@ def single(base, gen, argv_fn, proto, family=2, peer=PEER4):
         t0 = time.time()
         res = ctx.run_gen([path, *argv_fn(path, ctx)])
         t1 = time.time()
-        return _finalize(ctx, exe, proto, family, t0, t1, [res], peer=peer)
+        return _finalize(ctx, exe, proto, family, t0, t1, [res], peer=peer, syscall_result_unit=syscall_result_unit)
 
     return run
 
@@ -209,7 +214,7 @@ def build_scenarios():
         single("bg_dns", "benchgen", lambda p, c: ["-H", PEER4, "-t", "udp", "-d", "up", "-P", "53", "-z", "64", "-r", str(2 * MB), "-b", str(4 * MB)], "udp"),
         "bg_dns", rport=53, desc="Many small UDP datagrams on port 53.")
     add("s10", "Raw IP socket (proto 253) egress", "protocol", ["egress"], "raw253",
-        single("bg_rawip", "benchraw", lambda p, c: ["-H", PEER4, "-b", str(4 * MB), "-p", "253"], "raw253"),
+        single("bg_rawip", "benchraw", lambda p, c: ["-H", PEER4, "-b", str(4 * MB), "-p", "253", "-r", str(RATE)], "raw253"),
         "bg_rawip", desc="Custom-protocol raw IP; pcap TCP/UDP parsers miss it.",
         note="raw sockets with a custom IP protocol carry no TCP/UDP header; TCP/UDP-only attribution misses them.")
 
@@ -232,7 +237,7 @@ def build_scenarios():
         single("bg_sendf", "benchgen", lambda p, c: ["-H", PEER4, "-t", "tcp", "-d", "up", "-m", "sendfile", *rate, "-b", str(32 * MB)], "tcp"),
         "bg_sendf", rport=PORT_TCP, desc="Zero-copy sendfile upload (post-sendpage path).")
     add("s15", "sendmmsg batched UDP", "evasion", ["egress"], "udp",
-        single("bg_smmsg", "benchgen", lambda p, c: ["-H", PEER4, "-t", "udp", "-d", "up", "-m", "sendmmsg", *rate, "-b", str(24 * MB)], "udp"),
+        single("bg_smmsg", "benchgen", lambda p, c: ["-H", PEER4, "-t", "udp", "-d", "up", "-m", "sendmmsg", *rate, "-b", str(24 * MB)], "udp", syscall_result_unit="messages"),
         "bg_smmsg", rport=PORT_UDP, desc="Batched sendmmsg UDP egress.")
     add("s16", "Loopback-only transfer", "evasion", ["ingress"], "tcp",
         loopback("bg_loop"), "bg_loop", rport=PORT_TCP, peer="127.0.0.1",
@@ -264,7 +269,7 @@ def build_scenarios():
         "bg_splice", rport=PORT_TCP,
         desc="Zero-copy splice() download (tcp_splice_read path); the recv counterpart of sendfile (s14).")
     add("s23", "recvmmsg batched UDP (recv)", "evasion", ["ingress"], "udp",
-        single("bg_rmmsg", "benchgen", lambda p, c: ["-H", PEER4, "-t", "udp", "-d", "down", "-m", "recvmmsg", *rate, "-b", str(24 * MB)], "udp"),
+        single("bg_rmmsg", "benchgen", lambda p, c: ["-H", PEER4, "-t", "udp", "-d", "down", "-m", "recvmmsg", *rate, "-b", str(24 * MB)], "udp", syscall_result_unit="messages"),
         "bg_rmmsg", rport=PORT_UDP,
         desc="Batched recvmmsg UDP ingress; the recv counterpart of sendmmsg (s15).")
     add("s24", "IPv6 UDP download", "protocol", ["ingress"], "udp",

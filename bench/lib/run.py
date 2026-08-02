@@ -117,7 +117,7 @@ def run_trial(ad, scn, ctx):
         obs = ad.collect(gt)
     det, detnote = score_detection(obs, gt)
     if ad.does_bandwidth:
-        bw, bwdetail = score_bandwidth(obs, gt, ad.layer)
+        bw, bwdetail = score_bandwidth(obs, gt, ad.bandwidth_layer(gt))
     else:
         bw, bwdetail = NA, {"note": "no bandwidth capability"}
     return {
