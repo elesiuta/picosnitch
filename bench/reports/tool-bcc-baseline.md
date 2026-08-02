@@ -18,7 +18,7 @@ Rows show the first trial's numbers; verdicts combine all trials. \* = trials di
 | s08 | SCTP transfer | ⬜ N/A | ⬜ N/A | -/- | -/- |  | bcc tcplife/tcpconnect are TCP-only |
 | s09 | Small-packet UDP/53 flood | ⬜ N/A | ⬜ N/A | -/- | -/- |  | bcc tcplife/tcpconnect are TCP-only |
 | s10 | Raw IP socket (proto 253) egress | ⬜ N/A | ⬜ N/A | -/- | -/- |  | bcc tcplife/tcpconnect are TCP-only |
-| s11 | Short-lived processes | ✅ PASS | ✅ PASS | 10486240/- | 10485760/1048576 | egress 1.0 | tcplife fires on session close |
+| s11 | Short-lived processes | ✅ PASS | ✅ PASS | 10486240/- | 10485760/0 | egress 1.0 | tcplife fires on session close |
 | s12 | AF_PACKET raw-frame injection | ⬜ N/A | ⬜ N/A | -/- | -/- |  | bcc tcplife/tcpconnect are TCP-only |
 | s13 | io_uring data path | ✅ PASS | ✅ PASS | 25165848/- | 25165824/25165824 | egress 1.0 | tcplife fires on session close |
 | s14 | sendfile() zero-copy upload | ✅ PASS | ✅ PASS | 33554456/- | 33554432/0 | egress 1.0 | tcplife fires on session close |
@@ -27,7 +27,7 @@ Rows show the first trial's numbers; verdicts combine all trials. \* = trials di
 | s17 | In-container (docker) egress | ✅ PASS | ✅ PASS | 25165848/- | 25165824/0 | egress 1.0 | tcplife fires on session close |
 | s18 | Low-and-slow drip upload | ✅ PASS | ✅ PASS | 2097176/- | 2097152/0 | egress 1.0 | tcplife fires on session close |
 | s19 | Many small TCP connections | ✅ PASS | ✅ PASS | 3933600/- | 3932160/0 | egress 0.9996 | tcplife fires on session close |
-| s20 | High-rate parallel burst | ✅ PASS | ✅ PASS | 7865040/- | 7864320/1310720 | egress 0.9999 | tcplife fires on session close |
+| s20 | High-rate parallel burst | ✅ PASS | ✅ PASS | 7865040/- | 7864320/786432 | egress 0.9999 | tcplife fires on session close |
 | s21 | io_uring download (recv) | ✅ PASS | ✅ PASS | -/25165824 | 25165824/25165824 | ingress 1.0 | tcplife fires on session close |
 | s22 | splice() zero-copy download | ✅ PASS | ✅ PASS | -/33554432 | 0/33554432 | ingress 1.0 | tcplife fires on session close |
 | s23 | recvmmsg batched UDP (recv) | ⬜ N/A | ⬜ N/A | -/- | -/- |  | bcc tcplife/tcpconnect are TCP-only |

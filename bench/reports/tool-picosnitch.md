@@ -30,5 +30,5 @@ Rows show the first trial's numbers; verdicts combine all trials. \* = trials di
 | s20 | High-rate parallel burst | ✅ PASS | ✅ PASS | 7865040/- | 7865040/0 | egress 1.0 |  |
 | s21 | io_uring download (recv) | ✅ PASS | ✅ PASS | -/25165824 | 24/25165824 | ingress 1.0 |  |
 | s22 | splice() zero-copy download | ✅ PASS | ✅ PASS | -/33554432 | 24/33554432 | ingress 1.0 |  |
-| s23 | recvmmsg batched UDP (recv) | ✅ PASS | ✅ PASS | -/25165824 | 24/25165824 | ingress 1.0 |  |
-| s24 | IPv6 UDP download | ✅ PASS | ✅ PASS | -/25165824 | 24/25165824 | ingress 1.0 |  |
+| s23 | recvmmsg batched UDP (recv) | ✅ PASS | ✅ PASS | -/25165824 | 24/25127200 | ingress 0.9985 |  |
+| s24 | IPv6 UDP download | ✅ PASS | ✅ PASS | -/25165824 | 24/24834600 | ingress 0.9868 |  |
