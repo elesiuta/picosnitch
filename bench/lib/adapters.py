@@ -304,6 +304,32 @@ class Picosnitch(ToolAdapter):
         sh("systemctl stop picosnitch")
 
 
+def _drop_noise(u_s, u_r, total_s, total_r, ref, floor=0.01):
+    """Discard an unknown-bucket delta below `floor` of the scenario's reference:
+    these tools capture every interface, so a few hundred bytes of unrelated local
+    traffic would otherwise read as the flow under test being seen but unattributed.
+    Named bytes need no such floor -- the executable name is unique to the trial.
+    Measured separation on a full run: real unattributed credit starts near 20% of
+    the reference, background noise lands three orders of magnitude below it."""
+    if u_s + u_r < floor * ref:
+        return 0, 0, total_s - u_s, total_r - u_r
+    return u_s, u_r, total_s, total_r
+
+
+def _freshest(blocks):
+    """Per-key max over refresh blocks: the newest cumulative value the tool has
+    printed for each row. The pre-trial baseline is taken this way, including the
+    block still filling -- a baseline one refresh stale counts the tail of the
+    previous trial as this trial's traffic. Deltas still scan whole blocks only,
+    where every row of a refresh is present."""
+    best = {}
+    for block in blocks:
+        for k, (s, r) in block.items():
+            cs, cr = best.get(k, (0, 0))
+            best[k] = (max(cs, s), max(cr, r))
+    return best
+
+
 # --------------------------------------------------------------------------- #
 # nethogs: built from source at the pinned tag
 # --------------------------------------------------------------------------- #
@@ -345,8 +371,9 @@ class Nethogs(ToolAdapter):
 
     @staticmethod
     def parse_blocks(text):
-        """Return complete refresh blocks keyed by (name, pid). The PID remains
-        part of the key so same-named processes are aggregated independently."""
+        """Return (complete refresh blocks, the block still filling), keyed by
+        (name, pid). The PID remains part of the key so same-named processes are
+        aggregated independently."""
         blocks, block = [], None
         for line in text.splitlines():
             if line.startswith("Refreshing:"):
@@ -369,22 +396,17 @@ class Nethogs(ToolAdapter):
                 continue
             cur = block.get((nm, pid), (0.0, 0.0))
             block[(nm, pid)] = (max(cur[0], s), max(cur[1], r))
-        return blocks
-
-    @classmethod
-    def parse_cumulative(cls, text):
-        blocks = cls.parse_blocks(text)
-        return blocks[-1] if blocks else {}
+        return blocks, (block or {})
 
     def _blocks(self):
         try:
             return self.parse_blocks(open(self.log, errors="replace").read())
         except FileNotFoundError:
-            return []
+            return [], {}
 
     def pre_trial(self):
-        blocks = self._blocks()
-        self._snap = blocks[-1] if blocks else {}
+        blocks, filling = self._blocks()
+        self._snap = _freshest([*blocks, filling])
         self._block0 = len(blocks)
 
     @staticmethod
@@ -412,7 +434,7 @@ class Nethogs(ToolAdapter):
         best = (0.0, 0.0, 0.0, 0.0, [])
         best_total = 0.0
         directions = set(gt.test_dirs or ("egress", "ingress"))
-        for block in self._blocks()[self._block0 :]:
+        for block in self._blocks()[0][self._block0 :]:
             cur = self.delta_from(block, self._snap, gt.exe)
             total = (cur[0] + cur[2] if "egress" in directions else 0) + (cur[1] + cur[3] if "ingress" in directions else 0)
             if total >= best_total:
@@ -422,8 +444,9 @@ class Nethogs(ToolAdapter):
     def collect(self, gt: GT) -> Observation:
         # nethogs' -v2 totals are monotonic-cumulative; use the shared target/plateau
         # poll so it gets the same collection budget as the other cumulative tools.
-        target = 0.97 * sum(layer_ref(gt, self.layer, d) for d in (gt.test_dirs or []))
-        a_s, a_r, u_s, u_r, total_s, total_r, names = self._poll_cumulative(lambda: self._delta(gt), target, gt.test_dirs)
+        ref = sum(layer_ref(gt, self.layer, d) for d in (gt.test_dirs or []))
+        a_s, a_r, u_s, u_r, total_s, total_r, names = self._poll_cumulative(lambda: self._delta(gt), 0.97 * ref, gt.test_dirs)
+        u_s, u_r, total_s, total_r = _drop_noise(u_s, u_r, total_s, total_r, ref)
         attributed = bool(a_s or a_r)
         unknown = bool(u_s or u_r)
         detected = attributed or unknown
@@ -469,8 +492,9 @@ class Bandwhich(ToolAdapter):
 
     @staticmethod
     def parse_blocks(text):
-        """Return complete refresh blocks. Rows for duplicate process names are
-        summed within their block because bandwhich omits the PID."""
+        """Return (complete refresh blocks, the block still filling). Rows for
+        duplicate process names are summed within their block because bandwhich
+        omits the PID."""
         blocks, block = [], None
         for line in text.splitlines():
             if line.startswith("Refreshing:"):
@@ -486,18 +510,13 @@ class Bandwhich(ToolAdapter):
             nm, s, r = m.group(1), int(m.group(2)), int(m.group(3))
             cs, cr = block.get(nm, (0, 0))
             block[nm] = (cs + s, cr + r)
-        return blocks
-
-    @classmethod
-    def parse_cumulative(cls, text):
-        blocks = cls.parse_blocks(text)
-        return blocks[-1] if blocks else {}
+        return blocks, (block or {})
 
     def _blocks(self):
         try:
             return self.parse_blocks(open(self.log, errors="replace").read())
         except FileNotFoundError:
-            return []
+            return [], {}
 
     @staticmethod
     def delta_from(now, snap, exe):
@@ -519,15 +538,15 @@ class Bandwhich(ToolAdapter):
         return a_s, a_r, u_s, u_r, names
 
     def pre_trial(self):
-        blocks = self._blocks()
-        self._snap = blocks[-1] if blocks else {}
+        blocks, filling = self._blocks()
+        self._snap = _freshest([*blocks, filling])
         self._block0 = len(blocks)
 
     def _delta(self, gt):
         best = (0, 0, 0, 0, [])
         best_total = 0
         directions = set(gt.test_dirs or ("egress", "ingress"))
-        for block in self._blocks()[self._block0 :]:
+        for block in self._blocks()[0][self._block0 :]:
             cur = self.delta_from(block, self._snap, gt.exe)
             total = (cur[0] + cur[2] if "egress" in directions else 0) + (cur[1] + cur[3] if "ingress" in directions else 0)
             if total >= best_total:
@@ -538,8 +557,9 @@ class Bandwhich(ToolAdapter):
         # bandwhich's --total-utilization value is monotonic-cumulative but its
         # egress attribution to short-lived processes can lag well past a short
         # window; the shared target/plateau poll waits it out and takes the max.
-        target = 0.97 * sum(layer_ref(gt, self.layer, d) for d in (gt.test_dirs or []))
-        a_s, a_r, u_s, u_r, total_s, total_r, names = self._poll_cumulative(lambda: self._delta(gt), target, gt.test_dirs)
+        ref = sum(layer_ref(gt, self.layer, d) for d in (gt.test_dirs or []))
+        a_s, a_r, u_s, u_r, total_s, total_r, names = self._poll_cumulative(lambda: self._delta(gt), 0.97 * ref, gt.test_dirs)
+        u_s, u_r, total_s, total_r = _drop_noise(u_s, u_r, total_s, total_r, ref)
         attributed = bool(a_s or a_r)
         unknown = bool(u_s or u_r)
         detected = attributed or unknown
@@ -1233,6 +1253,10 @@ class Sysdig(ToolAdapter):
     # Two branches, because fd.type classifies INET sockets only: packet sockets
     # (AF_PACKET) report no fd.type, so they are matched by the socket-I/O syscall
     # names instead. File I/O (read/write/pread/pwrite) matches neither branch.
+    # sendmmsg/recvmmsg emit one event per message, rawres being that message's
+    # bytes (never a message count) -- plus one duplicate of the last message per
+    # call, so sysdig's total runs one message per call high. That overshoot is
+    # the tool's own and is scored as reported, like any other reported number.
     SOCK_SYSCALLS = "send,sendto,sendmsg,sendmmsg,recv,recvfrom,recvmsg,recvmmsg"
     FILTER = f"(fd.type in (ipv4,ipv6) or evt.type in ({SOCK_SYSCALLS})) and evt.is_io=true and evt.rawres>0 and proc.name contains bg"
     FMT = "%proc.name %evt.io_dir %evt.rawres"
@@ -1292,9 +1316,9 @@ class Sysdig(ToolAdapter):
             flow_detected=attributed,
             proc_attributed=attributed,
             names=names[:1],
-            sent=None if gt.syscall_result_unit != "bytes" else int(sent) if attributed else 0,
-            recv=None if gt.syscall_result_unit != "bytes" else int(recv) if attributed else 0,
-            note="Sysdig syscall detection; sendmmsg/recvmmsg results count messages, not bytes" if gt.syscall_result_unit != "bytes" else "Sysdig network I/O syscall bytes, per process",
+            sent=int(sent) if attributed else 0,
+            recv=int(recv) if attributed else 0,
+            note="Sysdig network I/O syscall bytes, per process",
         )
 
     def stop(self):

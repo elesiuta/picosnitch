@@ -1,15 +1,11 @@
 # Per-process network & bandwidth monitors on Linux
 
 <!-- --8<-- [start:overview] -->
-A comparison of per-process (per-executable) network and bandwidth monitors on Linux, measuring **completeness** (is traffic seen and attributed to the right process) and **accuracy** (are the byte counts correct). Nine projects in ten configurations.
-
-24 scenarios × 5 trials, each configuration run in isolation on Ubuntu 26.04 (kernel 7.0) on a GCP e2-standard-4 (4 vCPUs, 16 GB), run 2026-08-02, scored against tool-independent reference measurements. Detection = *seen and attributed to the right process*; Bandwidth = *bytes within ±10% (PASS) / ±25% (PARTIAL)* of the reference for the tool's layer. Method, harness, versions, and how to reproduce: [the `bench/` directory](https://github.com/elesiuta/picosnitch/tree/master/bench).
+24 scenarios × 5 trials on Ubuntu 26.04 (kernel 7.0) on a GCP e2-standard-4 (4 vCPUs, 16 GB), run 2026-08-02. Detection = *seen and attributed to the right process*; Bandwidth = *bytes within ±10% (PASS) / ±25% (PARTIAL)* of the reference for the tool's layer. Method, harness, versions, and how to reproduce: [the `bench/` directory](https://github.com/elesiuta/picosnitch/tree/master/bench).
 
 ## Results summary
 
-Each row counts scenarios covered, unweighted; the scenarios are not equally important and the totals are not an overall ranking.
-
-Each cell counts scenarios (of 24). N/A marks a missing capability or reference: OpenSnitch does no bandwidth accounting; the BCC utilities and the bpftrace script used here hook TCP only; Sniffnet reports one combined per-program total, so full-duplex scenarios it cannot split by direction are N/A; the loopback scenario has no wire measurement, so tools counting at a packet layer are N/A on its bandwidth.
+Each cell counts scenarios (of 24), unweighted; the scenarios are not equally important and the totals are not an overall ranking. N/A marks a missing capability or reference: OpenSnitch does no bandwidth accounting; the BCC utilities and the bpftrace script used here hook TCP only; Sniffnet reports one combined per-program total, so full-duplex scenarios it cannot split by direction are N/A; the loopback scenario has no wire measurement, so tools counting at a packet layer are N/A on its bandwidth.
 
 | Tool | Detection: PASS / PART / FAIL / N/A | Bandwidth: PASS / PART / FAIL / N/A | Trial disagreement |
 |---|---|---|---|

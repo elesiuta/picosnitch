@@ -1,5 +1,7 @@
 # Comparison to similar tools
 
+--8<-- "bench/README.md:intro"
+
 --8<-- "bench/reports/findings.md:overview"
 
 --8<-- "bench/reports/scorecard-detection.md:grid"

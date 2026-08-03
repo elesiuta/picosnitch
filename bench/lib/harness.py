@@ -64,7 +64,6 @@ class GT:
     peer: str = ""
     ok: bool = True  # did the generator complete cleanly
     raw: str = ""  # generator RESULT line
-    syscall_result_unit: str = "bytes"  # unit returned by the generator's data syscall
     test_dirs: list | None = None  # directions the scenario actually tests (set by
     # runner); scoring uses these, not reverse-path ACKs
 

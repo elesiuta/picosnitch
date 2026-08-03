@@ -34,7 +34,7 @@ def _parse_result(out, rc):
     return res
 
 
-def _finalize(ctx, exe, proto, family, t0, t1, results, peer=PEER4, wire_from="peer", syscall_result_unit="bytes"):
+def _finalize(ctx, exe, proto, family, t0, t1, results, peer=PEER4, wire_from="peer"):
     # wire_from="loop": traffic never reaches the peer namespace, so there is no
     # wire measurement and wire-layer tools score N/A on bandwidth
     if wire_from == "peer":
@@ -44,15 +44,13 @@ def _finalize(ctx, exe, proto, family, t0, t1, results, peer=PEER4, wire_from="p
     app_sent = sum(int(r.get("app_sent", 0)) for r in results)
     app_recv = sum(int(r.get("app_recv", 0)) for r in results)
     ok = all(r.get("_rc") == 0 for r in results) and (app_sent + app_recv) > 0
-    if proto in ("tcp", "sctp"):
-        # reliable transports move exactly what was asked for; a short transfer
-        # means the generator failed and the trial cannot be scored
+    if proto in ("tcp", "sctp") or proto.startswith("raw"):
+        # reliable transports move exactly what was asked for, and a raw sendto
+        # either sends the whole datagram or fails; a short transfer means the
+        # generator failed and the trial cannot be scored
         want = sum(int(r.get("want", 0)) for r in results)
-        if want and app_sent + app_recv < want * 0.99:
-            ok = False
-    if proto.startswith("raw"):
-        want = sum(int(r.get("want", 0)) for r in results)
-        if want and app_sent + app_recv < want:
+        tolerance = 1.0 if proto.startswith("raw") else 0.99
+        if want and app_sent + app_recv < want * tolerance:
             ok = False
     last = results[-1] if results else {}
     return GT(
@@ -72,12 +70,11 @@ def _finalize(ctx, exe, proto, family, t0, t1, results, peer=PEER4, wire_from="p
         peer=peer,
         ok=ok,
         raw=" || ".join(r.get("_out", "") for r in results),
-        syscall_result_unit=syscall_result_unit,
     )
 
 
 # --- run-function builders (each derives the UNIQUE per-trial name) ---------- #
-def single(base, gen, argv_fn, proto, family=2, peer=PEER4, syscall_result_unit="bytes"):
+def single(base, gen, argv_fn, proto, family=2, peer=PEER4):
     def run(ctx):
         path = ctx.named_gen(gen, base)
         exe = Path(path).name
@@ -85,7 +82,7 @@ def single(base, gen, argv_fn, proto, family=2, peer=PEER4, syscall_result_unit=
         t0 = time.time()
         res = ctx.run_gen([path, *argv_fn(path, ctx)])
         t1 = time.time()
-        return _finalize(ctx, exe, proto, family, t0, t1, [res], peer=peer, syscall_result_unit=syscall_result_unit)
+        return _finalize(ctx, exe, proto, family, t0, t1, [res], peer=peer)
 
     return run
 
@@ -237,7 +234,7 @@ def build_scenarios():
         single("bg_sendf", "benchgen", lambda p, c: ["-H", PEER4, "-t", "tcp", "-d", "up", "-m", "sendfile", *rate, "-b", str(32 * MB)], "tcp"),
         "bg_sendf", rport=PORT_TCP, desc="Zero-copy sendfile upload (post-sendpage path).")
     add("s15", "sendmmsg batched UDP", "evasion", ["egress"], "udp",
-        single("bg_smmsg", "benchgen", lambda p, c: ["-H", PEER4, "-t", "udp", "-d", "up", "-m", "sendmmsg", *rate, "-b", str(24 * MB)], "udp", syscall_result_unit="messages"),
+        single("bg_smmsg", "benchgen", lambda p, c: ["-H", PEER4, "-t", "udp", "-d", "up", "-m", "sendmmsg", *rate, "-b", str(24 * MB)], "udp"),
         "bg_smmsg", rport=PORT_UDP, desc="Batched sendmmsg UDP egress.")
     add("s16", "Loopback-only transfer", "evasion", ["ingress"], "tcp",
         loopback("bg_loop"), "bg_loop", rport=PORT_TCP, peer="127.0.0.1",
@@ -269,7 +266,7 @@ def build_scenarios():
         "bg_splice", rport=PORT_TCP,
         desc="Zero-copy splice() download (tcp_splice_read path); the recv counterpart of sendfile (s14).")
     add("s23", "recvmmsg batched UDP (recv)", "evasion", ["ingress"], "udp",
-        single("bg_rmmsg", "benchgen", lambda p, c: ["-H", PEER4, "-t", "udp", "-d", "down", "-m", "recvmmsg", *rate, "-b", str(24 * MB)], "udp", syscall_result_unit="messages"),
+        single("bg_rmmsg", "benchgen", lambda p, c: ["-H", PEER4, "-t", "udp", "-d", "down", "-m", "recvmmsg", *rate, "-b", str(24 * MB)], "udp"),
         "bg_rmmsg", rport=PORT_UDP,
         desc="Batched recvmmsg UDP ingress; the recv counterpart of sendmmsg (s15).")
     add("s24", "IPv6 UDP download", "protocol", ["ingress"], "udp",

@@ -218,8 +218,7 @@ def write_findings():
     scn = build_scenarios()
     C = {t: _counts(data[t], t) for t in tools}
     ntrials = max((len(r.get("trials", [])) for d in data.values() for r in d.get("scenarios", {}).values()), default=0)
-    dates = sorted({d.get("run_date", "") for d in data.values() if d.get("run_date")})
-    RUN_DATE = dates[0] if len(dates) == 1 else (f"{dates[0]} to {dates[-1]}" if dates else "date not recorded")
+    RUN_DATE = max(d.get("run_date", "") for d in data.values())  # the date the run finished
     # neutral ordering for the scoreboard: by detection then bandwidth PASS
     order = sorted(tools, key=lambda t: (-C[t]["det_pass"], -C[t]["bw_pass"]))
 
@@ -227,21 +226,16 @@ def write_findings():
     L = [
         "# Per-process network & bandwidth monitors on Linux\n",
         "<!-- --8<-- [start:overview] -->",
-        "A comparison of per-process (per-executable) network and bandwidth "
-        "monitors on Linux, measuring **completeness** (is traffic seen and "
-        "attributed to the right process) and **accuracy** (are the byte counts "
-        "correct). Nine projects in ten configurations.\n",
         # hardcoded; update when running on another host
-        f"{len(scn)} scenarios × {ntrials} trials, each configuration run in isolation on Ubuntu "
-        f"26.04 (kernel 7.0) on a GCP e2-standard-4 (4 vCPUs, 16 GB), run {RUN_DATE}, "
-        f"scored against tool-independent reference measurements. Detection = "
+        f"{len(scn)} scenarios × {ntrials} trials on Ubuntu 26.04 (kernel 7.0) on a GCP "
+        f"e2-standard-4 (4 vCPUs, 16 GB), run {RUN_DATE}. Detection = "
         f"*seen and attributed to the right process*; Bandwidth = *bytes within "
         f"±10% (PASS) / ±25% (PARTIAL)* of the reference for the tool's layer. Method, "
         f"harness, versions, and how to reproduce: [the `bench/` directory]({REPO}).\n",
         "## Results summary\n",
-        "Each row counts scenarios covered, unweighted; the scenarios are not equally important and the totals are not an overall ranking.\n",
-        f"Each cell counts scenarios (of {len(scn)}). N/A marks a missing capability "
-        "or reference: OpenSnitch does no bandwidth accounting; the BCC utilities and "
+        f"Each cell counts scenarios (of {len(scn)}), unweighted; the scenarios are not "
+        "equally important and the totals are not an overall ranking. N/A marks a missing "
+        "capability or reference: OpenSnitch does no bandwidth accounting; the BCC utilities and "
         "the bpftrace script used here hook TCP only; Sniffnet reports one combined "
         "per-program total, so full-duplex scenarios it cannot split by direction are "
         "N/A; the loopback scenario has no wire measurement, so tools counting at a "

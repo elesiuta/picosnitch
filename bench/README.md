@@ -1,9 +1,11 @@
 # Per-process network & bandwidth monitor benchmark
 
+<!-- --8<-- [start:intro] -->
 A comparison of per-process (per-executable) network and bandwidth monitors on Linux, measuring **completeness** (is traffic seen and attributed to the right process) and **accuracy** (are the byte counts correct).
 It generates known amounts of traffic across many protocols and hard-to-attribute cases, runs each configuration in isolation, and checks the output against tool-independent reference measurements: whether it (a) **detected** the activity and attributed it to the right process, and (b) **measured** the right number of bytes.
 
 Nine projects are covered in ten configurations.
+<!-- --8<-- [end:intro] -->
 
 ## Tools under test
 
@@ -65,7 +67,7 @@ A trial whose measurement could not be extracted (a failed screen read, an unrea
 
 * **Detection** (was the activity seen and attributed to the right process?)
   * PASS: attributed to the correct executable.
-  * PARTIAL: traffic seen but mis-attributed or unattributed (for example bucketed as "unknown"). Distinguishing a misattribution from a miss requires output the tool keys by flow or by an unknown bucket rather than by process name alone; the extractions that read name-keyed logs (the BCC utilities, the bpftrace script, Sysdig with its process-name capture filter) have nothing to check when the name does not match, so a mis-named flow there scores FAIL.
+  * PARTIAL: traffic seen but mis-attributed or unattributed (for example bucketed as "unknown"). Distinguishing a misattribution from a miss requires output the tool keys by flow or by an unknown bucket rather than by process name alone; the extractions that read name-keyed logs (the BCC utilities, the bpftrace script, Sysdig with its process-name capture filter) have nothing to check when the name does not match, so a mis-named flow there scores FAIL. An unknown bucket that grew by less than 1% of the scenario's reference is read as background traffic on the monitored interfaces rather than as the flow under test.
   * FAIL: not seen at all.
 * **Bandwidth** (reported bytes against the reference for that tool's layer)
   * PASS: within **±10%** of the appropriate reference.
