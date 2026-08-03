@@ -20,7 +20,7 @@ Rows show the first trial's numbers; verdicts combine all trials. \* = trials di
 | s10 | Raw IP socket (proto 253) egress | ⬜ N/A | ⬜ N/A | -/- | -/- |  | this bpftrace probe hooks tcp_* only (TCP) |
 | s11 | Short-lived processes | ✅ PASS | ✅ PASS | 10486240/- | 10486240/0 | egress 1.0 | bpftrace tcp_sendmsg/tcp_cleanup_rbuf, summed per second |
 | s12 | AF_PACKET raw-frame injection | ⬜ N/A | ⬜ N/A | -/- | -/- |  | this bpftrace probe hooks tcp_* only (TCP) |
-| s13 | io_uring data path | ✅ PASS | ✅ PASS | 25165848/- | 25291880/0 | egress 1.005 | bpftrace tcp_sendmsg/tcp_cleanup_rbuf, summed per second |
+| s13 | io_uring data path | ✅ PASS | ✅ PASS | 25165848/- | 25290056/0 | egress 1.0049 | bpftrace tcp_sendmsg/tcp_cleanup_rbuf, summed per second |
 | s14 | sendfile() zero-copy upload | ✅ PASS | ✅ PASS | 33554456/- | 33554456/0 | egress 1.0 | bpftrace tcp_sendmsg/tcp_cleanup_rbuf, summed per second |
 | s15 | sendmmsg batched UDP | ⬜ N/A | ⬜ N/A | -/- | -/- |  | this bpftrace probe hooks tcp_* only (TCP) |
 | s16 | Loopback-only transfer | ✅ PASS | ✅ PASS | -/25165824 | 24/25165824 | ingress 1.0 | bpftrace tcp_sendmsg/tcp_cleanup_rbuf, summed per second |

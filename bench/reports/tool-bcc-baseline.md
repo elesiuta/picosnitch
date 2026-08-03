@@ -18,7 +18,7 @@ Rows show the first trial's numbers; verdicts combine all trials. \* = trials di
 | s08 | SCTP transfer | ⬜ N/A | ⬜ N/A | -/- | -/- |  | bcc tcplife/tcpconnect are TCP-only |
 | s09 | Small-packet UDP/53 flood | ⬜ N/A | ⬜ N/A | -/- | -/- |  | bcc tcplife/tcpconnect are TCP-only |
 | s10 | Raw IP socket (proto 253) egress | ⬜ N/A | ⬜ N/A | -/- | -/- |  | bcc tcplife/tcpconnect are TCP-only |
-| s11 | Short-lived processes | ✅ PASS | ✅ PASS | 10486240/- | 10485760/0 | egress 1.0 | tcplife fires on session close |
+| s11 | Short-lived processes | ✅ PASS | ✅ PASS | 10486240/- | 10485760/524288 | egress 1.0 | tcplife fires on session close |
 | s12 | AF_PACKET raw-frame injection | ⬜ N/A | ⬜ N/A | -/- | -/- |  | bcc tcplife/tcpconnect are TCP-only |
 | s13 | io_uring data path | ✅ PASS | ✅ PASS | 25165848/- | 25165824/25165824 | egress 1.0 | tcplife fires on session close |
 | s14 | sendfile() zero-copy upload | ✅ PASS | ✅ PASS | 33554456/- | 33554432/0 | egress 1.0 | tcplife fires on session close |

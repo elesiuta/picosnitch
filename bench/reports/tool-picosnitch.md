@@ -10,7 +10,7 @@ Rows show the first trial's numbers; verdicts combine all trials. \* = trials di
 |---|---|---|---|---|---|---|---|
 | s01 | TCP bulk download (control) | ✅ PASS | ✅ PASS | -/33554432 | 24/33554432 | ingress 1.0 |  |
 | s02 | TCP bulk upload | ✅ PASS | ✅ PASS | 33554456/- | 33554456/0 | egress 1.0 |  |
-| s03 | TCP full-duplex up+down | ✅ PASS | ✅ PASS | 25165872/25165824 | 25165872/25165824 | egress 1.0 ingress 1.0 |  |
+| s03 | TCP full-duplex up+down | ✅ PASS | ✅ PASS | 25165872/25165824 | 25034800/25034752 | egress 0.9948 ingress 0.9948 |  |
 | s04 | UDP bulk up+down | ✅ PASS | ✅ PASS | 25166448/25165824 | 25166448/25165824 | egress 1.0 ingress 1.0 |  |
 | s05 | ICMP echo flood w/ payload | ✅ PASS | ✅ PASS | 6342336/6468176 | 6342336/6468176 | egress 1.0 ingress 1.0 |  |
 | s06 | UDP/443 bulk | ✅ PASS | ✅ PASS | 25166424/- | 25166424/0 | egress 1.0 |  |
@@ -30,5 +30,5 @@ Rows show the first trial's numbers; verdicts combine all trials. \* = trials di
 | s20 | High-rate parallel burst | ✅ PASS | ✅ PASS | 7865040/- | 7865040/0 | egress 1.0 |  |
 | s21 | io_uring download (recv) | ✅ PASS | ✅ PASS | -/25165824 | 24/25165824 | ingress 1.0 |  |
 | s22 | splice() zero-copy download | ✅ PASS | ✅ PASS | -/33554432 | 24/33554432 | ingress 1.0 |  |
-| s23 | recvmmsg batched UDP (recv) | ✅ PASS | ✅ PASS | -/25165824 | 24/25127200 | ingress 0.9985 |  |
-| s24 | IPv6 UDP download | ✅ PASS | ✅ PASS | -/25165824 | 24/24834600 | ingress 0.9868 |  |
+| s23 | recvmmsg batched UDP (recv) | ✅ PASS | ✅ PASS | -/25165824 | 24/25165824 | ingress 1.0 |  |
+| s24 | IPv6 UDP download | ✅ PASS | ✅ PASS | -/25165824 | 24/25165824 | ingress 1.0 |  |

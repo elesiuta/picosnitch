@@ -22,7 +22,7 @@ Rows show the first trial's numbers; verdicts combine all trials. \* = trials di
 | s12 | AF_PACKET raw-frame injection | ✅ PASS | ✅ PASS | 4320136/- | 4320136/0 | egress 1.0 | Sysdig network I/O syscall bytes, per process |
 | s13 | io_uring data path | ✅ PASS | ❌ FAIL | 25165848/- | 24/0 | egress 0.0 | Sysdig network I/O syscall bytes, per process |
 | s14 | sendfile() zero-copy upload | ✅ PASS | ❌ FAIL | 33554456/- | 24/0 | egress 0.0 | Sysdig network I/O syscall bytes, per process |
-| s15 | sendmmsg batched UDP | ✅ PASS | ⬜ N/A | -/- | -/- |  | Sysdig syscall detection; sendmmsg/recvmmsg results count messages, not bytes |
+| s15 | sendmmsg batched UDP | ✅ PASS | ✅ PASS | 25177624/- | 25964424/0 | egress 1.0312 | Sysdig network I/O syscall bytes, per process |
 | s16 | Loopback-only transfer | ✅ PASS | ✅ PASS | -/25165824 | 24/25165824 | ingress 1.0 | Sysdig network I/O syscall bytes, per process |
 | s17 | In-container (docker) egress | ✅ PASS | ✅ PASS | 25165848/- | 25165848/0 | egress 1.0 | Sysdig network I/O syscall bytes, per process |
 | s18 | Low-and-slow drip upload | ✅ PASS | ✅ PASS | 2097176/- | 2097176/0 | egress 1.0 | Sysdig network I/O syscall bytes, per process |
@@ -30,5 +30,5 @@ Rows show the first trial's numbers; verdicts combine all trials. \* = trials di
 | s20 | High-rate parallel burst | ✅ PASS | ✅ PASS | 7865040/- | 7865040/0 | egress 1.0 | Sysdig network I/O syscall bytes, per process |
 | s21 | io_uring download (recv) | ✅ PASS | ❌ FAIL | -/25165824 | 24/0 | ingress 0.0 | Sysdig network I/O syscall bytes, per process |
 | s22 | splice() zero-copy download | ✅ PASS | ❌ FAIL | -/33554432 | 24/0 | ingress 0.0 | Sysdig network I/O syscall bytes, per process |
-| s23 | recvmmsg batched UDP (recv) | ✅ PASS | ⬜ N/A | -/- | -/- |  | Sysdig syscall detection; sendmmsg/recvmmsg results count messages, not bytes |
+| s23 | recvmmsg batched UDP (recv) | ✅ PASS | ❌ FAIL | -/25165824 | 24/49910248 | ingress 1.9833 | Sysdig network I/O syscall bytes, per process |
 | s24 | IPv6 UDP download | ✅ PASS | ✅ PASS | -/25165824 | 24/25165824 | ingress 1.0 | Sysdig network I/O syscall bytes, per process |
