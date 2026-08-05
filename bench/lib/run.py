@@ -320,7 +320,7 @@ def main():
     netlab = Netlab()
     print("=== netlab up ===", flush=True)
     netlab.up()
-    outs = {}
+    outs: dict[str, dict] = {}
     try:
         for tool in tools:
             try:
