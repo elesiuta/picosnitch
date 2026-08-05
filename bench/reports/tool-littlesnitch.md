@@ -12,15 +12,15 @@ Rows show the first trial's numbers; verdicts combine all trials. \* = trials di
 | s02 | TCP bulk upload | ✅ PASS | ✅ PASS | 33554456/- | 33554456/0 | egress 1.0 | WebSocket per-app stats |
 | s03 | TCP full-duplex up+down | ✅ PASS | ✅ PASS | 25165872/25165824 | 25165872/25165824 | egress 1.0 ingress 1.0 | WebSocket per-app stats |
 | s04 | UDP bulk up+down | ✅ PASS | ✅ PASS | 25166448/25165824 | 25166448/25165824 | egress 1.0 ingress 1.0 | WebSocket per-app stats |
-| s05 | ICMP echo flood w/ payload | 🟡 PART* | ❌ FAIL | 6342336/6468176 | 2924652/2923648 | egress 0.4611 ingress 0.452 | WebSocket per-app stats |
+| s05 | ICMP echo flood w/ payload | 🟡 PART* | ❌ FAIL* | 6342336/6468176 | 5932636/5931632 | egress 0.9354 ingress 0.917 | WebSocket per-app stats |
 | s06 | UDP/443 bulk | ✅ PASS | ✅ PASS | 25166424/- | 25166424/0 | egress 1.0 | WebSocket per-app stats |
 | s07 | IPv6 TCP transfer | ✅ PASS | ✅ PASS | -/25165824 | 24/25165824 | ingress 1.0 | WebSocket per-app stats |
 | s08 | SCTP transfer | ✅ PASS | ✅ PASS | -/25165824 | 25590452/25590392 | ingress 1.0169 | WebSocket per-app stats |
-| s09 | Small-packet UDP/53 flood | ✅ PASS | ❌ FAIL | 4194328/- | 2004248/0 | egress 0.4778 | WebSocket per-app stats |
+| s09 | Small-packet UDP/53 flood | ✅ PASS | ❌ FAIL | 4194328/- | 1892888/0 | egress 0.4513 | WebSocket per-app stats |
 | s10 | Raw IP socket (proto 253) egress | ❌ FAIL | ❌ FAIL | 4194304/- | 0/0 | egress 0.0 | no matching app row |
 | s11 | Short-lived processes | ✅ PASS | ✅ PASS | 10486240/- | 10486240/0 | egress 1.0 | WebSocket per-app stats |
 | s12 | AF_PACKET raw-frame injection | 🟡 PART | ❌ FAIL | 4194304/- | 0/0 | egress 0.0 | recorded under another application |
-| s13 | io_uring data path | ✅ PASS | ❌ FAIL* | 25165848/- | 19005088/0 | egress 0.7552 | WebSocket per-app stats |
+| s13 | io_uring data path | ✅ PASS | ❌ FAIL* | 25165848/- | 20970792/0 | egress 0.8333 | WebSocket per-app stats |
 | s14 | sendfile() zero-copy upload | ✅ PASS | ✅ PASS | 33554456/- | 33554456/0 | egress 1.0 | WebSocket per-app stats |
 | s15 | sendmmsg batched UDP | ✅ PASS | ✅ PASS | 25177624/- | 25177624/0 | egress 1.0 | WebSocket per-app stats |
 | s16 | Loopback-only transfer | ❌ FAIL | ❌ FAIL | -/25165824 | 0/0 | ingress 0.0 | no matching app row |
@@ -28,7 +28,7 @@ Rows show the first trial's numbers; verdicts combine all trials. \* = trials di
 | s18 | Low-and-slow drip upload | ✅ PASS | ✅ PASS | 2097176/- | 2097176/0 | egress 1.0 | WebSocket per-app stats |
 | s19 | Many small TCP connections | ✅ PASS | ✅ PASS | 3933600/- | 3933600/0 | egress 1.0 | WebSocket per-app stats |
 | s20 | High-rate parallel burst | ✅ PASS | ✅ PASS | 7865040/- | 7865040/0 | egress 1.0 | WebSocket per-app stats |
-| s21 | io_uring download (recv) | ✅ PASS | ❌ FAIL | -/25165824 | 24/9016080 | ingress 0.3583 | WebSocket per-app stats |
+| s21 | io_uring download (recv) | ✅ PASS | ❌ FAIL | -/25165824 | 24/16075144 | ingress 0.6388 | WebSocket per-app stats |
 | s22 | splice() zero-copy download | ✅ PASS | ✅ PASS | -/33554432 | 24/33554432 | ingress 1.0 | WebSocket per-app stats |
 | s23 | recvmmsg batched UDP (recv) | ✅ PASS | ✅ PASS | -/25165824 | 24/25165824 | ingress 1.0 | WebSocket per-app stats |
 | s24 | IPv6 UDP download | ✅ PASS | ✅ PASS | -/25165824 | 24/25165824 | ingress 1.0 | WebSocket per-app stats |

@@ -30,5 +30,5 @@ Rows show the first trial's numbers; verdicts combine all trials. \* = trials di
 | s20 | High-rate parallel burst | ✅ PASS | ✅ PASS | 7865040/- | 7865040/0 | egress 1.0 | Sysdig network I/O syscall bytes, per process |
 | s21 | io_uring download (recv) | ✅ PASS | ❌ FAIL | -/25165824 | 24/0 | ingress 0.0 | Sysdig network I/O syscall bytes, per process |
 | s22 | splice() zero-copy download | ✅ PASS | ❌ FAIL | -/33554432 | 24/0 | ingress 0.0 | Sysdig network I/O syscall bytes, per process |
-| s23 | recvmmsg batched UDP (recv) | ✅ PASS | ❌ FAIL | -/25165824 | 24/49910248 | ingress 1.9833 | Sysdig network I/O syscall bytes, per process |
+| s23 | recvmmsg batched UDP (recv) | ✅ PASS | ❌ FAIL | -/25165824 | 24/49025448 | ingress 1.9481 | Sysdig network I/O syscall bytes, per process |
 | s24 | IPv6 UDP download | ✅ PASS | ✅ PASS | -/25165824 | 24/25165824 | ingress 1.0 | Sysdig network I/O syscall bytes, per process |
