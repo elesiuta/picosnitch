@@ -32,7 +32,7 @@ Scored on bytes reported, independently of attribution: a tool that measured the
 | s23 | recvmmsg batched UDP (recv) | ✅ | ✅ | ✅ | ⬜ | ✅ | ✅ | ⬜ | ⬜ | ⬜ | ❌ |
 | s24 | IPv6 UDP download | ✅ | ✅ | ✅ | ⬜ | ✅ | ✅ | ⬜ | ⬜ | ⬜ | ✅ |
 
-Legend: ✅ PASS · 🟡 PARTIAL · ❌ FAIL · ⬜ N/A · ⚠️ error · \* trials disagreed, see the note
+Legend: ✅ PASS · 🟡 PARTIAL · ❌ FAIL · ⬜ N/A · ⚠️ not measured (setup failed or unresolved trial) · \* trials disagreed, see the note
 
 <!-- --8<-- [end:grid] -->
 ## Result notes

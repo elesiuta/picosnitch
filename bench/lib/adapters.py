@@ -18,6 +18,7 @@ import re
 import sqlite3
 import subprocess
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -48,6 +49,7 @@ class ToolAdapter:
     # the archive currently ships and is only recorded.
     VERSION_CMD = ""
     VERSION_SOURCE = ""
+    LAYER_NOTE = ""  # set when bandwidth_layer() overrides `layer` for some scenarios
 
     def __init__(self, sess: Path):
         self.sess = sess
@@ -868,11 +870,11 @@ class Sniffnet(ToolAdapter):
 class LittleSnitch(ToolAdapter):
     name = "littlesnitch"
     VERSION_CMD = "dpkg-query -W -f '${Version}' littlesnitch"
-    VERSION_SOURCE = "pinned (release .deb)"
+    VERSION_SOURCE = "current release (recorded, not pinned)"
     layer = "socket"
     settle = 3.0
-    VERSION = "1.0.9"
-    DEB = f"https://obdev.at/downloads/littlesnitch-linux/littlesnitch_{VERSION}_amd64.deb"
+    DL_PAGE = "https://obdev.at/products/littlesnitch-linux/download.html"
+    _DEB_RE = re.compile(r'href="([^"]*/littlesnitch_(\d[\d.]*)_amd64\.deb)"')
     # little-snitch attributes traffic to the top-level "responsible" app, not the
     # leaf process, so each generator must run as its own detached transient
     # systemd service to get a distinct app row. --pipe keeps stdout (the RESULT
@@ -880,22 +882,35 @@ class LittleSnitch(ToolAdapter):
     # RuntimeMaxSec bounds the detached generator if the harness kills the --pipe client
     gen_prefix = ["systemd-run", "--pipe", "--quiet", "--collect", "--property=RuntimeMaxSec=120"]
 
+    def _current_deb(self):
+        """(url, version) of the amd64 .deb obdev publishes right now."""
+        with urllib.request.urlopen(self.DL_PAGE, timeout=60) as resp:
+            page = resp.read().decode("utf-8", "replace")
+        m = self._DEB_RE.search(page)
+        if not m:
+            raise RuntimeError(f"no littlesnitch amd64 .deb linked on {self.DL_PAGE}; their download page changed")
+        return urllib.parse.urljoin(self.DL_PAGE, m.group(1)), m.group(2)
+
     def install(self):
-        self.available = False
-        if self.version() == self.VERSION:
-            self.available = True
+        # Raises on any failure. A download or dpkg failure is a broken setup, NOT a
+        # missing capability: swallowing it would score every scenario N/A and read
+        # as "this tool does not do that", which is not a result at all.
+        url, ver = self._current_deb()
+        if self._installed() == ver:
             return
-        try:
-            deb = _download(self.DEB, DL / "littlesnitch.deb")
-            if Path(deb).stat().st_size > 100000:
-                r = sh(f"apt-get install -y {deb}", timeout=600)
-                self.available = r.returncode == 0 or bool(sh("command -v littlesnitch littlesnitchd").returncode == 0)
-        except Exception:
-            self.available = False
+        deb = _download(url, DL / f"littlesnitch-{ver}.deb")
+        size = Path(deb).stat().st_size
+        if size < 100000:
+            raise RuntimeError(f"littlesnitch .deb from {url} is {size} bytes; download failed or truncated")
+        r = sh(f"apt-get install -y {deb}", timeout=600)
+        if self._installed() != ver:
+            raise RuntimeError(f"littlesnitch {ver} install failed, found {self.version() or 'nothing'}: {(r.stdout + r.stderr)[-800:]}")
+
+    def _installed(self):
+        """Installed version without any debian revision, to compare with upstream's."""
+        return (self.version() or "").split("-")[0]
 
     def start(self):
-        if not getattr(self, "available", False):
-            return
         # clear the persistent traffic history so per-app cumulative stats start
         # fresh (little-snitch aggregates by name across restarts otherwise).
         sh("systemctl stop littlesnitch")
@@ -919,8 +934,6 @@ class LittleSnitch(ToolAdapter):
         self._snap = stream.totals() if stream else {}
 
     def collect(self, gt: GT) -> Observation:
-        if not getattr(self, "available", False):
-            return Observation(na=True, note="not installable in this environment")
         stream = getattr(self, "stream", None)
         if not stream:
             return Observation(invalid=True, note="WebSocket stream unavailable")
@@ -962,6 +975,36 @@ class LittleSnitch(ToolAdapter):
 # --------------------------------------------------------------------------- #
 # bcc-tools eBPF baseline — tcpconnect (detection) + tcplife (TCP bytes)
 # --------------------------------------------------------------------------- #
+_BCC_BUILD_ERR = None  # both bcc configs share one source build (~tens of minutes)
+
+
+def _build_bcc():
+    """Build+install the pinned bcc, once per run. A failure is remembered so the
+    second bcc config re-raises it immediately instead of repeating a doomed build,
+    and both configs report the same root cause. stdout is included in the message:
+    cmake/make report failures there, and a build error nobody can read is a
+    benchmark that silently loses a tool."""
+    global _BCC_BUILD_ERR
+    if _BCC_BUILD_ERR:
+        raise RuntimeError(_BCC_BUILD_ERR)
+    r = sh(f"bash {BENCH}/lib/build_bcc.sh", timeout=3600)
+    if r.returncode != 0:
+        _BCC_BUILD_ERR = f"bcc build failed (rc={r.returncode}, see lib/build_bcc.sh): {(r.stdout + r.stderr)[-1200:]}"
+        raise RuntimeError(_BCC_BUILD_ERR)
+
+
+def _bcc_crashed(*paths):
+    """A python traceback in a probe's log means the tool never ran (missing
+    bindings, failed attach). That is a harness failure -> ERROR, not a tool miss."""
+    for p in paths:
+        try:
+            if "Traceback (most recent call last)" in open(p, errors="replace").read():
+                return True
+        except FileNotFoundError:
+            pass
+    return False
+
+
 class Bcc(ToolAdapter):
     name = "bcc-baseline"
     # read the built library's soname: probing the tools themselves would attach BPF
@@ -972,9 +1015,11 @@ class Bcc(ToolAdapter):
     settle = 2.0
 
     # built from source by lib/build_bcc.sh (the distro package fails to
-    # JIT-compile against the 7.0 kernel headers). make install puts
-    # libbcc.so in /usr/local/lib, the tools in /usr/local/share/bcc/tools, and
-    # the python bindings on the system path -- no PYTHONPATH override needed.
+    # JIT-compile against the 7.0 kernel headers). That script pins the install
+    # prefix to /usr/local -- bcc's own cmake defaults to /usr -- so libbcc.so is in
+    # /usr/local/lib and the tools in /usr/local/share/bcc/tools. The tools are
+    # python scripts; their bindings come from the same prefix, which sorts ahead of
+    # the distro's python3-bpfcc on sys.path, so no PYTHONPATH override is needed.
     UP_TOOLS = "/usr/local/share/bcc/tools"
 
     def install(self):
@@ -982,9 +1027,7 @@ class Bcc(ToolAdapter):
         self.env["PYTHONUNBUFFERED"] = "1"  # else tcplife's low-volume output stays buffered
         self.env["LD_LIBRARY_PATH"] = "/usr/local/lib"
         if self.version() != self.VERSION or not Path(f"{self.UP_TOOLS}/tcplife").exists():
-            r = sh(f"bash {BENCH}/lib/build_bcc.sh", timeout=3600)
-            if r.returncode != 0:
-                raise RuntimeError(f"bcc build failed: {r.stderr[-800:]}")
+            _build_bcc()
             if self.version() != self.VERSION:
                 raise RuntimeError(f"bcc {self.VERSION} build failed, found {self.version() or 'nothing'}")
         self.tcplife = f"{self.UP_TOOLS}/tcplife"
@@ -1017,6 +1060,11 @@ class Bcc(ToolAdapter):
         except FileNotFoundError:
             return 0
 
+    def alive(self):
+        # two probe processes: either one dying leaves the trial unmeasured (ERROR),
+        # not a tool miss. The base class only knows about self.proc.
+        return all(p is None or p.poll() is None for p in (getattr(self, "proc", None), getattr(self, "proc2", None)))
+
     def collect(self, gt: GT) -> Observation:
         # the JIT compile can fail after start()'s check, so re-check here too.
         if not getattr(self, "broken", False):
@@ -1028,6 +1076,8 @@ class Bcc(ToolAdapter):
                     pass
         if getattr(self, "broken", False):
             return Observation(na=True, note="bcc programs fail to JIT-compile against the 7.0 kernel headers")
+        if _bcc_crashed(self.life, self.conn):
+            return Observation(invalid=True, note="tcplife/tcpconnect crashed (traceback in its log); nothing was measured")
         # bcc tcplife/tcpconnect are TCP-only
         if gt.proto not in ("tcp",):
             return Observation(na=True, note="bcc tcplife/tcpconnect are TCP-only")
@@ -1100,9 +1150,7 @@ class BccTcptop(ToolAdapter):
         self.env["LD_LIBRARY_PATH"] = "/usr/local/lib"
         up = f"{Bcc.UP_TOOLS}/tcptop"
         if self.version() != self.VERSION or not Path(up).exists():
-            r = sh(f"bash {BENCH}/lib/build_bcc.sh", timeout=3600)
-            if r.returncode != 0:
-                raise RuntimeError(f"bcc build failed: {r.stderr[-800:]}")
+            _build_bcc()
             if self.version() != self.VERSION:
                 raise RuntimeError(f"bcc {self.VERSION} build failed, found {self.version() or 'nothing'}")
         self.tcptop = up
@@ -1127,6 +1175,8 @@ class BccTcptop(ToolAdapter):
     def collect(self, gt: GT) -> Observation:
         if self.broken or self._broken():
             return Observation(na=True, note="bcc tcptop fails to JIT-compile against the 7.0 kernel headers")
+        if _bcc_crashed(self.log):
+            return Observation(invalid=True, note="tcptop crashed (traceback in its log); nothing was measured")
         if gt.proto != "tcp":
             return Observation(na=True, note="bcc tcptop is TCP-only")
         sent = recv = 0.0
@@ -1260,6 +1310,10 @@ class Sysdig(ToolAdapter):
     SOCK_SYSCALLS = "send,sendto,sendmsg,sendmmsg,recv,recvfrom,recvmsg,recvmmsg"
     FILTER = f"(fd.type in (ipv4,ipv6) or evt.type in ({SOCK_SYSCALLS})) and evt.is_io=true and evt.rawres>0 and proc.name contains bg"
     FMT = "%proc.name %evt.io_dir %evt.rawres"
+
+    # keep in step with bandwidth_layer() below: the tool page states the layer each
+    # row was scored at, and `layer` alone would claim app bytes for the s12 row too
+    LAYER_NOTE = "except s12 (AF_PACKET), scored against wire bytes (L3 + Ethernet header per packet): a packet-socket write is an ordinary sendto whose bytes are the whole frame"
 
     def bandwidth_layer(self, gt: GT) -> str:
         return "frame" if gt.proto == "afpacket" else self.layer

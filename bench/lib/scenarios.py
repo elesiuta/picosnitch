@@ -18,9 +18,12 @@ from pathlib import Path
 from harness import BIN, GT, HOST4, PEER4, PEER6, PORT_SCTP, PORT_TCP, PORT_UDP, VETH, Scenario, sh
 
 MB = 1 << 20
-RATE = 5 * MB  # 5 MiB/s ~ 40 Mbit/s: a realistic sustained rate; also keeps
-# every paced transfer >5s so bandwhich's 5s-rolling-average
-# cumulative gets a fair, steady-state window to measure.
+RATE = 5 * MB  # 5 MiB/s ~ 40 Mbit/s: a realistic sustained rate that spreads the
+# paced bulk transfers over several seconds (4.8s at 24 MiB, 6.4s at 32 MiB), so
+# rate-integrating tools such as bandwhich, whose cumulative total comes off a
+# 5s rolling average, measure a steady state rather than one burst. Scenarios
+# about a rate of their own set it themselves (s09, s18, s20), and s10 moves only
+# 4 MiB at this one.
 
 
 def _parse_result(out, rc):

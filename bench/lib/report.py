@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from adapters import ADAPTERS
 from harness import REPORTS, RESULTS
 from scenarios import build_scenarios
 
@@ -40,6 +41,13 @@ def _load():
     return data
 
 
+def _broken(d):
+    """Did this tool's setup fail, so it was never measured? Such a tool has no
+    scenario rows at all, which must NOT read as a score of zero (or as N/A) --
+    it is a harness/environment failure and is reported as one."""
+    return bool(d.get("setup_failed")) or not d.get("scenarios")
+
+
 def _resolve(rec, kind, tool):
     """Return (verdict, disagreement flag) for a cell."""
     if rec is None:
@@ -67,15 +75,19 @@ def _matrix(data, kind, title, tools, subtitle=""):
     if subtitle:
         lines += [subtitle, ""]
     lines += ["| # | Scenario | " + " | ".join(TOOL_LABEL[t] for t in tools) + " |", "|---|---|" + "|".join(["---"] * len(tools)) + "|"]
+    broken = {t: _broken(data.get(t, {})) for t in tools}
     for s in scn:
         row = [s.sid, s.name]
         for t in tools:
+            if broken[t]:  # never measured: not a blank N/A column
+                row.append("⚠️")
+                continue
             rec = data.get(t, {}).get("scenarios", {}).get(s.sid)
             sym, flaky = _cell(rec, kind, t)
             mark = "*" if flaky else ""
             row.append(sym + mark)
         lines.append("| " + " | ".join(row) + " |")
-    lines += ["", "Legend: ✅ PASS · 🟡 PARTIAL · ❌ FAIL · ⬜ N/A · ⚠️ error · \\* trials disagreed, see the note", ""]
+    lines += ["", "Legend: ✅ PASS · 🟡 PARTIAL · ❌ FAIL · ⬜ N/A · ⚠️ not measured (setup failed or unresolved trial) · \\* trials disagreed, see the note", ""]
     return "\n".join(lines)
 
 
@@ -102,6 +114,8 @@ def _footnotes(data, tools):
         d = data.get(t, {})
         sc = d.get("scenarios", {})
         items = []
+        if _broken(d):  # setup failed: say so, rather than leaving an empty section
+            items.append("    - **setup failed: this tool was never measured; the cells above are not results**")
         for sid, rec in sc.items():
             dv, dfl = _resolve(rec, "det", t)
             bv, bfl = _resolve(rec, "bw", t)
@@ -124,12 +138,12 @@ def _footnotes(data, tools):
                 seg += f" (det {[x.get('det') for x in rec.get('trials', [])]}, bw {[x.get('bw') for x in rec.get('trials', [])]})"
             extra = "; ".join(x for x in [onote, ratio] if x)
             items.append(f"    - **{sid} {scn[sid].name}**: {seg}. {extra}".rstrip().rstrip(".") + ".")
-        if items:
+        errs = d.get("errors", [])
+        if items or errs:  # errors need the tool header too, or they read as the previous tool's
             lines.append(f"- **{TOOL_LABEL[t]}**")
             lines += items
-        errs = d.get("errors", [])
         for e in errs[:5]:
-            lines.append(f"    - _run note:_ {e[:200]}")
+            lines.append(f"    - _run note:_ {' '.join(e.split())[:300]}")  # flattened: a traceback must stay one bullet
         if len(errs) > 5:
             lines.append(f"    - _run note:_ (+{len(errs) - 5} further notes not shown)")
     return "\n".join(lines) + "\n"
@@ -147,12 +161,19 @@ def _fmtb(v):
 def _per_tool(data, tool):
     scn = {s.sid: s for s in build_scenarios()}
     d = data.get(tool, {})
+    # a tool whose bandwidth_layer() overrides `layer` per scenario declares the
+    # exception itself, so this line describes every row rather than most of them
+    note = getattr(ADAPTERS.get(tool), "LAYER_NOTE", "")
     lines = [
         f"# {TOOL_LABEL.get(tool, tool)}: detailed results",
         "",
-        f"- scored against: **{LAYER_REF.get(d.get('layer'), d.get('layer'))}**",
+        f"- scored against: **{LAYER_REF.get(d.get('layer'), d.get('layer'))}**" + (f", {note}" if note else ""),
         "",
     ]
+    if _broken(d):
+        lines += ["> ⚠️ **Setup failed: this tool was never measured.** The harness recorded:"]
+        lines += [f"> - {' '.join(e.split())[:500]}" for e in d.get("errors", [])] or ["> - (no error recorded)"]
+        return "\n".join(lines) + "\n"
     ctrl = d.get("control")
     if ctrl:
         lines.append(f"- **control (separate from the s01 row):** det={ctrl['det']} bw={ctrl['bw']} (reference recv={ctrl['gt']['app_recv']}, reported recv={_fmtb(ctrl['obs']['recv'])})")
@@ -249,10 +270,26 @@ def write_findings():
 
     for t in order:
         c = C[t]
+        if _broken(data[t]):
+            # never measured: printing 0 / 0 / 0 / 0 here would read as a tool that
+            # scored nothing, which is exactly the wrong conclusion.
+            L.append(f"| {TOOL_LABEL[t]} | ⚠️ **not measured (setup failed)** | ⚠️ **not measured (setup failed)** | — |")
+            continue
         L.append(
             f"| {TOOL_LABEL[t]} | **{c['det_pass']}** / {c['det_part']} / {c['det_fail']} / {c['det_na']}{err(c['det_err'])} "
             f"| **{c['bw_pass']}** / {c['bw_part']} / {c['bw_fail']} / {c['bw_na']}{err(c['bw_err'])} | {c['flaky']} |"
         )
+
+    # run health: a benchmark that could not set a tool up, or that recorded errors
+    # while running one, must say so next to the numbers rather than in a log file.
+    unhealthy = [t for t in order if _broken(data[t]) or data[t].get("errors")]
+    if unhealthy:
+        L += ["", "## Run health\n", "Recorded by the harness during this run. A tool that was never measured has no results in the tables above.\n"]
+        for t in unhealthy:
+            state = "**never measured** (setup failed)" if _broken(data[t]) else "ran, with notes"
+            L.append(f"- **{TOOL_LABEL[t]}**: {state}")
+            for e in data[t].get("errors", [])[:3]:
+                L.append(f"    - {' '.join(e.split())[:300]}")
 
     # versions actually observed at run time, with how each was obtained
     if any(data[t].get("version") for t in order):

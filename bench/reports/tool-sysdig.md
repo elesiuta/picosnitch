@@ -1,6 +1,6 @@
 # Sysdig: detailed results
 
-- scored against: **application bytes**
+- scored against: **application bytes**, except s12 (AF_PACKET), scored against wire bytes (L3 + Ethernet header per packet): a packet-socket write is an ordinary sendto whose bytes are the whole frame
 
 - **control (separate from the s01 row):** det=PASS bw=PASS (reference recv=33554432, reported recv=33554432)
 

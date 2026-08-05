@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import report as reportmod
 from adapters import ADAPTERS
-from harness import ERROR, FAIL, NA, RESULTS, Ctx, Netlab, combine_trials, gt_directions, save_json, score_bandwidth, score_detection
+from harness import BIN, ERROR, FAIL, NA, RESULTS, Ctx, Netlab, combine_trials, gt_directions, save_json, score_bandwidth, score_detection, sh
 from resprof import ResProfiler
 from scenarios import build_scenarios
 
@@ -45,6 +45,51 @@ _MONITOR_SIG = {
     "opensnitch": "opensnitchd",
     "littlesnitch": "littlesnitch --daemon",
 }
+
+
+def preflight(tools, scenarios):
+    """Provision what the run assumes exists, before anything runs.
+
+    A stock cloud image has none of this. Without the check a missing prerequisite
+    surfaces hours in and reads as a result: no docker turns s17 into ERROR cells
+    for every tool, no pipx makes picosnitch's install fail, an unbuilt bin/ fails
+    every generator. Only what the SELECTED tools and scenarios need is required, so
+    a subset run on a lesser box still works. Loud and up front: missing
+    prerequisites are collected and the run aborts before the first tool."""
+    sids = {s.sid for s in scenarios}
+    missing = []
+    sh("apt-get update", timeout=600)  # a fresh image can ship empty package lists
+
+    for b in ("benchgen", "benchgen_static", "benchserver"):
+        if not (BIN / b).exists():
+            missing.append(f"bin/{b} (compile the helpers first: sudo bash lib/build.sh)")
+
+    if "picosnitch" in tools and sh("command -v pipx").returncode != 0:
+        sh("apt-get install -y pipx", timeout=600)
+        if sh("command -v pipx").returncode != 0:
+            missing.append("pipx (picosnitch is installed with it)")
+
+    if "s17" in sids:  # in-container egress
+        if sh("command -v docker").returncode != 0:
+            sh("apt-get install -y docker.io", timeout=900)
+        subprocess.run(["systemctl", "start", "docker"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if sh("command -v docker").returncode != 0:
+            missing.append("docker (s17 runs a generator inside a container)")
+        # pull now: a cold pull inside the first trial would time out that trial
+        elif sh("docker image inspect alpine:3.20", timeout=60).returncode != 0:
+            r = sh("docker pull alpine:3.20", timeout=600)
+            if r.returncode != 0:
+                missing.append(f"docker image alpine:3.20 ({r.stderr.strip()[:200]})")
+
+    if "s08" in sids and sh("modprobe sctp").returncode != 0:  # SCTP transfer
+        missing.append("sctp kernel module (s08); on Ubuntu it ships in linux-modules-extra")
+
+    if missing:
+        print("\n!!! PREFLIGHT FAILED -- the run would report these as tool results:", flush=True)
+        for m in missing:
+            print(f"    missing: {m}", flush=True)
+        sys.exit(2)
+    print(f"preflight OK ({len(tools)} tools, {len(sids)} scenarios)", flush=True)
 
 
 def quiesce_other_monitors(current):
@@ -161,6 +206,9 @@ def run_tool(toolname, scenarios, netlab, trials, profile=True):
         print(f"[{toolname}] start ...", flush=True)
         ad.start()
     except Exception as e:
+        # no scenarios run at all: flagged so the reports say "not measured" instead
+        # of rendering the empty matrix as a tool that scored zero
+        out["setup_failed"] = True
         out["errors"].append(f"setup: {e}\n{traceback.format_exc()}")
         print(f"[{toolname}] SETUP FAILED: {e}", flush=True)
         try:
@@ -267,16 +315,23 @@ def main():
         want = set(args.scenarios.split(","))
         all_scn = [s for s in all_scn if s.sid in want]
 
+    preflight(tools, all_scn)
+
     netlab = Netlab()
     print("=== netlab up ===", flush=True)
     netlab.up()
+    outs = {}
     try:
         for tool in tools:
             try:
-                run_tool(tool, all_scn, netlab, args.trials, profile=not args.no_profile)
+                outs[tool] = run_tool(tool, all_scn, netlab, args.trials, profile=not args.no_profile)
             except Exception:
                 # no single tool's failure may take down the rest of a multi-hour run
                 print(f"[{tool}] TOOL ABORTED:\n{traceback.format_exc()}", flush=True)
+                # persist the abort: without this the reports would silently pick up
+                # a previous run's results.json for this tool and publish them as this run's
+                outs[tool] = {"tool": tool, "run_date": time.strftime("%Y-%m-%d"), "setup_failed": True, "scenarios": {}, "control": None, "errors": [f"aborted: {traceback.format_exc()}"]}
+                save_json(RESULTS / tool / "results.json", outs[tool])
     finally:
         netlab.down()
         print("=== netlab down ===", flush=True)
@@ -284,6 +339,20 @@ def main():
     reportmod.write_reports()
     reportmod.write_findings()
     print("\n=== reports written to bench/reports/ ===", flush=True)
+
+    # Run health, last and loudest: a tool that was never measured is a harness
+    # failure, not a score of zero, and must not be read off the scorecards as one.
+    broken = [t for t, o in outs.items() if o.get("setup_failed") or not o.get("scenarios")]
+    noted = [t for t, o in outs.items() if o.get("errors") and t not in broken]
+    for t in noted:
+        print(f"[{t}] ran with {len(outs[t]['errors'])} recorded error(s); see results/{t}/results.json", flush=True)
+    if broken:
+        print(f"\n!!! NOT MEASURED (setup failed): {', '.join(broken)}", flush=True)
+        for t in broken:
+            first = (outs[t].get("errors") or ["(no error recorded)"])[0]
+            print(f"    {t}: {' '.join(first.split())[:300]}", flush=True)
+        print("!!! Their scorecard columns are marked not-measured; fix the setup and rerun those tools.", flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

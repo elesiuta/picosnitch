@@ -23,7 +23,7 @@ picosnitch is installed from PyPI, not from the source tree in this repository.
 | bandwhich | pinned (release binary) | `--raw --total-utilization --no-resolve --show-dns` stdout |
 | NetHogs | pinned (built from source) | `-t -C -v 2 -a -d 1 vbench0 lo` trace stdout |
 | Sniffnet¹ | pinned (release .deb) | GUI OCR under Xvfb (tesseract) |
-| Little Snitch² | pinned (release .deb) | local WebSocket `ws://localhost:3031/stream` |
+| Little Snitch² | current release (.deb), recorded | local WebSocket `ws://localhost:3031/stream` |
 | BCC `tcplife`/`tcpconnect` | pinned (built from source)³ | `tcplife`/`tcpconnect` stdout |
 | BCC `tcptop` | pinned (built from source) | `tcptop -C 1` per-interval throughput (return probes on `tcp_sendmsg`/`tcp_recvmsg`) |
 | bpftrace script | Ubuntu package, recorded | a `bpftrace -e` program in `lib/adapters.py`, on `tcp_sendmsg`/`tcp_cleanup_rbuf` |
@@ -64,6 +64,7 @@ The loopback scenario has no peer namespace and therefore no wire measurement, s
 Each (tool × scenario) cell is **PASS / PARTIAL / FAIL / N/A**, decided from **5 trials** (configurable).
 A footnote is attached to every PARTIAL or FAIL and to any cell whose trials did not all agree.
 A trial whose measurement could not be extracted (a failed screen read, an unreadable log or database) is retried once and otherwise recorded as ERROR, which is never outvoted by the trials that did produce a result; it is a harness failure, not a result for the tool.
+A tool whose setup fails (a build, download, or install that did not produce a working tool) is never measured at all: its scorecard column is marked ⚠️ *not measured*, the failure is published under **Run health** in the findings, and the run exits non-zero. That is a harness failure too, and is never published as zeros or as N/A.
 
 * **Detection** (was the activity seen and attributed to the right process?)
   * PASS: attributed to the correct executable.
@@ -155,7 +156,8 @@ bench/
 As root it installs packages, replaces the configuration of every monitor it tests, deletes picosnitch and Little Snitch history, starts and stops system services, kills processes by name, and binds the peer server's ports.
 It is not safe on a workstation.
 
-Prerequisites beyond a stock Ubuntu 26.04 install: `docker` (s17 pulls `alpine:3.20`), the kernel SCTP module (s08), and internet access for the pinned downloads.
+The only prerequisites beyond a stock Ubuntu 26.04 install are internet access for the pinned downloads and the compiled helpers.
+`lib/run.py` preflights the rest — `pipx`, `docker` with the `alpine:3.20` image (s17), the kernel SCTP module (s08) — and aborts before the matrix if any of it is missing, rather than letting a missing prerequisite score as a tool result.
 `lib/build.sh` installs its own build dependencies.
 
 On Ubuntu 26.04 (kernel 7.0):
