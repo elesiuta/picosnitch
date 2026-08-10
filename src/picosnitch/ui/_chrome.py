@@ -33,7 +33,7 @@ def init_colors() -> None:
         bg = curses.COLOR_BLACK
     pairs = (
         (CP_CHROME, curses.COLOR_WHITE, curses.COLOR_BLUE),
-        (CP_SELECTION, curses.COLOR_BLACK, curses.COLOR_CYAN),
+        (CP_SELECTION, curses.COLOR_WHITE, curses.COLOR_BLUE),
         (CP_ACCENT, curses.COLOR_CYAN, bg),
         (CP_OK, curses.COLOR_GREEN, bg),
         (CP_WARN, curses.COLOR_YELLOW, bg),
