@@ -44,6 +44,8 @@ except Exception:
     pass
 FD_CACHE: typing.Final[int] = max(1, resource.getrlimit(resource.RLIMIT_NOFILE)[0] - 128)
 PID_CACHE: typing.Final[int] = max(8192, 2 * FD_CACHE)
+# bounds the secondary's write-retry buffer near 200 MB (~2 KB/entry) on a persistent outage
+RETRY_BUFFER_MAX: typing.Final[int] = 100000
 st_dev_mask = 0xFFFFFFFF
 try:
     # parse /proc/mounts to detect btrfs filesystems (replaces psutil.disk_partitions)

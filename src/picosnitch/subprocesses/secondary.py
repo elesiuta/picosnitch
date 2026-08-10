@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from picosnitch.config import Config
-from picosnitch.constants import DATA_DIR, DB_VERSION, LOG_DIR, VERSION
+from picosnitch.constants import DATA_DIR, DB_VERSION, LOG_DIR, RETRY_BUFFER_MAX, VERSION
 from picosnitch.process_manager import ProcessManager
 from picosnitch.types import BpfEvent, ProcessHashInfo, State
 from picosnitch.utils import (
@@ -50,8 +50,17 @@ def maintain_database(file_path: Path, retention_days: int) -> None:
             con.close()
             logging.error(f"Incorrect database version of picosnitch.db for picosnitch v{VERSION}")
             sys.exit(1)
+        # retention_days <= 0 is the usual "keep forever" convention; config clamps only negatives
+        if int(retention_days) <= 0:
+            con.close()
+            return
         retention_cutoff = int(time.time()) - int(retention_days) * 86400
-        cur.execute("DELETE FROM connections WHERE contime < ?", (retention_cutoff,))
+        # a cutoff past the newest row means a future clock (booted before NTP), which would wipe the db
+        newest_contime = cur.execute("SELECT MAX(contime) FROM connections").fetchone()[0]
+        if newest_contime is None or retention_cutoff <= newest_contime:
+            cur.execute("DELETE FROM connections WHERE contime < ?", (retention_cutoff,))
+        else:
+            logging.error("picosnitch: skipping retention purge, wall clock is ahead of the newest logged connection (clock not synced?); no connections deleted")
         cur.execute("DELETE FROM domains WHERE id != 0 AND id NOT IN (SELECT DISTINCT domain_id FROM connections)")
         cur.execute("DELETE FROM addresses WHERE id != 0 AND id NOT IN (SELECT DISTINCT laddr_id FROM connections UNION SELECT DISTINCT raddr_id FROM connections)")
         # executables interns (exe, name, cmdline, sha256); a new cmdline is a new row, so a high
@@ -61,6 +70,12 @@ def maintain_database(file_path: Path, retention_days: int) -> None:
         con.commit()
         con.close()
     except sqlite3.DatabaseError as e:
+        # this runs before the main loop's try/except, so re-raising a full disk crash-loops the daemon
+        if "disk is full" in str(e).lower():
+            logging.error(f"picosnitch: skipping startup db maintenance, disk is full ({e}); starting anyway")
+            if con is not None:
+                con.close()
+            return
         if not sqlite_error_means_corrupt(e):
             raise
         logging.error(f"picosnitch.db is unusable ({e}); quarantining to picosnitch.db.bad and recreating on restart")
@@ -337,8 +352,9 @@ def run_secondary(
             sync_vt_results(state, p_virustotal.q_out, q_primary_in, False)
             get_fanotify_events(fan_fd, fan_mod_cnt, q_error)
             # process connection data
-            if time.time() - last_write > config.database.write_limit_seconds and (transaction or new_processes):
-                current_write = time.time()
+            # a backward wall-clock jump must not stall writes; contime still uses time.time()
+            if time.monotonic() - last_write > config.database.write_limit_seconds and (transaction or new_processes):
+                current_write = time.monotonic()
                 new_entries = build_log_entries(config, state, fan_mod_cnt, new_processes, p_fuse, p_virustotal.q_in, q_primary_in, q_error, ignored_networks)
                 if config.database.remote and new_entries:
                     # new entries only: the retries below are local, resending would duplicate remote rows
@@ -386,6 +402,11 @@ def run_secondary(
                     q_error.put("text log %s%s on line %s, lost %s entries" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?", len(transaction)))
                 if transaction_success or log_destinations == 0:
                     transaction = []
+                elif len(transaction) > RETRY_BUFFER_MAX:
+                    # a persistent write outage would grow transaction unbounded; keep the newest
+                    dropped = len(transaction) - RETRY_BUFFER_MAX
+                    transaction = transaction[-RETRY_BUFFER_MAX:]
+                    q_error.put("secondary retry buffer full (persistent write outage), dropped %s oldest entries; retrying %s" % (dropped, len(transaction)))
                 else:
                     q_error.put("secondary subprocess all log desinations failed, will retry %s entries with next write" % (len(transaction)))
                 last_write = current_write

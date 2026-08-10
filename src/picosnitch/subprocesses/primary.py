@@ -203,7 +203,8 @@ def run_primary(
                         state["Exe Log"].append(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg['sha256']:<16.16} {msg['exe']} (clean)")
             # flush logs every iteration (cheap appends), write state.json only when changed or every 30s
             flush_logs(state, config)
-            if time.time() - last_write > 30:
+            # monotonic interval: a wall-clock jump must not stall state.json persistence
+            if time.monotonic() - last_write > 30:
                 new_record = pickle.dumps(
                     [state["Executables"], state["Names"], state["Parent Executables"], state["Parent Names"], state["Grandparent Executables"], state["Grandparent Names"], state["SHA256"]]
                 )
@@ -213,7 +214,7 @@ def run_primary(
                 if write_record:
                     save_state(state, write_record=True, config=config)
                     write_record = False
-                last_write = time.time()
+                last_write = time.monotonic()
         except Exception as e:
             q_error.put("primary subprocess %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
     # clean exit after shutdown_event was set (by signal handler)

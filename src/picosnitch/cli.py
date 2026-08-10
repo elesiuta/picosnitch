@@ -265,6 +265,9 @@ def start_picosnitch() -> int:
         f"""
         [Unit]
         Description=picosnitch
+        # a future clock at boot would make the startup retention purge wipe the db
+        Wants=time-sync.target
+        After=time-sync.target
 
         [Service]
         # READY=1 is sent once the BPF probes are attached, so ordering waits for capture
