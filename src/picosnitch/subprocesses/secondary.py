@@ -147,6 +147,16 @@ def build_log_entries(
     traffic_counter: dict[tuple, list[int]] = {}
     # a burst of distinct addresses is that many serial round-trips before any row is written
     reverse_dns_budget = REVERSE_DNS_LOOKUPS_PER_WRITE
+    # many connections in one write share a cmdline, and this string work dominated at high cardinality
+    cmdline_cache: dict[str, str] = {}
+
+    def clean_cmdline(raw: str) -> str:
+        cleaned = cmdline_cache.get(raw)
+        if cleaned is None:
+            cleaned = shlex.join(raw.encode("utf-8", "ignore").decode("utf-8", "ignore").strip("\0\t\n ").split("\0"))
+            cmdline_cache[raw] = cleaned
+        return cleaned
+
     for proc in new_processes:
         if not isinstance(proc, dict):
             q_error.put("sync error between secondary and primary, received '%s' in middle of transfer" % str(proc))
@@ -159,9 +169,9 @@ def build_log_entries(
         gpsha256 = resolve_hash(state, fan_mod_cnt, gpproc, p_fuse, q_vt, q_out, q_error)
         # join or omit commands from logs
         if config.log.commands:
-            proc["cmdline"] = shlex.join(proc["cmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").strip("\0\t\n ").split("\0"))
-            proc["pcmdline"] = shlex.join(proc["pcmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").strip("\0\t\n ").split("\0"))
-            proc["gpcmdline"] = shlex.join(proc["gpcmdline"].encode("utf-8", "ignore").decode("utf-8", "ignore").strip("\0\t\n ").split("\0"))
+            proc["cmdline"] = clean_cmdline(proc["cmdline"])
+            proc["pcmdline"] = clean_cmdline(proc["pcmdline"])
+            proc["gpcmdline"] = clean_cmdline(proc["gpcmdline"])
         else:
             proc["cmdline"] = ""
             proc["pcmdline"] = ""
