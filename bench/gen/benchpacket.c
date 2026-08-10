@@ -109,7 +109,12 @@ int main(int argc, char **argv) {
         udp->len = htons(8 + plen); udp->csum = 0;   /* UDP csum optional in IPv4 */
         int flen = 14 + iptot;
         ssize_t w = sendto(fd, frame, flen, 0, (struct sockaddr *)&sll, sizeof sll);
-        if (w > 0) app_sent += (uint64_t)plen;   /* count UDP payload as the "transferred" amount */
+        /* application bytes = the whole frame handed to the socket (what sendto
+         * accepted), not just the UDP payload: that is what a socket-layer monitor
+         * sees and what the wire reference counts, so counting only the payload
+         * understates the reference and makes correct tools look wrong on small
+         * frames (payload/frame shrinks as the 42B header fraction grows) */
+        if (w > 0) app_sent += (uint64_t)w;
         else break;
     }
     close(fd);
