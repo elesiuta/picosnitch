@@ -228,7 +228,7 @@ def find_bpf_object() -> str:
 
 # Event structures matching BPF code - must be packed and match exactly
 class ExecEvent(ctypes.Structure):
-    """Event from exec_events perf buffer"""
+    """Event from the exec_events ring buffer"""
 
     _pack_ = 1
     _layout_ = "ms"  # keep the historical _pack_ layout explicit (required from py3.19; ignored <3.14)
@@ -250,7 +250,7 @@ class ExecEvent(ctypes.Structure):
 
 
 class DNSEvent(ctypes.Structure):
-    """Event from dns_events perf buffer"""
+    """Event from the dns_events ring buffer"""
 
     _pack_ = 1
     _layout_ = "ms"  # keep the historical _pack_ layout explicit (required from py3.19; ignored <3.14)
@@ -336,11 +336,6 @@ class ConnVal(ctypes.Structure):
     ]
 
 
-# Callback function types for perf buffers
-# void (*sample_cb)(void *ctx, int cpu, void *data, __u32 size)
-PERF_SAMPLE_CB = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32)
-# void (*lost_cb)(void *ctx, int cpu, __u64 cnt)
-PERF_LOST_CB = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int, ctypes.c_uint64)
 # int (*sample_cb)(void *ctx, void *data, size_t size) -- ring buffer callback (return 0 to continue)
 RING_SAMPLE_CB = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t)
 
@@ -456,23 +451,6 @@ class LibBPF:
         ]
         self.lib.bpf_map_lookup_and_delete_batch.restype = ctypes.c_int
 
-        # Perf buffer operations
-        self.lib.perf_buffer__new.argtypes = [
-            ctypes.c_int,  # map_fd
-            ctypes.c_size_t,  # page_cnt
-            ctypes.c_void_p,  # sample_cb
-            ctypes.c_void_p,  # lost_cb
-            ctypes.c_void_p,  # ctx
-            ctypes.c_void_p,  # opts
-        ]
-        self.lib.perf_buffer__new.restype = ctypes.c_void_p
-
-        self.lib.perf_buffer__poll.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        self.lib.perf_buffer__poll.restype = ctypes.c_int
-
-        self.lib.perf_buffer__free.argtypes = [ctypes.c_void_p]
-        self.lib.perf_buffer__free.restype = None
-
         # ring buffer (shared MPSC, not per-CPU): one manager can hold multiple ringbuf maps
         self.lib.ring_buffer__new.argtypes = [ctypes.c_int, RING_SAMPLE_CB, ctypes.c_void_p, ctypes.c_void_p]
         self.lib.ring_buffer__new.restype = ctypes.c_void_p
@@ -512,7 +490,7 @@ class BpfMapBatchOpts(ctypes.Structure):
 class BPFMap:
     """
     Wrapper for a BPF map providing BCC-like interface.
-    Handles perf buffer setup and event parsing.
+    Handles ring buffer setup and event parsing.
     """
 
     def __init__(self, bpf_obj: "BPFObject", name: str):
@@ -529,17 +507,6 @@ class BPFMap:
             return DNSEvent
         return None
 
-    def open_perf_buffer(self, callback, lost_cb=None, page_cnt: int = 64):
-        """
-        Open a perf buffer for this map with BCC-style API.
-
-        Args:
-            callback: Function called for each event (cpu, data, size)
-            lost_cb: Optional function called when events are lost (cpu, count)
-            page_cnt: Number of pages for the ring buffer (must be power of 2)
-        """
-        self.bpf_obj._open_perf_buffer(self.name, callback, lost_cb, page_cnt)
-
     def open_ring_buffer(self, callback):
         """Open a BPF ring buffer for this map; callback(ctx, data, size), bcc-style."""
         self.bpf_obj._open_ring_buffer(self.name, callback)
@@ -549,7 +516,7 @@ class BPFMap:
         Parse raw event data into the appropriate structure.
 
         Args:
-            data_ptr: Pointer to raw event data from perf buffer callback
+            data_ptr: Pointer to raw event data from the ring buffer callback
 
         Returns:
             Parsed event structure (ExecEvent or DNSEvent)
@@ -562,7 +529,7 @@ class BPFMap:
 class BPFObject:
     """
     High-level wrapper for BPF object operations.
-    Manages the lifecycle of a loaded BPF program including maps and perf buffers.
+    Manages the lifecycle of a loaded BPF program including maps and ring buffers.
     """
 
     def __init__(self, obj_path: str):
@@ -573,7 +540,6 @@ class BPFObject:
         self._maps: dict[str, ctypes.c_void_p] = {}
         self._map_fds: dict[str, int] = {}
         self._links = []
-        self._perf_buffers = []
         self._callbacks = []  # Must keep references to prevent garbage collection
         self._ring_buffer = None  # single libbpf ring_buffer manager holding all ringbuf maps
         self._ring_callbacks = []  # keep RING_SAMPLE_CB refs alive (GC would segfault the poll)
@@ -755,59 +721,6 @@ class BPFObject:
         self._links.append(link)
         return link
 
-    def _open_perf_buffer(self, map_name: str, callback, lost_callback, page_cnt: int):
-        """Internal: Open a perf buffer for a map."""
-        map_fd = self.get_map_fd(map_name)
-
-        # Create C callback wrappers that call Python functions
-        def sample_cb_wrapper(ctx, cpu, data, size):
-            try:
-                callback(cpu, data, size)
-            except Exception:
-                sys.stderr.write(f"BPF callback error in {map_name}: {traceback.format_exc()}")
-                sys.stderr.flush()
-
-        def lost_cb_wrapper(ctx, cpu, cnt):
-            if lost_callback:
-                try:
-                    lost_callback(cpu, cnt)
-                except Exception:
-                    pass
-
-        # Create ctypes callback objects
-        sample_cb = PERF_SAMPLE_CB(sample_cb_wrapper)
-        lost_cb = PERF_LOST_CB(lost_cb_wrapper) if lost_callback else None
-
-        # Must keep references to prevent garbage collection
-        self._callbacks.append((sample_cb, lost_cb, sample_cb_wrapper, lost_cb_wrapper))
-
-        pb = self.libbpf.lib.perf_buffer__new(
-            map_fd,
-            page_cnt,
-            sample_cb,
-            lost_cb,
-            None,  # ctx
-            None,  # opts
-        )
-
-        if not pb:
-            raise RuntimeError(f"Failed to create perf buffer for map {map_name}")
-
-        self._perf_buffers.append(pb)
-        return pb
-
-    def poll_perf_buffers(self, timeout_ms: int = 100) -> int:
-        """Poll all perf buffers for events."""
-        total = 0
-        for pb in self._perf_buffers:
-            ret = self.libbpf.lib.perf_buffer__poll(pb, timeout_ms)
-            if ret < 0:
-                if ret == -errno.EINTR:
-                    continue  # Interrupted, not an error
-                return ret
-            total += ret
-        return total
-
     def _open_ring_buffer(self, map_name: str, callback):
         """Internal: register a ringbuf map with the shared ring_buffer manager."""
         map_fd = self.get_map_fd(map_name)
@@ -845,13 +758,6 @@ class BPFObject:
 
     def cleanup(self):
         """Clean up all BPF resources."""
-        # Free perf buffers first
-        for pb in self._perf_buffers:
-            try:
-                self.libbpf.lib.perf_buffer__free(pb)
-            except Exception:
-                pass
-        self._perf_buffers.clear()
         self._callbacks.clear()
         if self._ring_buffer is not None:
             try:
@@ -963,10 +869,6 @@ class BPF:
     def __getitem__(self, key: str) -> BPFMap:
         """Map access: b["map_name"]"""
         return self.bpf_obj[key]
-
-    def perf_buffer_poll(self, timeout: int = 100) -> int:
-        """Poll all perf buffers for events."""
-        return self.bpf_obj.poll_perf_buffers(timeout)
 
     def ring_buffer_poll(self, timeout: int = 100) -> int:
         """Poll the ring buffer for events."""

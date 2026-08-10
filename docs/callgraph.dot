@@ -57,7 +57,6 @@ digraph G {
                 "picosnitch__bpf_wrapper__BPF__cleanup" [label="cleanup", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPF__drain_map" [label="drain_map", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPF__get_syscall_fnname" [label="get_syscall_fnname", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
-                "picosnitch__bpf_wrapper__BPF__perf_buffer_poll" [label="perf_buffer_poll", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPF__ring_buffer_poll" [label="ring_buffer_poll", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
             }
             subgraph "cluster_picosnitch__bpf_wrapper__BPFMap" {
@@ -66,7 +65,6 @@ digraph G {
                 "picosnitch__bpf_wrapper__BPFMap____init__" [label="__init__", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFMap___determine_event_type" [label="_determine_event_type", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFMap__event" [label="event", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
-                "picosnitch__bpf_wrapper__BPFMap__open_perf_buffer" [label="open_perf_buffer", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFMap__open_ring_buffer" [label="open_ring_buffer", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
             }
             subgraph "cluster_picosnitch__bpf_wrapper__BPFObject" {
@@ -76,7 +74,6 @@ digraph G {
                 "picosnitch__bpf_wrapper__BPFObject____exit__" [label="__exit__", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject____getitem__" [label="__getitem__", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject____init__" [label="__init__", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
-                "picosnitch__bpf_wrapper__BPFObject___open_perf_buffer" [label="_open_perf_buffer", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject___open_ring_buffer" [label="_open_ring_buffer", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject__attach_kprobe" [label="attach_kprobe", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject__attach_trace" [label="attach_trace", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
@@ -88,7 +85,6 @@ digraph G {
                 "picosnitch__bpf_wrapper__BPFObject__get_map_fd" [label="get_map_fd", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject__get_program" [label="get_program", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject__load" [label="load", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
-                "picosnitch__bpf_wrapper__BPFObject__poll_perf_buffers" [label="poll_perf_buffers", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject__poll_ring_buffer" [label="poll_ring_buffer", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
                 "picosnitch__bpf_wrapper__BPFObject__set_global" [label="set_global", style="filled", fillcolor="#ff6565b2", fontcolor="#000000", group="0"];
             }
@@ -340,27 +336,22 @@ digraph G {
         "picosnitch__bpf_wrapper__BPF" -> "picosnitch__bpf_wrapper__BPF__cleanup" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPF" -> "picosnitch__bpf_wrapper__BPF__drain_map" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPF" -> "picosnitch__bpf_wrapper__BPF__get_syscall_fnname" [style="dashed",  color="#ffffff00"];
-        "picosnitch__bpf_wrapper__BPF" -> "picosnitch__bpf_wrapper__BPF__perf_buffer_poll" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPF" -> "picosnitch__bpf_wrapper__BPF__ring_buffer_poll" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFMap" -> "picosnitch__bpf_wrapper__BPFMap____init__" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFMap" -> "picosnitch__bpf_wrapper__BPFMap___determine_event_type" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFMap" -> "picosnitch__bpf_wrapper__BPFMap__event" [style="dashed",  color="#ffffff00"];
-        "picosnitch__bpf_wrapper__BPFMap" -> "picosnitch__bpf_wrapper__BPFMap__open_perf_buffer" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFMap" -> "picosnitch__bpf_wrapper__BPFMap__open_ring_buffer" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFMap____init__" -> "picosnitch__bpf_wrapper__BPFMap" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFMap____init__" -> "picosnitch__bpf_wrapper__BPFMap___determine_event_type" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFMap___determine_event_type" -> "picosnitch__bpf_wrapper__DNSEvent" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFMap___determine_event_type" -> "picosnitch__bpf_wrapper__ExecEvent" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFMap__event" -> "picosnitch__bpf_wrapper__BPFMap___determine_event_type" [style="solid",  color="#000000"];
-        "picosnitch__bpf_wrapper__BPFMap__open_perf_buffer" -> "picosnitch__bpf_wrapper__BPFMap" [style="solid",  color="#000000"];
-        "picosnitch__bpf_wrapper__BPFMap__open_perf_buffer" -> "picosnitch__bpf_wrapper__BPFObject___open_perf_buffer" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFMap__open_ring_buffer" -> "picosnitch__bpf_wrapper__BPFMap" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFMap__open_ring_buffer" -> "picosnitch__bpf_wrapper__BPFObject___open_ring_buffer" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject____enter__" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject____exit__" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject____getitem__" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject____init__" [style="dashed",  color="#ffffff00"];
-        "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject___open_perf_buffer" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject___open_ring_buffer" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__attach_kprobe" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__attach_trace" [style="dashed",  color="#ffffff00"];
@@ -372,7 +363,6 @@ digraph G {
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__get_map_fd" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__get_program" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__load" [style="dashed",  color="#ffffff00"];
-        "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__poll_perf_buffers" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__poll_ring_buffer" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject" -> "picosnitch__bpf_wrapper__BPFObject__set_global" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__BPFObject____exit__" -> "picosnitch__bpf_wrapper__BPFObject__cleanup" [style="solid",  color="#000000"];
@@ -380,9 +370,6 @@ digraph G {
         "picosnitch__bpf_wrapper__BPFObject____getitem__" -> "picosnitch__bpf_wrapper__BPFMap____init__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject____init__" -> "picosnitch__bpf_wrapper__LibBPF" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject____init__" -> "picosnitch__bpf_wrapper__LibBPF____init__" [style="solid",  color="#000000"];
-        "picosnitch__bpf_wrapper__BPFObject___open_perf_buffer" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
-        "picosnitch__bpf_wrapper__BPFObject___open_perf_buffer" -> "picosnitch__bpf_wrapper__BPFObject____init__" [style="solid",  color="#000000"];
-        "picosnitch__bpf_wrapper__BPFObject___open_perf_buffer" -> "picosnitch__bpf_wrapper__BPFObject__get_map_fd" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject___open_ring_buffer" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject___open_ring_buffer" -> "picosnitch__bpf_wrapper__BPFObject____init__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject___open_ring_buffer" -> "picosnitch__bpf_wrapper__BPFObject__get_map_fd" [style="solid",  color="#000000"];
@@ -413,7 +400,6 @@ digraph G {
         "picosnitch__bpf_wrapper__BPFObject__get_map_fd" -> "picosnitch__bpf_wrapper__BPFObject__get_map" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__get_program" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__load" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
-        "picosnitch__bpf_wrapper__BPFObject__poll_perf_buffers" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__poll_ring_buffer" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__set_global" -> "picosnitch__bpf_wrapper__BPFObject__get_map_fd" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF____exit__" -> "picosnitch__bpf_wrapper__BPF__cleanup" [style="solid",  color="#000000"];
@@ -440,7 +426,6 @@ digraph G {
         "picosnitch__bpf_wrapper__BPF__get_syscall_fnname" -> "picosnitch__bpf_wrapper__BPFObject____exit__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF__get_syscall_fnname" -> "picosnitch__bpf_wrapper__BPF____enter__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF__get_syscall_fnname" -> "picosnitch__bpf_wrapper__BPF____exit__" [style="solid",  color="#000000"];
-        "picosnitch__bpf_wrapper__BPF__perf_buffer_poll" -> "picosnitch__bpf_wrapper__BPFObject__poll_perf_buffers" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPF__ring_buffer_poll" -> "picosnitch__bpf_wrapper__BPFObject__poll_ring_buffer" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__LibBPF" -> "picosnitch__bpf_wrapper__LibBPF____init__" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper__LibBPF" -> "picosnitch__bpf_wrapper__LibBPF____new__" [style="dashed",  color="#ffffff00"];
