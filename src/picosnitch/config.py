@@ -52,7 +52,7 @@ class MonitoringConfig:
     every_exe: bool = False
     # attribute receives that never issue a recvmsg; off by default, adds a per-frame softirq hook
     mmap_ring_rx: bool = False
-    perf_ring_buffer_pages: int = 256
+    exec_ring_buffer_pages: int = 256
     conn_map_max_entries: int = 65536
     rlimit_nofile: int | None = None
     st_dev_mask: int | None = None
@@ -143,6 +143,9 @@ def load_config(config_dir: Path = CONFIG_DIR) -> Config:
                 # skip so `field.name in section_data` can't raise and crash-loop the daemon
                 logging.warning(f"config.{section_name}: expected a table, got {type(section_data).__name__}, ignoring")
                 continue
+            # removed config options
+            if section_name == "monitoring" and "perf_ring_buffer_pages" in section_data:
+                logging.warning("monitoring.perf_ring_buffer_pages is now monitoring.exec_ring_buffer_pages, ignoring the old name")
             section_obj = getattr(config, section_name)
             for field in dataclasses.fields(section_obj):
                 if field.name in section_data:
@@ -162,12 +165,11 @@ def load_config(config_dir: Path = CONFIG_DIR) -> Config:
                         logging.warning(f"config.{section_name}.{field.name}: expected {type_name}, got {type(value).__name__}, skipping")
                         continue
                     setattr(section_obj, field.name, value)
-    # clamp values that would otherwise fail the perf mmap / BPF load and restart-loop the daemon;
-    # bound both above too so an absurd (but power-of-two / positive) value can't crash-loop either
-    pages = config.monitoring.perf_ring_buffer_pages
+    # clamp values that would otherwise fail the BPF load and restart-loop the daemon
+    pages = config.monitoring.exec_ring_buffer_pages
     if pages < 1 or pages > 16384 or (pages & (pages - 1)) != 0:
-        logging.warning(f"monitoring.perf_ring_buffer_pages must be a power of two in [1, 16384], got {pages}, using 256")
-        config.monitoring.perf_ring_buffer_pages = 256
+        logging.warning(f"monitoring.exec_ring_buffer_pages must be a power of two in [1, 16384], got {pages}, using 256")
+        config.monitoring.exec_ring_buffer_pages = 256
     entries = config.monitoring.conn_map_max_entries
     if entries < 1 or entries > 1048576:
         logging.warning(f"monitoring.conn_map_max_entries must be in [1, 1048576], got {entries}, using 65536")

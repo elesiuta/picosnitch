@@ -113,7 +113,7 @@ geoip_lookup = true
 
 [monitoring]
 every_exe = false
-perf_ring_buffer_pages = 256
+exec_ring_buffer_pages = 256
 
 [virustotal]
 api_key = ""

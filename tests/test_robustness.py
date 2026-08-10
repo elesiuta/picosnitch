@@ -42,12 +42,12 @@ def test_non_utf8_config_falls_back_to_defaults(tmp_path):
 
 def test_config_numeric_clamps(tmp_path):
     (tmp_path / "config.toml").write_text(
-        "[monitoring]\nperf_ring_buffer_pages = 3\nconn_map_max_entries = 0\nrlimit_nofile = true\nst_dev_mask = 4294967296\n"
+        "[monitoring]\nexec_ring_buffer_pages = 3\nconn_map_max_entries = 0\nrlimit_nofile = true\nst_dev_mask = 4294967296\n"
         "[database]\nretention_days = -1\nwrite_limit_seconds = -1\n"
         "[virustotal]\nrequest_limit_seconds = -1\n"
     )
     config = load_config(tmp_path)
-    assert config.monitoring.perf_ring_buffer_pages == 256  # non-power-of-two clamped to default
+    assert config.monitoring.exec_ring_buffer_pages == 256  # non-power-of-two clamped to default
     assert config.monitoring.conn_map_max_entries == 65536  # < 1 clamped to default
     assert config.monitoring.rlimit_nofile is None
     assert config.monitoring.st_dev_mask is None
@@ -57,10 +57,17 @@ def test_config_numeric_clamps(tmp_path):
 
 
 def test_config_valid_values_preserved(tmp_path):
-    (tmp_path / "config.toml").write_text("[monitoring]\nperf_ring_buffer_pages = 512\nconn_map_max_entries = 1024\n")
+    (tmp_path / "config.toml").write_text("[monitoring]\nexec_ring_buffer_pages = 512\nconn_map_max_entries = 1024\n")
     config = load_config(tmp_path)
-    assert config.monitoring.perf_ring_buffer_pages == 512
+    assert config.monitoring.exec_ring_buffer_pages == 512
     assert config.monitoring.conn_map_max_entries == 1024
+
+
+def test_config_renamed_key_warns_and_is_ignored(tmp_path, caplog):
+    (tmp_path / "config.toml").write_text("[monitoring]\nperf_ring_buffer_pages = 512\n")
+    config = load_config(tmp_path)
+    assert config.monitoring.exec_ring_buffer_pages == 256  # old name no longer applies
+    assert "exec_ring_buffer_pages" in caplog.text
 
 
 def test_config_scalar_for_list_field_skipped(tmp_path):
@@ -77,9 +84,9 @@ def test_config_scalar_for_list_field_skipped(tmp_path):
 def test_config_numeric_upper_clamps(tmp_path):
     """Absurd but positive / power-of-two BPF sizes must be clamped to defaults, not handed to
     the perf mmap or BPF map alloc where they crash-loop the daemon (conn also wraps a c_uint32)."""
-    (tmp_path / "config.toml").write_text("[monitoring]\nperf_ring_buffer_pages = 1073741824\nconn_map_max_entries = 8589934592\n")
+    (tmp_path / "config.toml").write_text("[monitoring]\nexec_ring_buffer_pages = 1073741824\nconn_map_max_entries = 8589934592\n")
     config = load_config(tmp_path)
-    assert config.monitoring.perf_ring_buffer_pages == 256  # 2^30 is a power of two but over max
+    assert config.monitoring.exec_ring_buffer_pages == 256  # 2^30 is a power of two but over max
     assert config.monitoring.conn_map_max_entries == 65536  # 2^33 over max (and would wrap c_uint32)
 
 
@@ -356,7 +363,7 @@ def test_config_scalar_section_falls_back(tmp_path):
     config = load_config(tmp_path)  # must not raise TypeError
     assert isinstance(config, Config)
     assert config.database.enabled is True  # defaults intact
-    assert config.monitoring.perf_ring_buffer_pages == 256
+    assert config.monitoring.exec_ring_buffer_pages == 256
 
 
 def test_relaunch_argv_reexecs_console_script(monkeypatch, tmp_path):

@@ -614,7 +614,9 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         # opt-in: these add a per-frame softirq hook the per-connection aggregation avoids
         if not config.monitoring.mmap_ring_rx:
             disabled_traces.update(("packet_set_ring_ret", "tpacket_rcv_ret", "xsk_bind_ret", "xsk_rcv_ret"))
-        b = BPF(obj_file=bpf_obj_path, map_max_entries={"conn_stats4": CONN_MAP_MAX, "conn_stats6": CONN_MAP_MAX}, disabled_programs=disabled_traces)
+        # a ringbuf's max_entries is its byte size, so the configured page count sizes it
+        exec_ring_bytes = config.monitoring.exec_ring_buffer_pages * resource.getpagesize()
+        b = BPF(obj_file=bpf_obj_path, map_max_entries={"conn_stats4": CONN_MAP_MAX, "conn_stats6": CONN_MAP_MAX, "exec_events": exec_ring_bytes}, disabled_programs=disabled_traces)
         b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
     except Exception as e:
         q_error.put("Init BPF %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
