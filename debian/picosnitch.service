@@ -2,7 +2,8 @@
 Description=picosnitch
 
 [Service]
-Type=simple
+# READY=1 is sent once the BPF probes are attached, so ordering waits for capture
+Type=notify
 Restart=always
 RestartSec=5
 ExecStart=/usr/bin/picosnitch start-no-daemon

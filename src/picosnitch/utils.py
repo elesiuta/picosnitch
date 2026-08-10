@@ -34,6 +34,22 @@ from picosnitch.types import FanotifyEventMetadata, State
 FUSE_HASH_TIMEOUT = 60
 
 
+def sd_notify(message: str) -> None:
+    """best-effort systemd notification via the raw sd_notify(3) protocol, so the
+    privileged daemon needs no python-systemd dependency. no-op unless launched by a
+    Type=notify unit (NOTIFY_SOCKET set); errors are swallowed, a readiness signal
+    must never take the daemon down."""
+    addr = os.environ.get("NOTIFY_SOCKET")
+    if not addr:
+        return
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            # a leading '@' selects the abstract namespace, sent as a leading NUL
+            sock.sendto(message.encode(), "\0" + addr[1:] if addr[0] == "@" else addr)
+    except OSError:
+        pass
+
+
 def relaunch_argv(cmd: str) -> list[str]:
     """argv to re-invoke picosnitch for `cmd` (used by `top` to spawn a monitor and by the
     main loop to restart after suspend). Re-exec argv[0] directly so its own shebang or nix

@@ -267,7 +267,8 @@ def start_picosnitch() -> int:
         Description=picosnitch
 
         [Service]
-        Type=simple
+        # READY=1 is sent once the BPF probes are attached, so ordering waits for capture
+        Type=notify
         Restart=always
         RestartSec=5
         ExecStart={sys.executable} -m picosnitch start-no-daemon

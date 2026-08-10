@@ -295,6 +295,7 @@ digraph G {
             "picosnitch__utils__safe_log_open" [label="safe_log_open", style="filled", fillcolor="#ff99eab2", fontcolor="#000000", group="13"];
             "picosnitch__utils__sanitize_log_line" [label="sanitize_log_line", style="filled", fillcolor="#ff99eab2", fontcolor="#000000", group="13"];
             "picosnitch__utils__save_state" [label="save_state", style="filled", fillcolor="#ff99eab2", fontcolor="#000000", group="13"];
+            "picosnitch__utils__sd_notify" [label="sd_notify", style="filled", fillcolor="#ff99eab2", fontcolor="#000000", group="13"];
             "picosnitch__utils__sqlite_error_means_corrupt" [label="sqlite_error_means_corrupt", style="filled", fillcolor="#ff99eab2", fontcolor="#000000", group="13"];
             "picosnitch__utils__sync_vt_results" [label="sync_vt_results", style="filled", fillcolor="#ff99eab2", fontcolor="#000000", group="13"];
         }
@@ -500,6 +501,7 @@ digraph G {
         "picosnitch__main_loop" -> "picosnitch__subprocesses__secondary__run_secondary" [style="solid",  color="#000000"];
         "picosnitch__main_loop" -> "picosnitch__subprocesses__virustotal__run_virustotal" [style="solid",  color="#000000"];
         "picosnitch__main_loop" -> "picosnitch__utils__relaunch_argv" [style="solid",  color="#000000"];
+        "picosnitch__main_loop" -> "picosnitch__utils__sd_notify" [style="solid",  color="#000000"];
         "picosnitch__main_loop__run_main_loop" -> "picosnitch__main_loop__run_main_loop___request_shutdown" [style="dashed",  color="#ffffff00"];
         "picosnitch__main_loop__run_main_loop" -> "picosnitch__main_loop__run_main_loop___request_shutdown" [style="solid",  color="#000000"];
         "picosnitch__main_loop__run_main_loop" -> "picosnitch__process_manager__ProcessManager" [style="solid",  color="#000000"];
@@ -518,6 +520,7 @@ digraph G {
         "picosnitch__main_loop__run_main_loop" -> "picosnitch__subprocesses__secondary__run_secondary" [style="solid",  color="#000000"];
         "picosnitch__main_loop__run_main_loop" -> "picosnitch__subprocesses__virustotal__run_virustotal" [style="solid",  color="#000000"];
         "picosnitch__main_loop__run_main_loop" -> "picosnitch__utils__relaunch_argv" [style="solid",  color="#000000"];
+        "picosnitch__main_loop__run_main_loop" -> "picosnitch__utils__sd_notify" [style="solid",  color="#000000"];
         "picosnitch__process_manager" -> "picosnitch__process_manager__ProcessManager" [style="dashed",  color="#ffffff00"];
         "picosnitch__process_manager" -> "picosnitch__process_manager___read_proc_rss_bytes" [style="dashed",  color="#ffffff00"];
         "picosnitch__process_manager" -> "picosnitch__process_manager___read_proc_stat_state" [style="dashed",  color="#ffffff00"];
@@ -804,6 +807,7 @@ digraph G {
         "picosnitch__utils" -> "picosnitch__utils__safe_log_open" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__sanitize_log_line" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__save_state" [style="dashed",  color="#ffffff00"];
+        "picosnitch__utils" -> "picosnitch__utils__sd_notify" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__sqlite_error_means_corrupt" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__sync_vt_results" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils__apply_data_permissions" -> "picosnitch__utils__resolve_group" [style="solid",  color="#000000"];

@@ -242,7 +242,7 @@ def initial_poll() -> list:
     return initial_processes
 
 
-def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multiprocessing.Queue[str], q_in: multiprocessing.Queue[str], _q_out: multiprocessing.Queue) -> int:
+def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multiprocessing.Queue[str], q_in: multiprocessing.Queue[str], q_out: multiprocessing.Queue) -> int:
     """runs a bpf program to monitor the system for new connections and puts info into a pipe for run_primary"""
     # initialization of subprocess
     try:
@@ -835,6 +835,8 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("exec", *args))
     if use_getaddrinfo_uprobe:
         b["dns_events"].open_perf_buffer(queue_dns_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("dns", *args))
+    # probes are attached, so the main process can sd_notify READY
+    q_out.put("ready")
     # main loop: poll the exec/dns perf buffers on a short timeout so DNS/exec
     # context stays fresh, and drain the in-kernel connection aggregation maps
     # on a fixed interval. Bandwidth is accumulated in-kernel between drains, so

@@ -6,6 +6,7 @@ import ctypes
 import logging
 import multiprocessing
 import os
+import queue
 import signal
 import subprocess
 import sys
@@ -23,7 +24,7 @@ from picosnitch.subprocesses.remote_sql import run_remote_sql
 from picosnitch.subprocesses.secondary import run_secondary
 from picosnitch.subprocesses.virustotal import run_virustotal
 from picosnitch.types import State
-from picosnitch.utils import relaunch_argv
+from picosnitch.utils import relaunch_argv, sd_notify
 
 
 def run_main_loop(config: Config, state: State) -> int:
@@ -133,6 +134,12 @@ def run_main_loop(config: Config, state: State) -> int:
     signal.signal(signal.SIGINT, _request_shutdown)
     signal.signal(signal.SIGTERM, _request_shutdown)
     signal.signal(signal.SIGUSR1, lambda signum, frame: resume_event.set())
+    # the monitor puts "ready" on q_out once its probes are attached; bounded so a stall cannot hang startup
+    try:
+        p_monitor.q_out.get(timeout=30)
+    except queue.Empty:
+        pass
+    sd_notify("READY=1")
     # watch subprocesses; detect a real suspend/resume by the gap between CLOCK_BOOTTIME
     # (counts time asleep) and CLOCK_MONOTONIC (does not). a plain wall-clock gap can be
     # forged by cpu starvation or SIGSTOP, which must not trigger a monitor restart -- that
