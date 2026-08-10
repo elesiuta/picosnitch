@@ -341,6 +341,8 @@ class ConnVal(ctypes.Structure):
 PERF_SAMPLE_CB = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32)
 # void (*lost_cb)(void *ctx, int cpu, __u64 cnt)
 PERF_LOST_CB = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int, ctypes.c_uint64)
+# int (*sample_cb)(void *ctx, void *data, size_t size) -- ring buffer callback (return 0 to continue)
+RING_SAMPLE_CB = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t)
 
 
 class LibBPF:
@@ -439,6 +441,8 @@ class LibBPF:
 
         self.lib.bpf_map_update_elem.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint64]
         self.lib.bpf_map_update_elem.restype = ctypes.c_int
+        self.lib.bpf_map_lookup_elem.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
+        self.lib.bpf_map_lookup_elem.restype = ctypes.c_int
 
         # Batched lookup-and-delete: O(n) syscalls instead of the O(map_size * n) get_next_key(None) loop
         self.lib.bpf_map_lookup_and_delete_batch.argtypes = [
@@ -468,6 +472,16 @@ class LibBPF:
 
         self.lib.perf_buffer__free.argtypes = [ctypes.c_void_p]
         self.lib.perf_buffer__free.restype = None
+
+        # ring buffer (shared MPSC, not per-CPU): one manager can hold multiple ringbuf maps
+        self.lib.ring_buffer__new.argtypes = [ctypes.c_int, RING_SAMPLE_CB, ctypes.c_void_p, ctypes.c_void_p]
+        self.lib.ring_buffer__new.restype = ctypes.c_void_p
+        self.lib.ring_buffer__add.argtypes = [ctypes.c_void_p, ctypes.c_int, RING_SAMPLE_CB, ctypes.c_void_p]
+        self.lib.ring_buffer__add.restype = ctypes.c_int
+        self.lib.ring_buffer__poll.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        self.lib.ring_buffer__poll.restype = ctypes.c_int
+        self.lib.ring_buffer__free.argtypes = [ctypes.c_void_p]
+        self.lib.ring_buffer__free.restype = None
 
 
 # Structure for bpf_uprobe_opts - must match libbpf's definition
@@ -526,6 +540,10 @@ class BPFMap:
         """
         self.bpf_obj._open_perf_buffer(self.name, callback, lost_cb, page_cnt)
 
+    def open_ring_buffer(self, callback):
+        """Open a BPF ring buffer for this map; callback(ctx, data, size), bcc-style."""
+        self.bpf_obj._open_ring_buffer(self.name, callback)
+
     def event(self, data_ptr):
         """
         Parse raw event data into the appropriate structure.
@@ -557,6 +575,8 @@ class BPFObject:
         self._links = []
         self._perf_buffers = []
         self._callbacks = []  # Must keep references to prevent garbage collection
+        self._ring_buffer = None  # single libbpf ring_buffer manager holding all ringbuf maps
+        self._ring_callbacks = []  # keep RING_SAMPLE_CB refs alive (GC would segfault the poll)
         self._map_max_entries: dict[str, int] = {}
 
     def load(self, map_max_entries: dict[str, int] | None = None, disabled_programs: set[str] | None = None) -> "BPFObject":
@@ -638,6 +658,15 @@ class BPFObject:
         buf = ctypes.create_string_buffer(data, len(data))
         if self.libbpf.lib.bpf_map_update_elem(fd, ctypes.byref(key), buf, 0) != 0:
             raise RuntimeError(f"Failed to update BPF global section '{section}'")
+
+    def get_global(self, section: str, size: int) -> bytes:
+        """Read a global variable section map (single-element array keyed by 0); returns `size` bytes."""
+        fd = self.get_map_fd(section)
+        key = ctypes.c_uint32(0)
+        buf = ctypes.create_string_buffer(size)
+        if self.libbpf.lib.bpf_map_lookup_elem(fd, ctypes.byref(key), buf) != 0:
+            raise RuntimeError(f"Failed to read BPF global section '{section}'")
+        return buf.raw
 
     def drain_map(self, name: str, key_type, val_type) -> list:
         """Drain all entries from a hash map, returning (key, value) ctypes instances.
@@ -779,6 +808,41 @@ class BPFObject:
             total += ret
         return total
 
+    def _open_ring_buffer(self, map_name: str, callback):
+        """Internal: register a ringbuf map with the shared ring_buffer manager."""
+        map_fd = self.get_map_fd(map_name)
+
+        def sample_cb_wrapper(ctx, data, size):
+            try:
+                callback(ctx, data, size)
+            except Exception:
+                sys.stderr.write(f"BPF ring callback error in {map_name}: {traceback.format_exc()}")
+                sys.stderr.flush()
+            return 0  # a negative return would stop ring_buffer__poll early
+
+        sample_cb = RING_SAMPLE_CB(sample_cb_wrapper)
+        # keep both the ctypes thunk and the python closure alive (GC -> segfault in poll)
+        self._ring_callbacks.append((sample_cb, sample_cb_wrapper))
+
+        if self._ring_buffer is None:
+            self._ring_buffer = self.libbpf.lib.ring_buffer__new(map_fd, sample_cb, None, None)
+            if not self._ring_buffer:
+                raise RuntimeError(f"Failed to create ring buffer for map {map_name}")
+        else:
+            ret = self.libbpf.lib.ring_buffer__add(self._ring_buffer, map_fd, sample_cb, None)
+            if ret != 0:
+                raise RuntimeError(f"Failed to add map {map_name} to ring buffer (ret={ret})")
+        return self._ring_buffer
+
+    def poll_ring_buffer(self, timeout_ms: int = 100) -> int:
+        """Poll the shared ring buffer; returns events consumed (>=0) or a libbpf error (<0)."""
+        if self._ring_buffer is None:
+            return 0
+        ret = self.libbpf.lib.ring_buffer__poll(self._ring_buffer, timeout_ms)
+        if ret == -errno.EINTR:
+            return 0
+        return ret
+
     def cleanup(self):
         """Clean up all BPF resources."""
         # Free perf buffers first
@@ -789,6 +853,13 @@ class BPFObject:
                 pass
         self._perf_buffers.clear()
         self._callbacks.clear()
+        if self._ring_buffer is not None:
+            try:
+                self.libbpf.lib.ring_buffer__free(self._ring_buffer)
+            except Exception:
+                pass
+            self._ring_buffer = None
+        self._ring_callbacks.clear()
 
         # Destroy links
         for link in self._links:
@@ -896,6 +967,10 @@ class BPF:
     def perf_buffer_poll(self, timeout: int = 100) -> int:
         """Poll all perf buffers for events."""
         return self.bpf_obj.poll_perf_buffers(timeout)
+
+    def ring_buffer_poll(self, timeout: int = 100) -> int:
+        """Poll the ring buffer for events."""
+        return self.bpf_obj.poll_ring_buffer(timeout)
 
     def drain_map(self, name: str, key_type, val_type) -> list:
         """Atomically drain all entries from a hash map (see BPFObject.drain_map)."""

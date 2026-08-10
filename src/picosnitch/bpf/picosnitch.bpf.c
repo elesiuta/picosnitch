@@ -164,17 +164,20 @@ struct {
     __type(value, struct dns_val_t);
 } dns_hash SEC(".maps");
 
+// one shared buffer per stream, not per-CPU, so a busy CPU can't drop events; max_entries is bytes
 struct {
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-    __uint(key_size, sizeof(__u32));
-    __uint(value_size, sizeof(__u32));
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 16);
 } dns_events SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-    __uint(key_size, sizeof(__u32));
-    __uint(value_size, sizeof(__u32));
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 20);
 } exec_events SEC(".maps");
+
+// bumped when bpf_ringbuf_output fails (ring full); userspace reads them each drain
+volatile __u64 exec_ring_drops SEC(".data.execdrops") = 0;
+volatile __u64 dns_ring_drops SEC(".data.dnsdrops") = 0;
 
 // Per-connection byte accumulators, drained periodically by userspace.
 // LRU so the map self-bounds under pathological connection churn; with a
@@ -269,14 +272,16 @@ int BPF_URETPROBE(dns_return)
             bpf_probe_read(&daddr, sizeof(daddr), &address->ai_addr);
             bpf_probe_read(&data.daddr, sizeof(data.daddr), &daddr->sin_addr.s_addr);
             data.family = AF_INET;
-            bpf_perf_event_output(ctx, &dns_events, BPF_F_CURRENT_CPU, &data, sizeof(data));
+            if (bpf_ringbuf_output(&dns_events, &data, sizeof(data), 0))
+                __sync_fetch_and_add(&dns_ring_drops, 1);
         }
         else if (address_family == AF_INET6) {
             struct sockaddr_in6 *daddr6;
             bpf_probe_read(&daddr6, sizeof(daddr6), &address->ai_addr);
             bpf_probe_read(&data.daddr6, sizeof(data.daddr6), &daddr6->sin6_addr.in6_u.u6_addr32);
             data.family = AF_INET6;
-            bpf_perf_event_output(ctx, &dns_events, BPF_F_CURRENT_CPU, &data, sizeof(data));
+            if (bpf_ringbuf_output(&dns_events, &data, sizeof(data), 0))
+                __sync_fetch_and_add(&dns_ring_drops, 1);
         }
 
         if (bpf_probe_read(&address, sizeof(address), &address->ai_next) != 0)
@@ -380,7 +385,8 @@ int BPF_KRETPROBE(exec_entry, long ret)
     bpf_get_current_comm(&data.comm, sizeof(data.comm));
     bpf_probe_read_kernel_str(&data.pcomm, sizeof(data.pcomm), BPF_CORE_READ(parent, comm));
 
-    bpf_perf_event_output(ctx, &exec_events, BPF_F_CURRENT_CPU, &data, sizeof(data));
+    if (bpf_ringbuf_output(&exec_events, &data, sizeof(data), 0))
+        __sync_fetch_and_add(&exec_ring_drops, 1);
     return 0;
 }
 

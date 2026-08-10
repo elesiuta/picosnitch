@@ -259,7 +259,6 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))
     event_pipe_0, event_pipe_1, event_pipe_2, event_pipe_3, event_pipe_4 = event_pipes
     EVERY_EXE: typing.Final[bool] = config.monitoring.every_exe
-    PAGE_CNT: typing.Final[int] = config.monitoring.perf_ring_buffer_pages
     CONN_MAP_MAX: typing.Final[int] = config.monitoring.conn_map_max_entries
     # fanotify (for watching executables for modification); CDLL(None) binds from the
     # already-loaded libc, avoiding find_library's gcc/objdump $PATH fallback
@@ -688,9 +687,6 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             q_error.put(f"BPF.attach_trace() failed for tcp_read_sock_ret: {e}, io_uring zero-copy recv bytes will not be recorded")
 
     # callbacks for bpf events, read event and put into a pipe for run_primary
-    def queue_lost(event, *args):
-        q_error.put(f"BPF callbacks not processing fast enough, missed {event} event, try increasing [monitoring].perf_ring_buffer_pages (power of two) if this continues")
-
     def resolve_grandparent(event, cmdline_cache: dict[int, str] | None = None) -> tuple[int, int, int, str, str, str, str]:
         """resolve grandparent proc info, returning all-empty/zero values when
         gppid <= 0 (BPF reports tgid=0 for the kernel/swapper). this happens
@@ -798,7 +794,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             if outgoing:
                 pipe.send_bytes(pickle.dumps(outgoing))
 
-    def queue_exec_event(cpu, data, size):
+    def queue_exec_event(ctx, data, size):
         event = b["exec_events"].event(data)
         st_dev, st_ino, pid, fd, exe = get_fd(event.dev, event.ino, event.pid, event.comm.decode(errors="replace"))
         pst_dev, pst_ino, ppid, pfd, pexe = get_fd(event.pdev, event.pino, event.ppid, event.pcomm.decode(errors="replace"))
@@ -845,7 +841,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                 )
             )
 
-    def queue_dns_event(cpu, data, size):
+    def queue_dns_event(ctx, data, size):
         event = b["dns_events"].event(data)
         if event.family == socket.AF_INET:
             ip = socket.inet_ntop(socket.AF_INET, struct.pack("I", event.daddr))
@@ -857,16 +853,32 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         except ValueError:
             cache_put(domain_dict, ip, ".".join(reversed(domain.split("."))))
 
-    b["exec_events"].open_perf_buffer(queue_exec_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("exec", *args))
+    b["exec_events"].open_ring_buffer(queue_exec_event)
     if use_getaddrinfo_uprobe:
-        b["dns_events"].open_perf_buffer(queue_dns_event, page_cnt=PAGE_CNT, lost_cb=lambda *args: queue_lost("dns", *args))
+        b["dns_events"].open_ring_buffer(queue_dns_event)
     # probes are attached, so the main process can sd_notify READY
     q_out.put("ready")
-    # main loop: poll the exec/dns perf buffers on a short timeout so DNS/exec
+    # main loop: poll the exec/dns ring buffer on a short timeout so DNS/exec
     # context stays fresh, and drain the in-kernel connection aggregation maps
     # on a fixed interval. Bandwidth is accumulated in-kernel between drains, so
     # the userspace cost scales with the number of active connections per
     # interval rather than the packet rate.
+    # a full ring drops silently, so read the BPF drop counters each drain and log any increase
+    ring_drop_state = [0, 0]  # last-reported (exec, dns) totals
+
+    def report_ring_drops() -> None:
+        try:
+            exec_drops = struct.unpack("<Q", b.bpf_obj.get_global(".data.execdrops", 8))[0]
+            dns_drops = struct.unpack("<Q", b.bpf_obj.get_global(".data.dnsdrops", 8))[0]
+        except Exception:
+            return
+        if exec_drops > ring_drop_state[0]:
+            q_error.put(f"exec ring buffer full: dropped {exec_drops - ring_drop_state[0]} exec event(s) (total {exec_drops}); their process attribution is lost")
+            ring_drop_state[0] = exec_drops
+        if dns_drops > ring_drop_state[1]:
+            q_error.put(f"dns ring buffer full: dropped {dns_drops - ring_drop_state[1]} dns event(s) (total {dns_drops})")
+            ring_drop_state[1] = dns_drops
+
     drain_interval = 1.0
     next_drain = time.monotonic() + drain_interval
     while True:
@@ -874,10 +886,11 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             drain_conn_maps()
             return 0
         try:
-            b.perf_buffer_poll(timeout=200)
+            b.ring_buffer_poll(timeout=200)
             now = time.monotonic()
             if now >= next_drain:
                 drain_conn_maps()
+                report_ring_drops()
                 next_drain = now + drain_interval
         except Exception as e:
             q_error.put("BPF %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
