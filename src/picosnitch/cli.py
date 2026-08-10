@@ -110,8 +110,9 @@ def check_remote_config(remote: dict) -> int:
 def _db_is_corrupt(db_path: Path) -> bool:
     """True if the db can't be opened, its version read, or its expected tables are present -- such
     a db must be quarantined+recreated, else check_database or the secondary boot purge crash-loops
-    the daemon. A valid db with the wrong version is NOT corrupt (returns False) so check_database
-    can reject it without destroying migratable data."""
+    the daemon. A populated db with the wrong version is NOT corrupt (returns False) so check_database
+    can reject it without destroying migratable data; an empty or schema-less file with a wrong
+    version has nothing to migrate and IS treated as recreatable."""
     try:
         db_stat = db_path.lstat()
         if not stat.S_ISREG(db_stat.st_mode) or db_stat.st_nlink != 1:
@@ -120,7 +121,9 @@ def _db_is_corrupt(db_path: Path) -> bool:
         try:
             cur = con.cursor()
             if cur.execute("PRAGMA user_version").fetchone()[0] != DB_VERSION:
-                return False  # wrong version but structurally readable -> leave for check_database
+                # recreate a 0-byte db a killed writer left behind instead of preserving it
+                has_schema = cur.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'connections'").fetchone()
+                return has_schema is None
             # validate the tables AND the columns the boot purge / inserts need: a db with the
             # right table names but wrong columns (partial migration / foreign db sharing the
             # version) passes a name-only check yet crashes the secondary. LIMIT 0 validates the
