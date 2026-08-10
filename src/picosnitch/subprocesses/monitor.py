@@ -586,17 +586,27 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             "tun_do_read_ret": "tun_do_read",
             # af_xdp copy-mode tx (per-frame skb build). optional: absent if CONFIG_XDP_SOCKETS=n
             "xsk_build_skb_ret": "xsk_build_skb",
+            # mmap-ring RX capture (opt-in mmap_ring_rx). absent if CONFIG_PACKET=n / CONFIG_XDP_SOCKETS=n
+            "packet_set_ring_ret": "packet_set_ring",
+            "tpacket_rcv_ret": "tpacket_rcv",
+            "xsk_bind_ret": "xsk_bind",
+            "xsk_rcv_ret": "__xsk_rcv",
         }
         syms = kernel_symbol_addrs(set(optional_trace_targets.values()))
         # gate on symbol PRESENCE (kptr_restrict=2 zeroes addresses but still lists names).
         # None (kallsyms unreadable) -> assume present and let the load try; a fexit prog
         # whose target symbol is absent would otherwise fail the whole bpf object load
         disabled_traces = set() if syms is None else {prog for prog, target in optional_trace_targets.items() if target not in syms}
+        # snapshot before the opt-in gate below, so a disabled hook is not reported as a missing symbol
+        missing_symbol = set(disabled_traces)
         # tcp_read_sock_ret is the exception: its actor filter needs the real address, not
         # just existence -- disable it rather than leave it attached counting nothing
         io_zcrx_actor = 0 if syms is None else syms.get("io_zcrx_recv_skb", 0)
         if io_zcrx_actor == 0:
             disabled_traces.add("tcp_read_sock_ret")
+        # opt-in: these add a per-frame softirq hook the per-connection aggregation avoids
+        if not config.monitoring.mmap_ring_rx:
+            disabled_traces.update(("packet_set_ring_ret", "tpacket_rcv_ret", "xsk_bind_ret", "xsk_rcv_ret"))
         b = BPF(obj_file=bpf_obj_path, map_max_entries={"conn_stats4": CONN_MAP_MAX, "conn_stats6": CONN_MAP_MAX}, disabled_programs=disabled_traces)
         b.attach_kretprobe(event=b.get_syscall_fnname("execve"), fn_name="exec_entry")
     except Exception as e:
@@ -633,9 +643,14 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         ("tun_get_user_ret", "tun_get_user", "TUN/TAP raw write bytes"),
         ("tun_do_read_ret", "tun_do_read", "TUN/TAP raw read bytes"),
         ("xsk_build_skb_ret", "xsk_build_skb", "AF_XDP copy-mode tx bytes"),
+        ("packet_set_ring_ret", "packet_set_ring", "AF_PACKET RX_RING owner tracking"),
+        ("tpacket_rcv_ret", "tpacket_rcv", "AF_PACKET RX_RING capture bytes"),
+        ("xsk_bind_ret", "xsk_bind", "AF_XDP RX owner tracking"),
+        ("xsk_rcv_ret", "__xsk_rcv", "AF_XDP RX capture bytes"),
     ):
         if prog in disabled_traces:
-            q_error.put(f"BPF.attach_trace() skipped for {target}: kernel symbol not found, {msg} will not be recorded")
+            if prog in missing_symbol:
+                q_error.put(f"BPF.attach_trace() skipped for {target}: kernel symbol not found, {msg} will not be recorded")
             continue
         try:
             b.bpf_obj.attach_trace(prog)

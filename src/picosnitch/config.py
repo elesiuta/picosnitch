@@ -50,6 +50,8 @@ class DesktopConfig:
 @dataclasses.dataclass
 class MonitoringConfig:
     every_exe: bool = False
+    # attribute receives that never issue a recvmsg; off by default, adds a per-frame softirq hook
+    mmap_ring_rx: bool = False
     perf_ring_buffer_pages: int = 256
     conn_map_max_entries: int = 65536
     rlimit_nofile: int | None = None

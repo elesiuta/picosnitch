@@ -112,6 +112,12 @@ struct conn_val_t {
     __u32 gpdev;
 };
 
+// owner of an mmap-ring socket (opt-in mmap_ring_rx), recorded at setup for the softirq enqueue
+struct conn_ring_owner_t {
+    struct conn_key_packet_t key;
+    struct conn_val_t val;
+};
+
 
 // CO-RE compat for possible_net_t: on kernels built with CONFIG_NET_NS=n
 // (or when BTF deduplication drops the field) `possible_net_t` has no
@@ -195,6 +201,14 @@ struct {
     __type(key, struct conn_key_packet_t);
     __type(value, struct conn_val_t);
 } conn_stats_packet SEC(".maps");
+
+// owning process for an mmap-ring socket, keyed by sock address; written at setup, read in softirq
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 1024);
+    __type(key, __u64);
+    __type(value, struct conn_ring_owner_t);
+} ring_owner SEC(".maps");
 
 // Convert kernel dev_t format (major << 20 | minor) to glibc format
 // that Python's os.stat() returns
@@ -637,6 +651,82 @@ int BPF_PROG(packet_recvmsg_ret, struct socket *sock, struct msghdr *msg, size_t
         return 0;
     struct sock *sk = BPF_CORE_READ(sock, sk);
     return trace_packet(sk, ret, 0);
+}
+
+// mmap-ring RX capture, shared by AF_PACKET PACKET_RX_RING and AF_XDP RX: the owner is recorded at
+// setup so the softirq enqueue can attribute it. Such a socket never takes recvmsg, so no double count.
+static __always_inline void register_ring_owner(struct sock *sk)
+{
+    __u64 sk_addr = (__u64)sk;
+    struct conn_ring_owner_t owner = {};
+    owner.key.pid = bpf_get_current_pid_tgid() >> 32;
+    owner.key.netns = read_netns(sk);  // socket's netns, matching the other conn_stats_packet writers
+    if (fill_conn_ancestry(&owner.val, bpf_get_current_uid_gid()) != 0)
+        return;
+    bpf_map_update_elem(&ring_owner, &sk_addr, &owner, BPF_ANY);
+}
+
+static __always_inline void account_ring_recv(__u64 sk_addr, __u64 bytes)
+{
+    struct conn_ring_owner_t *owner = bpf_map_lookup_elem(&ring_owner, &sk_addr);
+    if (!owner)
+        return;
+    struct conn_val_t *val = bpf_map_lookup_elem(&conn_stats_packet, &owner->key);
+    if (!val) {
+        bpf_map_update_elem(&conn_stats_packet, &owner->key, &owner->val, BPF_NOEXIST);
+        val = bpf_map_lookup_elem(&conn_stats_packet, &owner->key);
+        if (!val)
+            return;
+    }
+    __sync_fetch_and_add(&val->recv_bytes, bytes);
+    __sync_fetch_and_add(&val->recv_pkts, 1);
+}
+
+// packet_set_ring runs in task context for setup (closing=0) and teardown (closing=1); the TX ring is
+// packet_sendmsg's. tpacket_rcv's sock is pt->af_packet_priv, and it counts frames offered to the ring
+// rather than consumed, since its return can't distinguish a drop.
+SEC("fexit/packet_set_ring")
+int BPF_PROG(packet_set_ring_ret, struct sock *sk, void *req_u, int closing, int tx_ring, int ret)
+{
+    if (tx_ring)
+        return 0;
+    if (closing) {  // ring torn down (incl. on socket close): forget the owner
+        __u64 sk_addr = (__u64)sk;
+        bpf_map_delete_elem(&ring_owner, &sk_addr);
+        return 0;
+    }
+    if (ret != 0)  // setup failed
+        return 0;
+    register_ring_owner(sk);
+    return 0;
+}
+
+SEC("fexit/tpacket_rcv")
+int BPF_PROG(tpacket_rcv_ret, struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev, int ret)
+{
+    account_ring_recv((__u64)BPF_CORE_READ(pt, af_packet_priv), (__u64)BPF_CORE_READ(skb, len));
+    return 0;
+}
+
+// xsk_bind registers the owner in task context; __xsk_rcv copies into the UMEM ring in softirq and
+// returns non-zero on drop, so only delivered frames count. sk is at offset 0 of xdp_sock.
+SEC("fexit/xsk_bind")
+int BPF_PROG(xsk_bind_ret, struct socket *sock, struct sockaddr *addr, int addr_len, int ret)
+{
+    if (ret != 0)
+        return 0;
+    struct sock *sk = BPF_CORE_READ(sock, sk);
+    if (sk)
+        register_ring_owner(sk);
+    return 0;
+}
+
+SEC("fexit/__xsk_rcv")
+int BPF_PROG(xsk_rcv_ret, struct xdp_sock *xs, struct xdp_buff *xdp, __u32 len, int ret)
+{
+    if (ret == 0)  // frame copied into the RX ring (non-zero = dropped)
+        account_ring_recv((__u64)xs, (__u64)len);
+    return 0;
 }
 
 // a packet write()n into /dev/net/tun has no socket sendmsg; tun_get_user returns the bytes taken
