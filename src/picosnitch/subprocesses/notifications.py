@@ -50,7 +50,7 @@ def run_notifications(config: Config, fan_fd: int, q_error: multiprocessing.Queu
       notify-send appears (re-checked every drained message).
     - desktop.notifications = true, notify-send present: forward each
       distinct message; if notify-send exits non-zero, emit one tagged
-      q_error per distinct stderr signature."""
+      q_error per distinct return code."""
     parent_process = multiprocessing.parent_process()
     assert parent_process is not None
     from ..utils import drop_root_permanent, resolve_unprivileged_user
@@ -108,7 +108,8 @@ def run_notifications(config: Config, fan_fd: int, q_error: multiprocessing.Queu
         last_notification = msg
         if result.returncode != 0:
             stderr_text = (result.stderr or b"").decode("utf-8", "replace").strip()
-            sig = f"rc={result.returncode} {stderr_text}"
+            # dedup on rc: notify-send's stderr carries a per-call pid and timestamp, so it never repeats
+            sig = f"rc={result.returncode}"
             if sig not in reported_send_failures:
                 reported_send_failures.add(sig)
                 q_error.put(f"notifier: notify-send exited rc={result.returncode}" + (f": {stderr_text}" if stderr_text else ""))
