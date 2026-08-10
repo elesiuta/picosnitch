@@ -705,6 +705,9 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         gpcmd = get_cmdline_cached(event.gppid, cmdline_cache) if cmdline_cache is not None else get_cmdline(event.gppid)
         return gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm
 
+    # maps already warned as near-capacity, so the warning fires once per episode, not every drain
+    near_capacity_maps: set[str] = set()
+
     def drain_conn_maps():
         """drain the per-connection aggregation maps.
 
@@ -726,7 +729,11 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             # an lru map evicts oldest entries silently when full, so a drain at
             # near capacity means connections may have been dropped before drain
             if len(entries) >= CONN_MAP_MAX * 9 // 10:
-                q_error.put(f"{map_name} near capacity ({len(entries)}/{CONN_MAP_MAX}), connections may have been evicted, try increasing [monitoring].conn_map_max_entries")
+                if map_name not in near_capacity_maps:
+                    near_capacity_maps.add(map_name)
+                    q_error.put(f"{map_name} near capacity ({len(entries)}/{CONN_MAP_MAX}), connections may have been evicted, try increasing [monitoring].conn_map_max_entries")
+            else:
+                near_capacity_maps.discard(map_name)
             # drain_map already lookup_and_delete'd every entry from the kernel, so a
             # raise here would drop the rest of this (now unrecoverable) batch -- keep
             # per-entry failures isolated so one bad entry can't lose its siblings.
