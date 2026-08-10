@@ -57,8 +57,8 @@ struct exec_event_t {
 
 // Per-connection aggregation: instead of one perf event per sendmsg/recvmsg,
 // sum send/recv bytes and packets in a BPF hash map keyed by connection.
-// userspace drains the map on a fixed interval with bpf_map_lookup_and_delete_elem
-// (atomic per entry, no in-flight loss) and emits one event per connection, so
+// userspace drains the map on a fixed interval with the batched lookup-and-delete op
+// (bpf_map_lookup_and_delete_batch, atomic per entry, no in-flight loss) and emits one event per connection, so
 // the per-packet event rate and ancestry walk collapse to once per connection.
 // v4 and v6 use separate maps to keep keys compact; the value layout is shared.
 struct conn_key4_t {

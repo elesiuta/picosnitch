@@ -18,7 +18,21 @@ from picosnitch.config import Config
 from picosnitch.constants import DATA_DIR, DB_VERSION, LOG_DIR, VERSION
 from picosnitch.process_manager import ProcessManager
 from picosnitch.types import BpfEvent, ProcessHashInfo, State
-from picosnitch.utils import get_fanotify_events, get_sha256_fd, get_sha256_fuse, get_sha256_pid, reverse_dns_lookup, safe_log_open, sanitize_log_line, sqlite_error_means_corrupt, sync_vt_results
+from picosnitch.utils import (
+    get_fanotify_events,
+    get_sha256_fd,
+    get_sha256_fuse,
+    get_sha256_pid,
+    reverse_dns_is_cached,
+    reverse_dns_lookup,
+    safe_log_open,
+    sanitize_log_line,
+    sqlite_error_means_corrupt,
+    sync_vt_results,
+)
+
+# new (uncached, blocking) reverse-DNS lookups per write; ~256 * a few ms stays under a second
+REVERSE_DNS_LOOKUPS_PER_WRITE = 256
 
 
 def maintain_database(file_path: Path, retention_days: int) -> None:
@@ -131,6 +145,8 @@ def build_log_entries(
     """iterate over the list of process/connection data to generate a list of entries for the sql database"""
     datetime_now = int(time.time())
     traffic_counter: dict[tuple, list[int]] = {}
+    # a burst of distinct addresses is that many serial round-trips before any row is written
+    reverse_dns_budget = REVERSE_DNS_LOOKUPS_PER_WRITE
     for proc in new_processes:
         if not isinstance(proc, dict):
             q_error.put("sync error between secondary and primary, received '%s' in middle of transfer" % str(proc))
@@ -152,8 +168,13 @@ def build_log_entries(
             proc["gpcmdline"] = ""
         # reverse dns lookup or omit with IP from logs
         if config.log.addresses:
-            if not proc["domain"]:
-                proc["domain"] = reverse_dns_lookup(proc["raddr"])
+            if not proc["domain"] and proc["raddr"]:
+                # a cached lookup is free; a new one has to fit the per-write budget
+                if reverse_dns_is_cached(proc["raddr"]):
+                    proc["domain"] = reverse_dns_lookup(proc["raddr"])
+                elif reverse_dns_budget > 0:
+                    proc["domain"] = reverse_dns_lookup(proc["raddr"])
+                    reverse_dns_budget -= 1
         else:
             proc["domain"], proc["raddr"] = "", ""
         if not config.log.ports:

@@ -2,6 +2,7 @@
 # Copyright (C) 2020 Eric Lesiuta
 from __future__ import annotations
 
+import collections
 import ctypes
 import fcntl
 import functools
@@ -343,18 +344,39 @@ def save_state(state: State, write_record: bool = True, config: Config | None = 
         logging.error(f"picosnitch write error (state.json): {type(e).__name__}{e.args}")
 
 
-@functools.lru_cache(maxsize=131072)
+# reverse-DNS results keyed by ip; getnameinfo blocks, so callers probe reverse_dns_is_cached() first
+_reverse_dns_cache: collections.OrderedDict[str, str] = collections.OrderedDict()
+_REVERSE_DNS_CACHE_MAX: int = 8192
+
+
+def reverse_dns_is_cached(ip: str) -> bool:
+    """True if `ip` already has a cached reverse-DNS result (so resolving it is free)."""
+    return ip in _reverse_dns_cache
+
+
 def reverse_dns_lookup(ip: str) -> str:
-    """do a reverse dns lookup, return original ip if fails"""
+    """Reverse-DNS `ip` to a hostname, cached; return the ip itself on failure. A
+    repeated address costs nothing; callers gate a NEW (blocking) getnameinfo with
+    reverse_dns_is_cached() plus their own per-write budget so a burst of distinct
+    addresses cannot stall byte accounting."""
+    cached = _reverse_dns_cache.get(ip)
+    if cached is not None:
+        _reverse_dns_cache.move_to_end(ip)
+        return cached
     try:
         host = socket.getnameinfo((ip, 0), 0)[0]
         try:
             ipaddress.ip_address(host)
-            return ip
+            result = ip
         except ValueError:
-            return ".".join(reversed(host.split(".")))
+            result = ".".join(reversed(host.split(".")))
     except Exception:
-        return ip
+        result = ip
+    _reverse_dns_cache[ip] = result
+    _reverse_dns_cache.move_to_end(ip)
+    if len(_reverse_dns_cache) > _REVERSE_DNS_CACHE_MAX:
+        _reverse_dns_cache.popitem(last=False)
+    return result
 
 
 @functools.lru_cache(maxsize=PID_CACHE)

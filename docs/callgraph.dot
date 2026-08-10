@@ -284,6 +284,7 @@ digraph G {
             "picosnitch__utils__resolve_group" [label="resolve_group", style="filled", fillcolor="#ff99eab2", fontcolor="#000000", group="13"];
             "picosnitch__utils__resolve_owner" [label="resolve_owner", style="filled", fillcolor="#ff99eab2", fontcolor="#000000", group="13"];
             "picosnitch__utils__resolve_unprivileged_user" [label="resolve_unprivileged_user", style="filled", fillcolor="#ff99eab2", fontcolor="#000000", group="13"];
+            "picosnitch__utils__reverse_dns_is_cached" [label="reverse_dns_is_cached", style="filled", fillcolor="#ff99eab2", fontcolor="#000000", group="13"];
             "picosnitch__utils__reverse_dns_lookup" [label="reverse_dns_lookup", style="filled", fillcolor="#ff99eab2", fontcolor="#000000", group="13"];
             "picosnitch__utils__safe_log_open" [label="safe_log_open", style="filled", fillcolor="#ff99eab2", fontcolor="#000000", group="13"];
             "picosnitch__utils__sanitize_log_line" [label="sanitize_log_line", style="filled", fillcolor="#ff99eab2", fontcolor="#000000", group="13"];
@@ -706,6 +707,7 @@ digraph G {
         "picosnitch__subprocesses__secondary" -> "picosnitch__utils__get_sha256_fd" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary" -> "picosnitch__utils__get_sha256_fuse" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary" -> "picosnitch__utils__get_sha256_pid" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__secondary" -> "picosnitch__utils__reverse_dns_is_cached" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary" -> "picosnitch__utils__reverse_dns_lookup" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary" -> "picosnitch__utils__safe_log_open" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary" -> "picosnitch__utils__sanitize_log_line" [style="solid",  color="#000000"];
@@ -714,6 +716,7 @@ digraph G {
         "picosnitch__subprocesses__secondary__build_log_entries" -> "picosnitch__process_manager__ProcessManager" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary__build_log_entries" -> "picosnitch__process_manager__ProcessManager__join" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary__build_log_entries" -> "picosnitch__subprocesses__secondary__resolve_hash" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__secondary__build_log_entries" -> "picosnitch__utils__reverse_dns_is_cached" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary__build_log_entries" -> "picosnitch__utils__reverse_dns_lookup" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary__maintain_database" -> "picosnitch__utils__sqlite_error_means_corrupt" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__secondary__resolve_hash" -> "picosnitch__process_manager__ProcessManager" [style="solid",  color="#000000"];
@@ -782,6 +785,7 @@ digraph G {
         "picosnitch__utils" -> "picosnitch__utils__resolve_group" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__resolve_owner" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__resolve_unprivileged_user" [style="dashed",  color="#ffffff00"];
+        "picosnitch__utils" -> "picosnitch__utils__reverse_dns_is_cached" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__reverse_dns_lookup" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__safe_log_open" [style="dashed",  color="#ffffff00"];
         "picosnitch__utils" -> "picosnitch__utils__sanitize_log_line" [style="dashed",  color="#ffffff00"];
