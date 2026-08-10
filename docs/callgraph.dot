@@ -23,6 +23,7 @@ digraph G {
             "picosnitch__bpf_wrapper__BPF" [label="BPF", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__BPFMap" [label="BPFMap", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__BPFObject" [label="BPFObject", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            "picosnitch__bpf_wrapper__BpfMapBatchOpts" [label="BpfMapBatchOpts", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__BpfUprobeOpts" [label="BpfUprobeOpts", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__ConnKey4" [label="ConnKey4", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__ConnKey6" [label="ConnKey6", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
@@ -296,6 +297,7 @@ digraph G {
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__BPF" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__BPFMap" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__BPFObject" [style="dashed",  color="#ffffff00"];
+        "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__BpfMapBatchOpts" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__BpfUprobeOpts" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__ConnKey4" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__ConnKey6" [style="dashed",  color="#ffffff00"];
@@ -377,7 +379,12 @@ digraph G {
         "picosnitch__bpf_wrapper__BPFObject__attach_uprobe" -> "picosnitch__bpf_wrapper__LibBPF____init__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__cleanup" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__cleanup" -> "picosnitch__bpf_wrapper__BPFObject____init__" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__BPFObject__drain_map" -> "picosnitch__bpf_wrapper__BPFMap____init__" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__BPFObject__drain_map" -> "picosnitch__bpf_wrapper__BPFObject____init__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__drain_map" -> "picosnitch__bpf_wrapper__BPFObject__get_map_fd" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__BPFObject__drain_map" -> "picosnitch__bpf_wrapper__BPF____init__" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__BPFObject__drain_map" -> "picosnitch__bpf_wrapper__BpfMapBatchOpts" [style="solid",  color="#000000"];
+        "picosnitch__bpf_wrapper__BPFObject__drain_map" -> "picosnitch__bpf_wrapper__LibBPF____init__" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__get_map" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__get_map_fd" -> "picosnitch__bpf_wrapper__BPFObject" [style="solid",  color="#000000"];
         "picosnitch__bpf_wrapper__BPFObject__get_map_fd" -> "picosnitch__bpf_wrapper__BPFObject__get_map" [style="solid",  color="#000000"];
