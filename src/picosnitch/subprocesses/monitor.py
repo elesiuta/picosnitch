@@ -492,6 +492,14 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         except Exception:
             return ""
 
+    def get_cmdline_cached(pid: int, cache: dict[int, str]) -> str:
+        """get_cmdline once per pid per drain rather than once per drained entry, so a process
+        with a huge (crafted) cmdline flooding connections cannot stall the drain. A pid in one
+        drain snapshot is a single process, and the cache is rebuilt each drain."""
+        if pid not in cache:
+            cache[pid] = get_cmdline(pid)
+        return cache[pid]
+
     # get current connections
     initial_batch = []
     for proc in initial_poll():
@@ -683,7 +691,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     def queue_lost(event, *args):
         q_error.put(f"BPF callbacks not processing fast enough, missed {event} event, try increasing [monitoring].perf_ring_buffer_pages (power of two) if this continues")
 
-    def resolve_grandparent(event) -> tuple[int, int, int, str, str, str, str]:
+    def resolve_grandparent(event, cmdline_cache: dict[int, str] | None = None) -> tuple[int, int, int, str, str, str, str]:
         """resolve grandparent proc info, returning all-empty/zero values when
         gppid <= 0 (BPF reports tgid=0 for the kernel/swapper). this happens
         whenever the parent walk hits init or any process whose parent is the
@@ -695,7 +703,8 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             return 0, 0, 0, "", "", "", ""
         gpcomm = event.gpcomm.decode(errors="replace")
         gpst_dev, gpst_ino, gppid, gpfd, gpexe = get_fd(event.gpdev, event.gpino, event.gppid, gpcomm)
-        gpcmd = get_cmdline(event.gppid)
+        # cache-aware from the drain (per-entry) path; uncached is fine for the per-exec caller
+        gpcmd = get_cmdline_cached(event.gppid, cmdline_cache) if cmdline_cache is not None else get_cmdline(event.gppid)
         return gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm
 
     def drain_conn_maps():
@@ -724,13 +733,14 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             # raise here would drop the rest of this (now unrecoverable) batch -- keep
             # per-entry failures isolated so one bad entry can't lose its siblings.
             outgoing = []
+            cmdline_cache: dict[int, str] = {}
             for key, val in entries:
                 try:
                     st_dev, st_ino, pid, fd, exe = get_fd(val.dev, val.ino, key.pid, val.comm.decode(errors="replace"))
                     pst_dev, pst_ino, ppid, pfd, pexe = get_fd(val.pdev, val.pino, val.ppid, val.pcomm.decode(errors="replace"))
-                    gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(val)
-                    cmd = get_cmdline(key.pid)
-                    pcmd = get_cmdline(val.ppid)
+                    gpst_dev, gpst_ino, gppid, gpfd, gpexe, gpcmd, gpcomm = resolve_grandparent(val, cmdline_cache)
+                    cmd = get_cmdline_cached(key.pid, cmdline_cache)
+                    pcmd = get_cmdline_cached(val.ppid, cmdline_cache)
                     if family == socket.AF_INET:
                         laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", key.saddr))
                         raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", key.daddr))
