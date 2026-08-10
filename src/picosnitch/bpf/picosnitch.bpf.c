@@ -11,6 +11,7 @@
 #define TASK_COMM_LEN 16
 #define AF_INET 2
 #define AF_INET6 10
+#define AF_PACKET 17       // raw L2 socket family; peer lives in the frame, not the sock
 #define MSG_PEEK 2         // recv flag: data left in queue, recounted on the real recv
 #define MSG_ERRQUEUE 0x2000  // recv flag: reads the error queue, not received data
 
@@ -82,6 +83,12 @@ struct conn_key6_t {
     __u16 _pad;
 } __attribute__((packed));
 
+// a packet socket carries no L3/L4 identity, so the key holds only the sender and its netns
+struct conn_key_packet_t {
+    __u32 pid;
+    __u32 netns;
+} __attribute__((packed));
+
 // conn_val_t is deliberately NOT packed: the 64-bit counters are updated with
 // atomic adds, which require natural 8-byte alignment. Field order (char
 // arrays, then u64s, then u32s) yields a 128-byte struct with no internal
@@ -133,6 +140,14 @@ static __always_inline __u32 read_netns(struct sock *sk) {
     return BPF_CORE_READ(n, ns.inum);
 }
 
+// netns of the running task, for raw egress with no sock (tun writes); a socket lives in its creator's
+static __always_inline __u32 read_current_netns(void) {
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    if (!task)
+        return 0;
+    return BPF_CORE_READ(task, nsproxy, net_ns, ns.inum);
+}
+
 // Maps
 struct {
     // LRU so a flood of in-flight getaddrinfo (dns_entry with no matching dns_return) evicts
@@ -172,6 +187,14 @@ struct {
     __type(key, struct conn_key6_t);
     __type(value, struct conn_val_t);
 } conn_stats6 SEC(".maps");
+
+// AF_PACKET raw send bytes, keyed only by (pid, netns) -- see conn_key_packet_t.
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct conn_key_packet_t);
+    __type(value, struct conn_val_t);
+} conn_stats_packet SEC(".maps");
 
 // Convert kernel dev_t format (major << 20 | minor) to glibc format
 // that Python's os.stat() returns
@@ -559,6 +582,87 @@ int BPF_PROG(inet6_sendmsg_ret, struct socket *sock, struct msghdr *msg, size_t 
 {
     struct sock *sk = BPF_CORE_READ(sock, sk);
     return trace_sendrecv(ctx, sk, msg, ret, 1);
+}
+
+// AF_PACKET raw-frame I/O (L2 injection / capture); ret is the full frame length. Only the recvmsg
+// dequeue is counted on rx: the enqueue is softirq and an RX_RING reader issues no syscall at all.
+static __always_inline int account_packet(__u32 netns, int retval, int is_send)
+{
+    if (retval <= 0)
+        return 0;
+
+    struct conn_key_packet_t key = {};
+    key.pid = bpf_get_current_pid_tgid() >> 32;
+    key.netns = netns;
+    __u32 uid = bpf_get_current_uid_gid();
+
+    struct conn_val_t *val = bpf_map_lookup_elem(&conn_stats_packet, &key);
+    if (!val) {
+        struct conn_val_t newval = {};
+        if (fill_conn_ancestry(&newval, uid) != 0)
+            return 0;
+        bpf_map_update_elem(&conn_stats_packet, &key, &newval, BPF_NOEXIST);
+        val = bpf_map_lookup_elem(&conn_stats_packet, &key);
+        if (!val)
+            return 0;
+    }
+    if (is_send) {
+        __sync_fetch_and_add(&val->send_bytes, (__u64)retval);
+        __sync_fetch_and_add(&val->send_pkts, 1);
+    } else {
+        __sync_fetch_and_add(&val->recv_bytes, (__u64)retval);
+        __sync_fetch_and_add(&val->recv_pkts, 1);
+    }
+    return 0;
+}
+
+static __always_inline int trace_packet(struct sock *sk, int retval, int is_send)
+{
+    if (!sk)
+        return 0;
+    return account_packet(read_netns(sk), retval, is_send);
+}
+
+SEC("fexit/packet_sendmsg")
+int BPF_PROG(packet_sendmsg_ret, struct socket *sock, struct msghdr *msg, size_t len, int ret)
+{
+    struct sock *sk = BPF_CORE_READ(sock, sk);
+    return trace_packet(sk, ret, 1);
+}
+
+SEC("fexit/packet_recvmsg")
+int BPF_PROG(packet_recvmsg_ret, struct socket *sock, struct msghdr *msg, size_t len, int flags, int ret)
+{
+    if (flags & (MSG_PEEK | MSG_ERRQUEUE))  // don't double count peeks or count errqueue reads
+        return 0;
+    struct sock *sk = BPF_CORE_READ(sock, sk);
+    return trace_packet(sk, ret, 0);
+}
+
+// a packet write()n into /dev/net/tun has no socket sendmsg; tun_get_user returns the bytes taken
+SEC("fexit/tun_get_user")
+int BPF_PROG(tun_get_user_ret, void *tun, void *tfile, void *msg_control, void *from, int noblock, int more, long ret)
+{
+    return account_packet(read_current_netns(), (int)ret, 1);
+}
+
+// mirror of tun_get_user, behind both tun_chr_read_iter and tun_recvmsg. A vhost-serviced tap read
+// runs in the vhost thread and is attributed there, like any in-kernel I/O.
+SEC("fexit/tun_do_read")
+int BPF_PROG(tun_do_read_ret, void *tun, void *tfile, void *to, int noblock, void *ptr, long ret)
+{
+    return account_packet(read_current_netns(), (int)ret, 0);
+}
+
+// AF_XDP copy-mode TX lands in xsk_build_skb, not a sendmsg slot, one skb per TX descriptor in the
+// sendto task. Zero-copy TX (no skb, outside the task) is not counted; skb is an ERR_PTR on failure.
+SEC("fexit/xsk_build_skb")
+int BPF_PROG(xsk_build_skb_ret, void *xs, void *desc, struct sk_buff *skb)
+{
+    if (!skb)
+        return 0;
+    __u32 len = BPF_CORE_READ(skb, len);
+    return account_packet(read_current_netns(), (int)len, 1);
 }
 
 // recv: hook inet_recvmsg / inet6_recvmsg, the per-family recvmsg dispatch.

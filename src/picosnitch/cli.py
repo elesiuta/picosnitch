@@ -277,8 +277,7 @@ def start_picosnitch() -> int:
         CacheDirectory=picosnitch
         ConfigurationDirectory=picosnitch
 
-        # Required for libbpf to mmap the per-cpu perf event ring buffers
-        # (~16 MiB by default) without hitting the inherited 8 MiB cap.
+        # Required for libbpf to lock the BPF maps and ring buffers past the inherited 8 MiB cap
         LimitMEMLOCK=infinity
 
         # Hardening

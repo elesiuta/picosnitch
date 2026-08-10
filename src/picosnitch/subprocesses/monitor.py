@@ -17,7 +17,7 @@ import sys
 import time
 import typing
 
-from picosnitch.bpf_wrapper import BPF, ConnKey4, ConnKey6, ConnVal, check_bpf_requirements, find_bpf_object, kernel_symbol_addrs
+from picosnitch.bpf_wrapper import BPF, ConnKey4, ConnKey6, ConnKeyPacket, ConnVal, check_bpf_requirements, find_bpf_object, kernel_symbol_addrs
 from picosnitch.config import Config
 from picosnitch.constants import FD_CACHE, ST_DEV_MASK
 from picosnitch.utils import get_fstat
@@ -246,8 +246,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         os.nice(-20)
     except Exception:
         pass
-    # Required for libbpf to mmap the per-cpu perf event ring buffers
-    # without hitting the inherited 8 MiB cap.
+    # Required for libbpf to lock the BPF maps and ring buffers past the inherited 8 MiB cap
     try:
         resource.setrlimit(resource.RLIMIT_MEMLOCK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
     except (ValueError, OSError):
@@ -575,6 +574,14 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             # only calls whose recv_actor is io_zcrx_recv_skb (the actor io_uring passes) and
             # needs its address; without the symbol the program stays disabled
             "tcp_read_sock_ret": "io_zcrx_recv_skb",
+            # af_packet raw send/recv (L2 injection / capture). optional: absent if CONFIG_PACKET=n
+            "packet_sendmsg_ret": "packet_sendmsg",
+            "packet_recvmsg_ret": "packet_recvmsg",
+            # tun/tap raw write egress + read ingress. optional: absent if CONFIG_TUN=n
+            "tun_get_user_ret": "tun_get_user",
+            "tun_do_read_ret": "tun_do_read",
+            # af_xdp copy-mode tx (per-frame skb build). optional: absent if CONFIG_XDP_SOCKETS=n
+            "xsk_build_skb_ret": "xsk_build_skb",
         }
         syms = kernel_symbol_addrs(set(optional_trace_targets.values()))
         # gate on symbol PRESENCE (kptr_restrict=2 zeroes addresses but still lists names).
@@ -613,9 +620,15 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     # inet6_sendmsg and inet6_recvmsg are best-effort: absent on kernels built
     # without IPv6, a missing hook only drops IPv6 send/recv bytes. attach each
     # independently so one failing does not skip the other.
+    # packet_sendmsg/packet_recvmsg are best-effort too (see optional_trace_targets)
     for prog, target, msg in (
         ("inet6_sendmsg_ret", "inet6_sendmsg", "IPv6 send bytes"),
         ("inet6_recvmsg_ret", "inet6_recvmsg", "IPv6 recv bytes"),
+        ("packet_sendmsg_ret", "packet_sendmsg", "AF_PACKET raw send bytes"),
+        ("packet_recvmsg_ret", "packet_recvmsg", "AF_PACKET raw recv bytes"),
+        ("tun_get_user_ret", "tun_get_user", "TUN/TAP raw write bytes"),
+        ("tun_do_read_ret", "tun_do_read", "TUN/TAP raw read bytes"),
+        ("xsk_build_skb_ret", "xsk_build_skb", "AF_XDP copy-mode tx bytes"),
     ):
         if prog in disabled_traces:
             q_error.put(f"BPF.attach_trace() skipped for {target}: kernel symbol not found, {msg} will not be recorded")
@@ -677,6 +690,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         for map_name, key_type, family, pipe in (
             ("conn_stats4", ConnKey4, socket.AF_INET, event_pipe_0),
             ("conn_stats6", ConnKey6, socket.AF_INET6, event_pipe_1),
+            ("conn_stats_packet", ConnKeyPacket, socket.AF_PACKET, event_pipe_0),
         ):
             try:
                 entries = b.drain_map(map_name, key_type, ConnVal)
@@ -700,9 +714,15 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                     if family == socket.AF_INET:
                         laddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", key.saddr))
                         raddr = socket.inet_ntop(socket.AF_INET, struct.pack("I", key.daddr))
-                    else:
+                        lport, rport, protocol = key.lport, key.dport, int(key.protocol)
+                    elif family == socket.AF_INET6:
                         laddr = socket.inet_ntop(socket.AF_INET6, bytes(key.saddr)[:16])
                         raddr = socket.inet_ntop(socket.AF_INET6, bytes(key.daddr)[:16])
+                        lport, rport, protocol = key.lport, key.dport, int(key.protocol)
+                    else:
+                        # the peer, ports and protocol live inside the app-crafted frame, so record them as unknown
+                        laddr = raddr = ""
+                        lport = rport = protocol = 0
                     pipe.send_bytes(
                         pickle.dumps(
                             {
@@ -732,9 +752,9 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                                 "recv": int(val.recv_bytes),
                                 "pkts": int(val.send_pkts) + int(val.recv_pkts),
                                 "family": int(family),
-                                "protocol": int(key.protocol),
-                                "lport": key.lport,
-                                "rport": key.dport,
+                                "protocol": protocol,
+                                "lport": lport,
+                                "rport": rport,
                                 "laddr": laddr,
                                 "raddr": raddr,
                                 "domain": cache_get(domain_dict, raddr),

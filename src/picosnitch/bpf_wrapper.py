@@ -298,6 +298,18 @@ class ConnKey6(ctypes.Structure):
     ]
 
 
+class ConnKeyPacket(ctypes.Structure):
+    """Key for the conn_stats_packet map (AF_PACKET raw send: pid + netns only,
+    matching conn_key_packet_t -- no L3/L4 identity exists for a packet socket)."""
+
+    _pack_ = 1
+    _layout_ = "ms"  # keep the historical _pack_ layout explicit (required from py3.19; ignored <3.14)
+    _fields_ = [
+        ("pid", ctypes.c_uint32),
+        ("netns", ctypes.c_uint32),
+    ]
+
+
 class ConnVal(ctypes.Structure):
     """Value for both conn_stats4 and conn_stats6 (ancestry + accumulators).
 

@@ -26,6 +26,7 @@ digraph G {
             "picosnitch__bpf_wrapper__BpfUprobeOpts" [label="BpfUprobeOpts", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__ConnKey4" [label="ConnKey4", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__ConnKey6" [label="ConnKey6", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
+            "picosnitch__bpf_wrapper__ConnKeyPacket" [label="ConnKeyPacket", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__ConnVal" [label="ConnVal", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__DNSEvent" [label="DNSEvent", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
             "picosnitch__bpf_wrapper__ExecEvent" [label="ExecEvent", style="filled", fillcolor="#ff9999b2", fontcolor="#000000", group="0"];
@@ -296,6 +297,7 @@ digraph G {
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__BpfUprobeOpts" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__ConnKey4" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__ConnKey6" [style="dashed",  color="#ffffff00"];
+        "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__ConnKeyPacket" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__ConnVal" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__DNSEvent" [style="dashed",  color="#ffffff00"];
         "picosnitch__bpf_wrapper" -> "picosnitch__bpf_wrapper__ExecEvent" [style="dashed",  color="#ffffff00"];
@@ -526,6 +528,7 @@ digraph G {
         "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__BPF" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__ConnKey4" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__ConnKey6" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__ConnKeyPacket" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__ConnVal" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__check_bpf_requirements" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__find_bpf_object" [style="solid",  color="#000000"];
@@ -615,6 +618,7 @@ digraph G {
         "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" -> "picosnitch__bpf_wrapper__BPF__drain_map" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" -> "picosnitch__bpf_wrapper__ConnKey4" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" -> "picosnitch__bpf_wrapper__ConnKey6" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" -> "picosnitch__bpf_wrapper__ConnKeyPacket" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" -> "picosnitch__bpf_wrapper__ConnVal" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" -> "picosnitch__subprocesses__monitor__run_monitor__cache_get" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__drain_conn_maps" -> "picosnitch__subprocesses__monitor__run_monitor__get_cmdline" [style="solid",  color="#000000"];
