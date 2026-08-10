@@ -104,6 +104,7 @@ digraph G {
                 graph [style="filled,rounded", fillcolor="#80808018", label="picosnitch.live_feed.LiveFeedPublisher"];
                 "picosnitch__live_feed__LiveFeedPublisher____init__" [label="__init__", style="filled", fillcolor="#ffa365b2", fontcolor="#000000", group="1"];
                 "picosnitch__live_feed__LiveFeedPublisher___accept_loop" [label="_accept_loop", style="filled", fillcolor="#ffa365b2", fontcolor="#000000", group="1"];
+                "picosnitch__live_feed__LiveFeedPublisher__has_subscribers" [label="has_subscribers", style="filled", fillcolor="#ffa365b2", fontcolor="#000000", group="1"];
                 "picosnitch__live_feed__LiveFeedPublisher__publish" [label="publish", style="filled", fillcolor="#ffa365b2", fontcolor="#000000", group="1"];
                 "picosnitch__live_feed__LiveFeedPublisher__start" [label="start", style="filled", fillcolor="#ffa365b2", fontcolor="#000000", group="1"];
                 "picosnitch__live_feed__LiveFeedPublisher__stop" [label="stop", style="filled", fillcolor="#ffa365b2", fontcolor="#000000", group="1"];
@@ -445,12 +446,14 @@ digraph G {
         "picosnitch__live_feed" -> "picosnitch__live_feed__LiveFeedSubscriber" [style="dashed",  color="#ffffff00"];
         "picosnitch__live_feed__LiveFeedPublisher" -> "picosnitch__live_feed__LiveFeedPublisher____init__" [style="dashed",  color="#ffffff00"];
         "picosnitch__live_feed__LiveFeedPublisher" -> "picosnitch__live_feed__LiveFeedPublisher___accept_loop" [style="dashed",  color="#ffffff00"];
+        "picosnitch__live_feed__LiveFeedPublisher" -> "picosnitch__live_feed__LiveFeedPublisher__has_subscribers" [style="dashed",  color="#ffffff00"];
         "picosnitch__live_feed__LiveFeedPublisher" -> "picosnitch__live_feed__LiveFeedPublisher__publish" [style="dashed",  color="#ffffff00"];
         "picosnitch__live_feed__LiveFeedPublisher" -> "picosnitch__live_feed__LiveFeedPublisher__start" [style="dashed",  color="#ffffff00"];
         "picosnitch__live_feed__LiveFeedPublisher" -> "picosnitch__live_feed__LiveFeedPublisher__stop" [style="dashed",  color="#ffffff00"];
         "picosnitch__live_feed__LiveFeedPublisher___accept_loop" -> "picosnitch__live_feed__LiveFeedPublisher" [style="solid",  color="#000000"];
         "picosnitch__live_feed__LiveFeedPublisher___accept_loop" -> "picosnitch__live_feed__LiveFeedPublisher____init__" [style="solid",  color="#000000"];
         "picosnitch__live_feed__LiveFeedPublisher___accept_loop" -> "picosnitch__live_feed__LiveFeedSubscriber__close" [style="solid",  color="#000000"];
+        "picosnitch__live_feed__LiveFeedPublisher__has_subscribers" -> "picosnitch__live_feed__LiveFeedPublisher" [style="solid",  color="#000000"];
         "picosnitch__live_feed__LiveFeedPublisher__publish" -> "picosnitch__live_feed__LiveFeedPublisher" [style="solid",  color="#000000"];
         "picosnitch__live_feed__LiveFeedPublisher__publish" -> "picosnitch__live_feed__LiveFeedPublisher____init__" [style="solid",  color="#000000"];
         "picosnitch__live_feed__LiveFeedPublisher__publish" -> "picosnitch__live_feed__LiveFeedSubscriber____iter__" [style="solid",  color="#000000"];
@@ -661,6 +664,7 @@ digraph G {
         "picosnitch__subprocesses__primary__handle_new_processes" -> "picosnitch__subprocesses__primary___toast" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__live_feed__LiveFeedPublisher" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__live_feed__LiveFeedPublisher____init__" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__live_feed__LiveFeedPublisher__has_subscribers" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__live_feed__LiveFeedPublisher__publish" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__live_feed__LiveFeedPublisher__start" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__primary__run_primary" -> "picosnitch__subprocesses__primary___toast" [style="solid",  color="#000000"];

@@ -121,7 +121,7 @@ def build_log_entries(
     config: Config,
     state: State,
     fan_mod_cnt: dict[str, int],
-    new_processes: list[bytes],
+    new_processes: list[BpfEvent],
     p_fuse: ProcessManager,
     q_vt: multiprocessing.Queue[bytes],
     q_out: multiprocessing.Queue[bytes],
@@ -131,8 +131,7 @@ def build_log_entries(
     """iterate over the list of process/connection data to generate a list of entries for the sql database"""
     datetime_now = int(time.time())
     traffic_counter: dict[tuple, list[int]] = {}
-    for proc_pickle in new_processes:
-        proc: BpfEvent = pickle.loads(proc_pickle)
+    for proc in new_processes:
         if not isinstance(proc, dict):
             q_error.put("sync error between secondary and primary, received '%s' in middle of transfer" % str(proc))
             continue
@@ -284,50 +283,25 @@ def run_secondary(
 
     # main loop
     transaction = []
-    new_processes = []
+    new_processes: list[BpfEvent] = []
     last_write = 0
     while True:
         if not parent_process.is_alive():
             return 0
         try:
-            # prep to receive new connections
+            # request a batch, then read the single (possibly empty) list primary sends back
             if secondary_pipe.poll():
                 q_error.put("sync error between secondary and primary on ready (pipe not empty)")
             else:
                 q_primary_in.put(pickle.dumps({"type": "ready"}))
-                secondary_pipe.poll(timeout=300)
-                if not secondary_pipe.poll():
-                    q_error.put("sync error between secondary and primary on ready (secondary timed out waiting for first message)")
-            # receive first message, should be transfer size
-            transfer_size = 0
-            if secondary_pipe.poll():
-                first_pickle = secondary_pipe.recv_bytes()
-                first = pickle.loads(first_pickle)
-                if isinstance(first, int):
-                    transfer_size = first
-                elif first == "done":
-                    q_error.put("sync error between secondary and primary on ready (received done)")
+            if secondary_pipe.poll(timeout=300):
+                batch = pickle.loads(secondary_pipe.recv_bytes())
+                if isinstance(batch, list):
+                    new_processes.extend(batch)
                 else:
-                    q_error.put("sync error between secondary and primary on ready (did not receive transfer size)")
-                    new_processes.append(first_pickle)
-            # receive new connections until "done"
-            timeout_counter = 0
-            while True:
-                while secondary_pipe.poll(timeout=1):
-                    new_processes.append(secondary_pipe.recv_bytes())
-                    transfer_size -= 1
-                timeout_counter += 1
-                if new_processes and pickle.loads(new_processes[-1]) == "done":
-                    new_processes.pop()
-                    transfer_size += 1
-                    break
-                elif timeout_counter > 30:
-                    q_error.put("sync error between secondary and primary on receive (did not receive done)")
-                    break
-            if transfer_size > 0:
-                q_error.put("sync error between secondary and primary on receive (did not receive all messages)")
-            elif transfer_size < 0:
-                q_error.put("sync error between secondary and primary on receive (received extra messages)")
+                    q_error.put("sync error between secondary and primary on receive (expected a batch list)")
+            else:
+                q_error.put("sync error between secondary and primary on receive (timed out waiting for batch)")
             # check for other pending data (vt, fanotify)
             sync_vt_results(state, p_virustotal.q_out, q_primary_in, False)
             get_fanotify_events(fan_fd, fan_mod_cnt, q_error)

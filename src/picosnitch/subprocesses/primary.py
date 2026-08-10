@@ -28,11 +28,10 @@ def _toast(q_notify: multiprocessing.Queue[str], q_error: multiprocessing.Queue[
             pass
 
 
-def handle_new_processes(state: State, new_processes: list[bytes], q_notify: multiprocessing.Queue[str], q_error: multiprocessing.Queue[str]) -> None:
+def handle_new_processes(state: State, new_processes: list[BpfEvent], q_notify: multiprocessing.Queue[str], q_error: multiprocessing.Queue[str]) -> None:
     """iterate over the list of process/connection data to update the state dictionary and create notifications on new entries"""
     datetime_now = time.strftime("%Y-%m-%d %H:%M:%S")
-    for proc_pickle in new_processes:
-        proc: BpfEvent = pickle.loads(proc_pickle)
+    for proc in new_processes:
         levels = (
             (proc["name"], proc["exe"], state["Names"], state["Executables"], ""),
             (proc["pname"], proc["pexe"], state["Parent Names"], state["Parent Executables"], " (parent)"),
@@ -125,13 +124,12 @@ def run_primary(
             listen.wait()
             new_processes = pipe_data[0]
             while listen.is_set():
-                for _ in range(5):
-                    if any(event_pipe.poll() for event_pipe in event_pipes):
-                        break
-                    time.sleep(1)
-                for event_pipe in event_pipes:
-                    while event_pipe.poll():
-                        new_processes.append(event_pipe.recv_bytes())
+                # block on poll's own timeout; sleeping between polls capped the pipeline at one chunk per sleep
+                if any(event_pipe.poll(0.05) for event_pipe in event_pipes):
+                    for event_pipe in event_pipes:
+                        while event_pipe.poll():
+                            # each message is a pickled batch, so extend rather than append
+                            new_processes.extend(pickle.loads(event_pipe.recv_bytes()))
             ready.set()
 
     listen, ready = threading.Event(), threading.Event()
@@ -167,19 +165,19 @@ def run_primary(
             listen.set()
             # process the list and update state, send new process/connection data to secondary subprocess if ready
             handle_new_processes(state, new_processes, q_notify, q_error)
-            for proc_pickle in new_processes:
-                try:
-                    live_feed.publish(pickle.loads(proc_pickle))
-                except Exception:
-                    pass
+            # serializing with no subscriber backs the pipeline up at high connection cardinality
+            if live_feed.has_subscribers():
+                for proc in new_processes:
+                    try:
+                        live_feed.publish(proc)
+                    except Exception:
+                        pass
             processes_to_send += new_processes
             while not q_in.empty():
                 msg: dict = pickle.loads(q_in.get())
                 if msg["type"] == "ready":
-                    secondary_pipe.send_bytes(pickle.dumps(len(processes_to_send)))
-                    for proc_pickle in processes_to_send:
-                        secondary_pipe.send_bytes(proc_pickle)
-                    secondary_pipe.send_bytes(pickle.dumps("done"))
+                    # one message for the whole batch: a send per event blocks until the secondary receives each
+                    secondary_pipe.send_bytes(pickle.dumps(processes_to_send))
                     processes_to_send = []
                     break
                 elif msg["type"] == "sha256":

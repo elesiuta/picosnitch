@@ -22,6 +22,9 @@ from picosnitch.config import Config
 from picosnitch.constants import FD_CACHE, ST_DEV_MASK
 from picosnitch.utils import get_fstat
 
+# entries per drain handoff: a send per event stalls the drain, one per drain lands a burst at once
+CONN_DRAIN_CHUNK: typing.Final[int] = 2048
+
 
 def _read_proc_comm(pid: int) -> str:
     # comm is kernel-supplied bytes (prctl PR_SET_NAME), not necessarily utf-8
@@ -490,6 +493,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             return ""
 
     # get current connections
+    initial_batch = []
     for proc in initial_poll():
         try:
             stat = os.stat(f"/proc/{proc['pid']}/exe")
@@ -515,46 +519,46 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             except Exception:
                 pass
             if EVERY_EXE or proc["rport"] != -1:
-                event_pipe_0.send_bytes(
-                    pickle.dumps(
-                        {
-                            "pid": pid,
-                            "name": proc["name"],
-                            "fd": fd,
-                            "dev": st_dev,
-                            "ino": st_ino,
-                            "exe": exe,
-                            "cmdline": cmd,
-                            "ppid": ppid,
-                            "pname": proc["pname"],
-                            "pfd": pfd,
-                            "pdev": pst_dev,
-                            "pino": pst_ino,
-                            "pexe": pexe,
-                            "pcmdline": pcmd,
-                            "gppid": gppid,
-                            "gpname": gpname,
-                            "gpfd": gpfd,
-                            "gpdev": gpst_dev,
-                            "gpino": gpst_ino,
-                            "gpexe": gpexe,
-                            "gpcmdline": gpcmd,
-                            "uid": proc["uid"],
-                            "send": 0,
-                            "recv": 0,
-                            "family": _initial_family_for(proc["raddr"]),
-                            "protocol": 0,
-                            "lport": proc["lport"],
-                            "rport": proc["rport"],
-                            "laddr": proc["laddr"],
-                            "raddr": proc["raddr"],
-                            "domain": cache_get(domain_dict, proc["raddr"]),
-                            "netns": _read_netns_inode(pid),
-                        }
-                    )
+                initial_batch.append(
+                    {
+                        "pid": pid,
+                        "name": proc["name"],
+                        "fd": fd,
+                        "dev": st_dev,
+                        "ino": st_ino,
+                        "exe": exe,
+                        "cmdline": cmd,
+                        "ppid": ppid,
+                        "pname": proc["pname"],
+                        "pfd": pfd,
+                        "pdev": pst_dev,
+                        "pino": pst_ino,
+                        "pexe": pexe,
+                        "pcmdline": pcmd,
+                        "gppid": gppid,
+                        "gpname": gpname,
+                        "gpfd": gpfd,
+                        "gpdev": gpst_dev,
+                        "gpino": gpst_ino,
+                        "gpexe": gpexe,
+                        "gpcmdline": gpcmd,
+                        "uid": proc["uid"],
+                        "send": 0,
+                        "recv": 0,
+                        "family": _initial_family_for(proc["raddr"]),
+                        "protocol": 0,
+                        "lport": proc["lport"],
+                        "rport": proc["rport"],
+                        "laddr": proc["laddr"],
+                        "raddr": proc["raddr"],
+                        "domain": cache_get(domain_dict, proc["raddr"]),
+                        "netns": _read_netns_inode(pid),
+                    }
                 )
         except Exception:
             pass
+    if initial_batch:
+        event_pipe_0.send_bytes(pickle.dumps(initial_batch))
     # pre-flight checks and BPF program init
     try:
         check_bpf_requirements()
@@ -703,7 +707,8 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                 q_error.put(f"{map_name} near capacity ({len(entries)}/{CONN_MAP_MAX}), connections may have been evicted, try increasing [monitoring].conn_map_max_entries")
             # drain_map already lookup_and_delete'd every entry from the kernel, so a
             # raise here would drop the rest of this (now unrecoverable) batch -- keep
-            # per-entry failures isolated so one bad entry can't lose its siblings
+            # per-entry failures isolated so one bad entry can't lose its siblings.
+            outgoing = []
             for key, val in entries:
                 try:
                     st_dev, st_ino, pid, fd, exe = get_fd(val.dev, val.ino, key.pid, val.comm.decode(errors="replace"))
@@ -723,47 +728,50 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                         # the peer, ports and protocol live inside the app-crafted frame, so record them as unknown
                         laddr = raddr = ""
                         lport = rport = protocol = 0
-                    pipe.send_bytes(
-                        pickle.dumps(
-                            {
-                                "pid": pid,
-                                "name": val.comm.decode(errors="replace"),
-                                "fd": fd,
-                                "dev": st_dev,
-                                "ino": st_ino,
-                                "exe": exe,
-                                "cmdline": cmd,
-                                "ppid": ppid,
-                                "pname": val.pcomm.decode(errors="replace"),
-                                "pfd": pfd,
-                                "pdev": pst_dev,
-                                "pino": pst_ino,
-                                "pexe": pexe,
-                                "pcmdline": pcmd,
-                                "gppid": gppid,
-                                "gpname": gpcomm,
-                                "gpfd": gpfd,
-                                "gpdev": gpst_dev,
-                                "gpino": gpst_ino,
-                                "gpexe": gpexe,
-                                "gpcmdline": gpcmd,
-                                "uid": val.uid,
-                                "send": int(val.send_bytes),
-                                "recv": int(val.recv_bytes),
-                                "pkts": int(val.send_pkts) + int(val.recv_pkts),
-                                "family": int(family),
-                                "protocol": protocol,
-                                "lport": lport,
-                                "rport": rport,
-                                "laddr": laddr,
-                                "raddr": raddr,
-                                "domain": cache_get(domain_dict, raddr),
-                                "netns": int(key.netns),
-                            }
-                        )
+                    outgoing.append(
+                        {
+                            "pid": pid,
+                            "name": val.comm.decode(errors="replace"),
+                            "fd": fd,
+                            "dev": st_dev,
+                            "ino": st_ino,
+                            "exe": exe,
+                            "cmdline": cmd,
+                            "ppid": ppid,
+                            "pname": val.pcomm.decode(errors="replace"),
+                            "pfd": pfd,
+                            "pdev": pst_dev,
+                            "pino": pst_ino,
+                            "pexe": pexe,
+                            "pcmdline": pcmd,
+                            "gppid": gppid,
+                            "gpname": gpcomm,
+                            "gpfd": gpfd,
+                            "gpdev": gpst_dev,
+                            "gpino": gpst_ino,
+                            "gpexe": gpexe,
+                            "gpcmdline": gpcmd,
+                            "uid": val.uid,
+                            "send": int(val.send_bytes),
+                            "recv": int(val.recv_bytes),
+                            "pkts": int(val.send_pkts) + int(val.recv_pkts),
+                            "family": int(family),
+                            "protocol": protocol,
+                            "lport": lport,
+                            "rport": rport,
+                            "laddr": laddr,
+                            "raddr": raddr,
+                            "domain": cache_get(domain_dict, raddr),
+                            "netns": int(key.netns),
+                        }
                     )
+                    if len(outgoing) >= CONN_DRAIN_CHUNK:
+                        pipe.send_bytes(pickle.dumps(outgoing))
+                        outgoing = []
                 except Exception as e:
                     q_error.put("BPF drain entry %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
+            if outgoing:
+                pipe.send_bytes(pickle.dumps(outgoing))
 
     def queue_exec_event(cpu, data, size):
         event = b["exec_events"].event(data)
@@ -773,39 +781,42 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
         cmd = get_cmdline(event.pid)
         pcmd = get_cmdline(event.ppid)
         if EVERY_EXE:
+            # wrap in a list: every event-pipe message is a batch, the contract the reader extends from
             event_pipe_4.send_bytes(
                 pickle.dumps(
-                    {
-                        "pid": pid,
-                        "name": event.comm.decode(errors="replace"),
-                        "fd": fd,
-                        "dev": st_dev,
-                        "ino": st_ino,
-                        "exe": exe,
-                        "cmdline": cmd,
-                        "ppid": ppid,
-                        "pname": event.pcomm.decode(errors="replace"),
-                        "pfd": pfd,
-                        "pdev": pst_dev,
-                        "pino": pst_ino,
-                        "pexe": pexe,
-                        "pcmdline": pcmd,
-                        "gppid": gppid,
-                        "gpname": gpcomm,
-                        "gpfd": gpfd,
-                        "gpdev": gpst_dev,
-                        "gpino": gpst_ino,
-                        "gpexe": gpexe,
-                        "gpcmdline": gpcmd,
-                        "uid": event.uid,
-                        "send": 0,
-                        "recv": 0,
-                        "lport": -1,
-                        "rport": -1,
-                        "laddr": "",
-                        "raddr": "",
-                        "domain": "",
-                    }
+                    [
+                        {
+                            "pid": pid,
+                            "name": event.comm.decode(errors="replace"),
+                            "fd": fd,
+                            "dev": st_dev,
+                            "ino": st_ino,
+                            "exe": exe,
+                            "cmdline": cmd,
+                            "ppid": ppid,
+                            "pname": event.pcomm.decode(errors="replace"),
+                            "pfd": pfd,
+                            "pdev": pst_dev,
+                            "pino": pst_ino,
+                            "pexe": pexe,
+                            "pcmdline": pcmd,
+                            "gppid": gppid,
+                            "gpname": gpcomm,
+                            "gpfd": gpfd,
+                            "gpdev": gpst_dev,
+                            "gpino": gpst_ino,
+                            "gpexe": gpexe,
+                            "gpcmdline": gpcmd,
+                            "uid": event.uid,
+                            "send": 0,
+                            "recv": 0,
+                            "lport": -1,
+                            "rport": -1,
+                            "laddr": "",
+                            "raddr": "",
+                            "domain": "",
+                        }
+                    ]
                 )
             )
 

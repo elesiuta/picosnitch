@@ -70,8 +70,13 @@ class LiveFeedPublisher:
                 else:
                     self._subscribers.append(conn)
 
+    def has_subscribers(self) -> bool:
+        """True if anyone is listening, so callers can skip serializing an event no
+        one will read -- the common case (no picosnitch top / tui Live tab open)."""
+        return self._sock is not None and bool(self._subscribers)
+
     def publish(self, event: dict) -> None:
-        if self._sock is None:
+        if self._sock is None or not self._subscribers:
             return
         payload = (json.dumps(event, default=str) + "\n").encode("utf-8", "replace")
         dropped: list[socket.socket] = []
