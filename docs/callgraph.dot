@@ -159,6 +159,7 @@ digraph G {
 
             graph [style="filled,rounded", fillcolor="#80808018", label="picosnitch.subprocesses.monitor"];
             "picosnitch__subprocesses__monitor___classify_inodeX_fallback" [label="_classify_inode_fallback", style="filled", fillcolor="#65ff65b2", fontcolor="#000000", group="5"];
+            "picosnitch__subprocesses__monitor___close_unlinked_fds" [label="_close_unlinked_fds", style="filled", fillcolor="#65ff65b2", fontcolor="#000000", group="5"];
             "picosnitch__subprocesses__monitor___initial_family_for" [label="_initial_family_for", style="filled", fillcolor="#65ff65b2", fontcolor="#000000", group="5"];
             "picosnitch__subprocesses__monitor___parse_proc_net_addr" [label="_parse_proc_net_addr", style="filled", fillcolor="#65ff65b2", fontcolor="#000000", group="5"];
             "picosnitch__subprocesses__monitor___parse_proc_net_port" [label="_parse_proc_net_port", style="filled", fillcolor="#65ff65b2", fontcolor="#000000", group="5"];
@@ -185,6 +186,7 @@ digraph G {
                 "picosnitch__subprocesses__monitor__run_monitor__get_fd" [label="get_fd", style="filled", fillcolor="#32ff32b2", fontcolor="#000000", group="5"];
                 "picosnitch__subprocesses__monitor__run_monitor__queue_dns_event" [label="queue_dns_event", style="filled", fillcolor="#32ff32b2", fontcolor="#000000", group="5"];
                 "picosnitch__subprocesses__monitor__run_monitor__queue_exec_event" [label="queue_exec_event", style="filled", fillcolor="#32ff32b2", fontcolor="#000000", group="5"];
+                "picosnitch__subprocesses__monitor__run_monitor__remove_fanotify_mark" [label="remove_fanotify_mark", style="filled", fillcolor="#32ff32b2", fontcolor="#000000", group="5"];
                 "picosnitch__subprocesses__monitor__run_monitor__report_ring_drops" [label="report_ring_drops", style="filled", fillcolor="#32ff32b2", fontcolor="#000000", group="5"];
                 "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" [label="resolve_grandparent", style="filled", fillcolor="#32ff32b2", fontcolor="#000000", group="5"];
             }
@@ -557,6 +559,7 @@ digraph G {
         "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__find_bpf_object" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__bpf_wrapper__kernel_symbol_addrs" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__subprocesses__monitor___classify_inodeX_fallback" [style="dashed",  color="#ffffff00"];
+        "picosnitch__subprocesses__monitor" -> "picosnitch__subprocesses__monitor___close_unlinked_fds" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__subprocesses__monitor___initial_family_for" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__subprocesses__monitor___parse_proc_net_addr" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__monitor" -> "picosnitch__subprocesses__monitor___parse_proc_net_port" [style="dashed",  color="#ffffff00"];
@@ -608,6 +611,7 @@ digraph G {
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__bpf_wrapper__check_bpf_requirements" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__bpf_wrapper__find_bpf_object" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__bpf_wrapper__kernel_symbol_addrs" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor___close_unlinked_fds" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor___initial_family_for" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor___read_netns_inodeX" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor___read_proc_comm" [style="solid",  color="#000000"];
@@ -630,6 +634,8 @@ digraph G {
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__queue_dns_event" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__queue_exec_event" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__queue_exec_event" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__remove_fanotify_mark" [style="dashed",  color="#ffffff00"];
+        "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__remove_fanotify_mark" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__report_ring_drops" [style="dashed",  color="#ffffff00"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__report_ring_drops" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor" -> "picosnitch__subprocesses__monitor__run_monitor__resolve_grandparent" [style="dashed",  color="#ffffff00"];
@@ -659,6 +665,7 @@ digraph G {
         "picosnitch__subprocesses__monitor__run_monitor__get_fd" -> "picosnitch__subprocesses__monitor__run_monitor__add_fanotify_mark" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__get_fd" -> "picosnitch__subprocesses__monitor__run_monitor__cache_get" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__get_fd" -> "picosnitch__subprocesses__monitor__run_monitor__cache_put" [style="solid",  color="#000000"];
+        "picosnitch__subprocesses__monitor__run_monitor__get_fd" -> "picosnitch__subprocesses__monitor__run_monitor__remove_fanotify_mark" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__get_fd" -> "picosnitch__utils__get_fstat" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__queue_dns_event" -> "picosnitch__bpf_wrapper__BPF" [style="solid",  color="#000000"];
         "picosnitch__subprocesses__monitor__run_monitor__queue_dns_event" -> "picosnitch__subprocesses__monitor__run_monitor__cache_put" [style="solid",  color="#000000"];

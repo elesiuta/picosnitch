@@ -76,6 +76,29 @@ def _read_proc_status_uid(pid: int) -> int:
     return 0
 
 
+def _close_unlinked_fds(fd_dict: collections.OrderedDict[str, tuple], used: set[str], remove_mark: typing.Callable[[int], object]) -> None:
+    """close cached fds whose executable has been deleted (st_nlink == 0), since the fd
+    and its fanotify mark are all that keep the kernel from freeing the file's disk space.
+
+    fds used since the last sweep stay open: a live process from a deleted binary keeps its
+    fd instead of being reopened (and rehashed) every sweep, and the secondary subprocess
+    gets at least one sweep interval to hash a binary that was deleted right after it ran."""
+    for sig, entry in list(fd_dict.items()):
+        fd = entry[0]
+        if not fd or sig in used:
+            continue
+        try:
+            if os.fstat(fd).st_nlink:
+                continue
+        except OSError:
+            continue
+        remove_mark(fd)
+        os.close(fd)
+        # fd 0 keeps the cache slot and sends the next lookup of sig down get_fd's reopen path
+        fd_dict[sig] = (0, "", entry[2])
+    used.clear()
+
+
 def _parse_proc_net_addr(hex_addr: str) -> str:
     """Parse 'AABBCCDD:PPPP' or IPv6 hex form into a string IP address."""
     addr_part, _, _port_part = hex_addr.partition(":")
@@ -282,6 +305,9 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             fan_mark_errors.add(key)
             q_error.put(f"fanotify cannot watch {exe or 'executable'}: {os.strerror(err)}; in-place changes may not trigger a rehash")
 
+    def remove_fanotify_mark(fd: int) -> None:
+        libc.fanotify_mark(fan_fd, _FAN_MARK_REMOVE, _FAN_MODIFY, fd, None)
+
     lookup_cache_max = max(8192, min(FD_CACHE, 131072))
 
     def cache_get(cache: collections.OrderedDict, key: str) -> str:
@@ -302,6 +328,7 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
     fd_dict = collections.OrderedDict()
     for cache_idx in range(FD_CACHE):
         fd_dict[f"tmp{cache_idx}"] = (0,)
+    fd_used_since_sweep: set[str] = set()
     self_pid = os.getpid()
     # cache of resolved (dev, ino, comm) -> exe path, used as a fallback for
     # when /proc/PID/exe is no longer readable (short-lived processes).
@@ -476,10 +503,11 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
             fd_dict[sig] = (fd, fd_path, exe)
             try:
                 if fd_old := fd_dict.popitem(last=False)[1][0]:
-                    libc.fanotify_mark(fan_fd, _FAN_MARK_REMOVE, _FAN_MODIFY, fd_old, None)
+                    remove_fanotify_mark(fd_old)
                     os.close(fd_old)
             except Exception:
                 pass
+        fd_used_since_sweep.add(sig)
         return (st_dev, st_ino, pid, fd_path, exe)
 
     # PID-only caching survives execve and PID reuse, so read the current value.
@@ -890,6 +918,8 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
 
     drain_interval = 1.0
     next_drain = time.monotonic() + drain_interval
+    fd_sweep_interval = 60.0
+    next_fd_sweep = time.monotonic() + fd_sweep_interval
     while True:
         if not parent_process.is_alive() or not q_in.empty():
             drain_conn_maps()
@@ -901,5 +931,8 @@ def run_monitor(config: Config, fan_fd: int, event_pipes: tuple, q_error: multip
                 drain_conn_maps()
                 report_ring_drops()
                 next_drain = now + drain_interval
+            if now >= next_fd_sweep:
+                _close_unlinked_fds(fd_dict, fd_used_since_sweep, remove_fanotify_mark)
+                next_fd_sweep = now + fd_sweep_interval
         except Exception as e:
             q_error.put("BPF %s%s on line %s" % (type(e).__name__, str(e.args), e.__traceback__.tb_lineno if e.__traceback__ else "?"))
